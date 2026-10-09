@@ -1,13 +1,14 @@
 # Working on Sourcerer
 
-A portable Windows app that keeps per-artist media collections in sync across
+A portable app for Windows, Linux and macOS that keeps per-artist media collections in sync across
 sites and drops every new file, de-duplicated across sources, into a
 [TrackImage](https://github.com/Moritz-arts/TrackImage) library. Sibling
 project of TrackImage, built the same way: the repository *is* the program —
 what people download and unpack is these folders, unchanged.
 
-**Status: early development.** No program code exists yet. What is here is the
-workshop: these notes, the docs and the automation that versions every push.
+**Status: early development.** What exists: the three launchers, a placeholder
+`app.py`, and the workshop — these notes, the docs and the automation that
+versions every push.
 
 ## Where the knowledge lives
 
@@ -33,8 +34,9 @@ lost.
 moving anything.
 
 The repository root stays short on purpose — README.md, CLAUDE.md and the
-launcher(s). Everything else lives in `Sourcerer_files/`, `docs/` included. Do
-not add another file beside the launchers.
+three launchers (`start-windows.bat`, `start-linux.sh`, `start-macos.command`).
+Everything else lives in `Sourcerer_files/`, `docs/` and all machine state
+(`venv/`, `Userdata/`) included. Do not add another file beside the launchers.
 
 **What people download is not what the repository holds.** `.gitattributes`
 marks the workshop files `export-ignore`, so `.github/`, `CLAUDE.md` and the
@@ -51,7 +53,8 @@ raises it on every push to `main` and rewrites it everywhere it is written:
 ```
 Sourcerer_files/VERSION     0.1            ← the one that counts
 README.md                   # Sourcerer v0.1
-start-windows.bat           Sourcerer v0.1 - Setup   (once the launcher exists)
+start-windows.bat / start-linux.sh / start-macos.command
+                            Sourcerer v0.1 - Setup & Start
 ```
 
 The program reads its version from `Sourcerer_files/VERSION` and from nowhere
@@ -96,8 +99,8 @@ Do not create releases or tags yourself, and do not push to `main`.
 
 ### Sourcerer's own
 
-- **`Userdata/` holds logins, tokens and cookies.** It is git-ignored and must
-  stay that way. Never commit it, never write its contents to a log, never put
+- **`Sourcerer_files/Userdata/` holds logins, tokens and cookies.** It is
+  git-ignored and must stay that way. Never commit it, never write its contents to a log, never put
   a credential into a commit message, an issue or a test fixture.
 
 ### Inherited from TrackImage — they apply here as soon as the updater exists
@@ -111,7 +114,9 @@ Do not create releases or tags yourself, and do not push to `main`.
   script that performs a swap comes from the version being replaced. Stale
   names must also be removed at start by the version that knows them.
 - **User state belongs to the machine, not the program.** `Userdata/` and
-  `runtime/` are never in an archive and never overwritten by an update.
+  `venv/` sit inside `Sourcerer_files/`, which an update replaces whole, so the
+  updater must move both across by hand. Forgetting one costs the user their
+  logins or minutes of pip on every update.
 - **The helper must not live in the folder it deletes.** A shell reads a
   script as it goes; delete the folder it is read from and execution simply
   stops. Write it to the system temp folder and let it delete itself last.
@@ -130,6 +135,22 @@ Do not create releases or tags yourself, and do not push to `main`.
   every shortcut somebody made to it.
 - **Everything here is written in English — file and folder names included.**
 
+### Launchers
+
+- **Three launchers, one behaviour.** A change to one goes into all three in the
+  same commit. Dependencies live in `Sourcerer_files/requirements.txt`, never
+  in a launcher, so there is one list rather than three that drift apart.
+- **`.bat` stays CRLF, `.sh` / `.command` stay executable.** `.gitattributes`
+  handles the line endings; the executable bit is git mode `100755` — check
+  with `git ls-files -s start-*` after editing them on Windows.
+- **No `( )` blocks around text with brackets in a `.bat`.** cmd expands a
+  variable before it parses the block, so one `)` in a message ends the block
+  early and the rest of the script never runs (TrackImage lost its whole start
+  that way). Use plain `goto` labels, as `start-windows.bat` does.
+- **The launchers find `Sourcerer_files/` from their own location.** Finder
+  starts a `.command` in `$HOME`, Explorer may start a `.bat` anywhere; never
+  rely on the current folder.
+
 ## House style
 
 Compact code, and comments that explain *why* — usually the thing that was
@@ -141,10 +162,13 @@ file; do not add a comment that only restates the line under it.
 There is no test suite yet. Run at least:
 
 ```bash
-python3 -m py_compile .github/*.py
+python3 -m py_compile .github/*.py $(git ls-files 'Sourcerer_files/*.py')
 python3 -c "import yaml; yaml.safe_load(open('.github/workflows/version-bump.yml'))"
-# once program code exists:
-python3 -m py_compile $(git ls-files 'Sourcerer_files/*.py')
+bash -n start-linux.sh && bash -n start-macos.command
+./start-linux.sh      # the whole start, end to end
 ```
+
+`start-windows.bat` cannot be checked on Linux; after changing it, start it on
+Windows once before pushing.
 
 Never commit `__pycache__`, `Userdata/`, or anything the `.gitignore` names.

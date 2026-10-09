@@ -7,9 +7,9 @@ pick the project up from this file and `CLAUDE.md` alone.
 
 ## Goal
 
-A portable Windows app that keeps per-artist media collections in sync across
-sites and drops every new file, de-duplicated across sources, into a
-TrackImage library.
+A portable app for Windows, Linux and macOS that keeps per-artist media
+collections in sync across sites and drops every new file, de-duplicated across
+sources, into a TrackImage library.
 
 ## Sources
 
@@ -34,13 +34,21 @@ add the one that replaced it.
 - 2026-10-09 — The version lives in `Sourcerer_files/VERSION`, a plain file,
   not in code. — No code exists yet, and a plain file is the easiest thing for
   both the program and the updater to read.
+- 2026-10-09 — Windows, Linux and macOS, each with a launcher in the root
+  (`start-windows.bat`, `start-linux.sh`, `start-macos.command`). — Same
+  reach as TrackImage.
+- 2026-10-09 — The system Python (3.10+) and a `venv` inside `Sourcerer_files/`,
+  as in TrackImage, instead of a bundled runtime; packages come from one
+  `requirements.txt`. — One setup path for all three systems; the root stays
+  clean because all machine state lives in `Sourcerer_files/`.
 
 ## Done
 
 - [x] Repository workshop: CLAUDE.md, docs, version workflow
+- [x] Launchers for Windows, Linux and macOS; `app.py` placeholder
 
 ## Next
 
-- [ ] Program skeleton and the Windows launcher
+- [ ] Program skeleton: the `sourcerer/` package, `Userdata/`, logging
 - [ ] Where Sourcerer hands files to TrackImage, and how duplicates are matched
 - [ ] First source

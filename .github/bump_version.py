@@ -28,8 +28,7 @@ VERSION_FILE = ROOT / "Sourcerer_files" / "VERSION"
 #:
 #: Each file is rewritten once: the first match is the definition or the
 #: heading, and every later mention is history that keeps the version it
-#: describes. A missing file is skipped, so a launcher can be listed before it
-#: exists.
+#: describes. A missing file is skipped rather than fatal.
 PLACES = [
     (VERSION_FILE,
      r'\A(?P<pre>)(?P<v>[\d.]+)(?=\s*\Z)'),
@@ -37,6 +36,10 @@ PLACES = [
     (ROOT / "README.md",
      r'^(?P<pre># Sourcerer v)(?P<v>[\d.]+)(?=[ \t]*\r?$)'),
     (ROOT / "start-windows.bat",
+     r'(?P<pre>Sourcerer v)(?P<v>[\d.]+)(?= - Setup)'),
+    (ROOT / "start-linux.sh",
+     r'(?P<pre>Sourcerer v)(?P<v>[\d.]+)(?= - Setup)'),
+    (ROOT / "start-macos.command",
      r'(?P<pre>Sourcerer v)(?P<v>[\d.]+)(?= - Setup)'),
 ]
 
