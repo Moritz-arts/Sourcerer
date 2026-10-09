@@ -5,3 +5,15 @@
 *.jpg binary
 *.ico binary
 *.zip binary
+
+# What belongs to the workshop, not to the program.
+#
+# The source archive GitHub builds from a branch or a tag is what people
+# download and what an update installs, so it should hold Sourcerer and nothing
+# else. export-ignore is honoured by `git archive`, which is what GitHub's
+# "Source code (zip)" is made with. Nothing here affects a clone, and the
+# workflow still runs: Actions checks the repository out.
+/.github         export-ignore
+/.gitattributes  export-ignore
+/.gitignore      export-ignore
+/CLAUDE.md       export-ignore
