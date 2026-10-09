@@ -1,0 +1,18 @@
+# Runtime data — never commit (contains logins, tokens, cookies)
+/Userdata/
+/runtime/
+/_update/
+/Sourcerer_files.bak/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Editors / OS
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
