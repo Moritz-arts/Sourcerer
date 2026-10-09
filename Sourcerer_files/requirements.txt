@@ -1,0 +1,3 @@
+# Every package Sourcerer needs, one per line, each with what it is FOR.
+# The launchers install from this file -- the one list for all three systems --
+# and only when it changed since the last start.

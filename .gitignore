@@ -1,18 +1,20 @@
-# Runtime data — never commit (contains logins, tokens, cookies)
-/Userdata/
-/runtime/
-/_update/
-/Sourcerer_files.bak/
-
-# Python
+# Python leaves these beside the source; they are rebuilt on every run and have
+# no business in an archive people download and unpack.
 __pycache__/
 *.py[cod]
-.pytest_cache/
-.venv/
-venv/
+
+# This machine, not the program: settings, logins, tokens, cookies, logs, and
+# the Python environment the launchers build. Never in git, never in an archive
+# -- an update carries them across instead.
+Sourcerer_files/Userdata/
+Sourcerer_files/venv/
+
+# What an update stages before the swap (once the updater exists).
+_update/
 
 # Editors / OS
 .vscode/
 .idea/
+.DS_Store
 Thumbs.db
 desktop.ini
