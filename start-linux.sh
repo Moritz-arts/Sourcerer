@@ -11,7 +11,7 @@ fi
 cd "$SDIR" || exit 1
 echo ""
 echo "  ========================================"
-echo "   Sourcerer v0.0 - Setup & Start"
+echo "   Sourcerer v0.1 - Setup & Start"
 echo "  ========================================"
 echo ""
 

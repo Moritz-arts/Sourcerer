@@ -16,7 +16,7 @@ goto :fail
 cd /d "%SDIR%"
 echo.
 echo  ========================================
-echo   Sourcerer v0.0 - Setup ^& Start
+echo   Sourcerer v0.1 - Setup ^& Start
 echo  ========================================
 echo.
 

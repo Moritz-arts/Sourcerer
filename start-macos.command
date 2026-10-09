@@ -13,7 +13,7 @@ fi
 cd "$SDIR" || exit 1
 echo ""
 echo "  ========================================"
-echo "   Sourcerer v0.0 - Setup & Start (macOS)"
+echo "   Sourcerer v0.1 - Setup & Start (macOS)"
 echo "  ========================================"
 echo ""
 
