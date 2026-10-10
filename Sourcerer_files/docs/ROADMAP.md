@@ -53,6 +53,9 @@ add the one that replaced it.
   launchers at its top, built by a workflow. — GitHub's own archive wraps
   everything in `Sourcerer-<ref>/`, so unpacking it gave two folder levels;
   Sourcerer.zip unpacks to exactly one, `Sourcerer/`.
+- 2026-10-10 — Every new version also replaces Sourcerer.zip on the prerelease
+  `beta`. — A clean download of the newest build without publishing a release
+  by hand; Stable stays what was published deliberately.
 
 ## Done
 
@@ -65,8 +68,8 @@ add the one that replaced it.
 - [ ] Program skeleton: the `sourcerer/` package, `Userdata/`, logging
 - [ ] Updater in the program, with a switch between two channels:
       **Stable** — the newest GitHub release (its Sourcerer.zip);
-      **Beta** — the `main` branch as it stands (GitHub's archive of main, its
-      top folder stripped). Same rules as TrackImage's updater: verify the
+      **Beta** — the newest build of `main` (Sourcerer.zip on the `beta`
+      prerelease). Same rules as TrackImage's updater: verify the
       archive, carry `Userdata/` and `venv/` across, keep the folder's name.
 - [ ] Where Sourcerer hands files to TrackImage, and how duplicates are matched
 - [ ] First source

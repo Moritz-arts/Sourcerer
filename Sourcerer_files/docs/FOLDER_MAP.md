@@ -33,7 +33,8 @@ Only in the repository, never in the ZIP (`export-ignore` in `.gitattributes`):
 ```
 ├─ .claude/CLAUDE.md              rules and traps for whoever works on it
 ├─ .github/
-│   ├─ workflows/version-bump.yml raises the version on every push to main
+│   ├─ workflows/version-bump.yml raises the version on every push to main,
+│   │                               and puts that build on the `beta` prerelease
 │   ├─ workflows/release-zip.yml  attaches Sourcerer.zip to a published release
 │   ├─ bump_version.py            rewrites the number everywhere it is written
 │   └─ changelog_entry.py         turns commit subjects into the changelog entry
