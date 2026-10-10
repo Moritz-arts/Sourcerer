@@ -41,11 +41,20 @@ add the one that replaced it.
   as in TrackImage, instead of a bundled runtime; packages come from one
   `requirements.txt`. — One setup path for all three systems; the root stays
   clean because all machine state lives in `Sourcerer_files/`.
+- 2026-10-10 — The launchers only find a Python 3.10+; `Sourcerer_files/launch.py`
+  does everything after that (environment, packages, start). — One
+  implementation instead of three shell languages, and testable on any system.
+- 2026-10-10 — One venv per system (`venv/windows|linux|macos`), checked by
+  running it; pip's cache inside `venv/`. — The folder is portable; a venv
+  built by one system cannot run on another, and a broken one must heal itself.
+- 2026-10-10 — The notes for Claude live in `.claude/CLAUDE.md`, not in the
+  root. — The root holds only what a user needs to start Sourcerer.
 
 ## Done
 
 - [x] Repository workshop: CLAUDE.md, docs, version workflow
 - [x] Launchers for Windows, Linux and macOS; `app.py` placeholder
+- [x] Audit: launchers, version workflow and docs checked and corrected
 
 ## Next
 
