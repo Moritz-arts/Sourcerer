@@ -5,6 +5,12 @@ automatically -- one line per change, newest first. A release is drafted by hand
 from the tag of whichever version is judged ready, and this is the text to paste
 into it.
 
+## v0.3 — 2026-10-10
+
+- Every new version is downloadable as Sourcerer.zip from the beta prerelease
+- Sourcerer opens a window with artist cards and downloads from Mastodon and Bluesky
+- Window and card dialog follow the design mockups; same picture across sources kept once
+
 ## v0.2 — 2026-10-10
 
 - Launchers only find Python; launch.py sets up and starts Sourcerer on all systems
