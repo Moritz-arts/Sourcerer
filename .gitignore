@@ -4,13 +4,18 @@ __pycache__/
 *.py[cod]
 
 # This machine, not the program: settings, logins, tokens, cookies, logs, and
-# the Python environment the launchers build. Never in git, never in an archive
+# the Python environments launch.py builds. Never in git, never in an archive
 # -- an update carries them across instead.
 Sourcerer_files/Userdata/
 Sourcerer_files/venv/
 
-# What an update stages before the swap (once the updater exists).
+# What an update stages and keeps during a swap (once the updater exists) --
+# Sourcerer_files.bak/ still holds Userdata/, logins included.
 _update/
+Sourcerer_files.bak/
+
+# Claude Code's per-machine settings; the project's notes in .claude/ are shared.
+.claude/settings.local.json
 
 # Editors / OS
 .vscode/

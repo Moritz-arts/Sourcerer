@@ -1,78 +1,50 @@
 @echo off
+setlocal
 chcp 65001 >nul 2>&1
 title Sourcerer
-:: Everything Sourcerer owns lives one level down, in Sourcerer_files. This
-:: launcher is the only thing in the unpacked folder, so it steps in there itself.
-:: No ( ) blocks around text with brackets in it: cmd expands a variable before
-:: it parses the block, and one ")" in a message ends the block early (TrackImage
-:: lost its whole start that way). Plain gotos cannot do that.
+:: Finds a Python 3.10+ and hands over to Sourcerer_files\launch.py, which does
+:: everything else. setlocal keeps every variable inside this script when it
+:: is run from an open console.
+::
+:: No ( ) blocks: cmd expands a variable before it parses a block, and one ")"
+:: in a message ends the block early (TrackImage lost its whole start that
+:: way). Plain gotos cannot do that. And no "cd": started from a \\server
+:: share, cmd cannot change into it and silently stays in C:\Windows -- every
+:: path below is absolute instead.
 set "SDIR=%~dp0Sourcerer_files"
-if exist "%SDIR%\app.py" goto :found
-echo  [ERROR] Sourcerer_files\app.py not found next to this launcher.
+if exist "%SDIR%\launch.py" goto :find_python
+echo  [ERROR] Sourcerer_files\launch.py not found next to this launcher.
 echo          Unpack the whole ZIP, keeping start-windows.bat and the
 echo          Sourcerer_files folder side by side.
 goto :fail
-:found
-cd /d "%SDIR%"
-echo.
-echo  ========================================
-echo   Sourcerer v0.1 - Setup ^& Start
-echo  ========================================
-echo.
 
+:find_python
+:: Each candidate must be 3.10 or newer, not merely present: a py launcher that
+:: picks an old 3.9 must not hide a current python on PATH. "call" because a
+:: python that is itself a .bat or .cmd -- pyenv-win's shims -- would otherwise
+:: take over this script for good and never come back.
 :: The py launcher first: it finds a python.org install even when "Add to PATH"
-:: was not ticked. Plain "python" may be the Microsoft Store stub, which
-:: answers nothing useful -- the version check below catches that too.
+:: was not ticked. Plain "python" may be the Microsoft Store stub, which fails
+:: the check like a missing one.
 set "PY="
-py -3 -c "import sys" >nul 2>&1
-if not errorlevel 1 set "PY=py -3"
-if defined PY goto :have_py
-python -c "import sys" >nul 2>&1
-if not errorlevel 1 set "PY=python"
-if defined PY goto :have_py
-echo  [ERROR] Python not found. Install Python 3.10 or newer from python.org
-echo          and run this file again.
+call py -3 -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" >nul 2>&1
+if "%errorlevel%"=="0" set "PY=py -3"
+if defined PY goto :run
+call python -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" >nul 2>&1
+if "%errorlevel%"=="0" set "PY=python"
+if defined PY goto :run
+echo  [ERROR] Sourcerer needs Python 3.10 or newer, and none was found.
+echo          Install a current one from python.org and run this file again.
 goto :fail
-:have_py
-%PY% -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" >nul 2>&1
-if not errorlevel 1 goto :py_ok
-echo  [ERROR] This Python is older than 3.10. Install a current one from
-echo          python.org and run this file again.
-goto :fail
-:py_ok
 
-set "VPY=%SDIR%\venv\Scripts\python.exe"
-if exist "%VPY%" goto :venv_ok
-echo  [1/3] Creating the Python environment...
-%PY% -m venv venv
-if exist "%VPY%" goto :venv_ok
-echo  [ERROR] Could not create it, see above.
-goto :fail
-:venv_ok
-:: Everything Sourcerer needs lives in THIS venv; per-user packages stay out.
-set "PYTHONNOUSERSITE=1"
-
-:: Only when requirements.txt changed -- pip on every start costs seconds for nothing.
-fc /b requirements.txt venv\requirements.installed >nul 2>&1
-if not errorlevel 1 goto :deps_ok
-echo  [2/3] Installing dependencies...
-"%VPY%" -m pip install -q --disable-pip-version-check -r requirements.txt
-if errorlevel 1 goto :deps_fail
-copy /y requirements.txt venv\requirements.installed >nul
-goto :deps_ok
-:deps_fail
-echo  [ERROR] Installing dependencies failed, see above.
-goto :fail
-:deps_ok
-
-echo  [3/3] Starting Sourcerer...
-echo.
-"%VPY%" app.py %*
+:run
+call %PY% "%SDIR%\launch.py" %*
+set "RC=%errorlevel%"
 :: A double-clicked window closes the moment the program ends; stay open so
 :: what it said can be read.
 echo.
 pause
-exit /b 0
+exit /b %RC%
 
 :fail
 echo.

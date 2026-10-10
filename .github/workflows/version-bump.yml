@@ -6,13 +6,14 @@
 # make. When you decide one is, the tag is already sitting there -- draft a
 # release from it and paste its section out of CHANGELOG.md.
 #
-# The commit it makes keeps YOUR subject line and adds the version to it, so
-# the repository's front page reads "what changed (v0.4)" rather than a column
-# of identical version numbers.
+# The commit it makes keeps the work's own subject line and adds the version to
+# it, so the front page reads "what changed (v0.4)" rather than a column of
+# identical version numbers.
 #
-# Put [skip version] in a commit message to push without any of this. The
-# workflow's own commit is pushed with GITHUB_TOKEN, which by design starts no
-# further runs, and carries [skip ci] as well, so it cannot chase its own tail.
+# Put [skip version] in the pull request's title (or, for a direct push, in the
+# last commit) to push without any of this. The workflow's own commit is pushed
+# with GITHUB_TOKEN, which by design starts no further runs, and carries
+# [skip ci] as well, so it cannot chase its own tail.
 name: Raise the version
 
 on:
@@ -37,61 +38,54 @@ jobs:
           # history and the tags both have to be here.
           fetch-depth: 0
 
-      - name: Raise the version by one
-        id: bump
-        run: python3 .github/bump_version.py
-
-      - name: Write the changelog entry
-        id: notes
-        env:
-          VER: ${{ steps.bump.outputs.version }}
+      - name: Raise the version, write the changelog, tag and push
         run: |
-          NOTES=$(python3 .github/changelog_entry.py "$VER")
-          printf '%s\n' "$NOTES"
-          # Also in the run summary, so the text for a release is one click away.
-          {
-            printf '## v%s\n\n%s\n\n' "$VER" "$NOTES"
-            printf '_Draft a release from tag `v%s` and paste this._\n' "$VER"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Commit, tag and push
-        env:
-          VER: ${{ steps.bump.outputs.version }}
-          # Through the environment, never interpolated into the script: these
-          # are whatever somebody typed in a commit message, quotes and all.
-          HEAD_MSG: ${{ github.event.head_commit.message }}
-          # The last real commit of this version. Preferred over HEAD_MSG,
-          # which on a merged pull request is GitHub's "Merge pull request #4
-          # from owner/branch" -- the button that was pressed, not the work.
-          WORK_MSG: ${{ steps.notes.outputs.subject }}
-        run: |
-          if git diff --quiet; then
-            echo "Nothing moved -- no version line, no changelog."
-            exit 0
-          fi
-          # First line, shortened at a word if it is long.
-          SUBJECT=${WORK_MSG:-${HEAD_MSG%%$'\n'*}}
-          SUBJECT=${SUBJECT%%$'\n'*}
-          if [ ${#SUBJECT} -gt 64 ]; then
-            SUBJECT="${SUBJECT:0:64}"
-            SUBJECT="${SUBJECT% *}…"
-          fi
-          [ -n "$SUBJECT" ] || SUBJECT="Changes"
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # add -A, not commit -a: on the first run CHANGELOG.md may be new,
-          # and -a never picks up a file git has not been told about.
-          git add -A
-          git commit -m "$SUBJECT (v$VER)" -m "[skip ci]"
-          # The tag must sit on the commit that carries the new number, or an
-          # archive built from it claims a version it does not contain.
-          git tag -a "v$VER" -m "v$VER"
-          # Somebody may have pushed while this ran. Rebase onto whatever is
-          # there now and try once more; a second failure means the branch is
-          # moving faster than this job, and the next push raises it anyway.
-          git push origin HEAD:main || {
-            git pull --rebase origin main
-            git tag -f -a "v$VER" -m "v$VER"
-            git push origin HEAD:main
-          }
-          git push origin "v$VER"
+          # Each attempt starts from main as it is now. When a push is refused
+          # because somebody pushed meanwhile, the whole thing is done again on
+          # top of that push -- retagging the old entry would tag code its
+          # changelog never mentions.
+          for attempt in 1 2 3; do
+            git fetch -q --tags origin main
+            git reset -q --hard origin/main
+            # Two pushes close together: the run for the second can start after
+            # the first run already versioned both. Nothing new -> no version.
+            if git describe --exact-match --match 'v*' HEAD >/dev/null 2>&1; then
+              echo "main is already versioned ($(git describe --exact-match --match 'v*' HEAD))."
+              exit 0
+            fi
+            env -u GITHUB_OUTPUT python3 .github/bump_version.py
+            VER=$(tr -d '[:space:]' < Sourcerer_files/VERSION)
+            NOTES=$(python3 .github/changelog_entry.py "$VER")
+            printf '%s\n' "$NOTES"
+            # Named after the last real commit, not after GitHub's "Merge pull
+            # request #4 from owner/branch" -- the button, not the work.
+            SUBJECT=$(python3 .github/changelog_entry.py --last-subject)
+            # Shortened at a word if long: a plain cut stops mid-word.
+            if [ ${#SUBJECT} -gt 64 ]; then
+              SUBJECT="${SUBJECT:0:64}"
+              SUBJECT="${SUBJECT% *}…"
+            fi
+            [ -n "$SUBJECT" ] || SUBJECT="Maintenance"
+            # add -A, not commit -a: a file git has not been told about yet
+            # would be left out by -a.
+            git add -A
+            git commit -q -m "$SUBJECT (v$VER)" -m "[skip ci]"
+            # The tag sits on the commit that carries the new number, or an
+            # archive built from it claims a version it does not contain.
+            git tag -a "v$VER" -m "v$VER"
+            # Atomic: main and the tag land together or not at all. Pushed one
+            # after the other, a failed tag push left a version nothing tags.
+            if git push --atomic origin HEAD:main "v$VER"; then
+              {
+                printf '## v%s\n\n%s\n\n' "$VER" "$NOTES"
+                printf '_Draft a release from tag `v%s` and paste this._\n' "$VER"
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            git tag -d "v$VER"
+            echo "Push refused -- main moved meanwhile. Trying again on top of it."
+          done
+          echo "main kept moving; the next push raises the version."
+          exit 1

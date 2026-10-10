@@ -28,28 +28,18 @@ VERSION_FILE = ROOT / "Sourcerer_files" / "VERSION"
 #:
 #: Each file is rewritten once: the first match is the definition or the
 #: heading, and every later mention is history that keeps the version it
-#: describes. A missing file is skipped rather than fatal.
+#: describes. The launchers carry no number: launch.py prints it from VERSION.
 PLACES = [
     (VERSION_FILE,
-     r'\A(?P<pre>)(?P<v>[\d.]+)(?=\s*\Z)'),
+     r'\A(?P<pre>\s*)(?P<v>[\d.]+)(?=\s*\Z)'),
     # The repository's front page, in its title.
     (ROOT / "README.md",
      r'^(?P<pre># Sourcerer v)(?P<v>[\d.]+)(?=[ \t]*\r?$)'),
-    (ROOT / "start-windows.bat",
-     r'(?P<pre>Sourcerer v)(?P<v>[\d.]+)(?= - Setup)'),
-    (ROOT / "start-linux.sh",
-     r'(?P<pre>Sourcerer v)(?P<v>[\d.]+)(?= - Setup)'),
-    (ROOT / "start-macos.command",
-     r'(?P<pre>Sourcerer v)(?P<v>[\d.]+)(?= - Setup)'),
 ]
 
 
 def _read(path):
-    """Text with its line endings left exactly as they are on disk.
-
-    A .bat file is CRLF and has to stay CRLF: a batch file whose labels end in
-    a bare newline stops working on some Windows versions.
-    """
+    """Text with its line endings left exactly as they are on disk."""
     with open(path, "r", encoding="utf-8", newline="") as f:
         return f.read()
 
@@ -91,6 +81,10 @@ def main():
         out, n = re.subn(pattern, lambda m: m.group("pre") + new,
                          text, count=1, flags=re.M)
         if not n:
+            # VERSION is the number the program and the tag go by. Moving the
+            # copies on without it is the exact trap this script exists for.
+            if path == VERSION_FILE:
+                sys.exit("Sourcerer_files/VERSION could not be rewritten.")
             print("skipped (no version line): %s" % path.name)
             continue
         _write(path, out)
