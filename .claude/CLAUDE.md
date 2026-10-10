@@ -97,8 +97,10 @@ stays with the diff.
    `main` moves while it runs, it starts over on top of the new state.
 4. When the user judges a version ready, they draft a release from its tag by
    hand and paste that version's section out of
-   `Sourcerer_files/docs/CHANGELOG.md`. GitHub's own source archive is the
-   release — no uploaded files.
+   `Sourcerer_files/docs/CHANGELOG.md`. Publishing it starts
+   `.github/workflows/release-zip.yml`, which attaches **Sourcerer.zip**.
+   That is the download the README links to
+   (`releases/latest/download/Sourcerer.zip`).
 
 Do not create releases or tags yourself, and do not push to `main`.
 
@@ -143,6 +145,12 @@ Do not create releases or tags yourself, and do not push to `main`.
   helper starts may wait for a keypress.
 - **The installation folder keeps its name.** Renaming it per version breaks
   every shortcut somebody made to it.
+- **GitHub's own archive wraps everything in `Sourcerer-<ref>/`.** "Download
+  ZIP" and "Source code (zip)" both do, and it cannot be switched off:
+  unpacked into a folder, that gave `Sourcerer/Sourcerer-main/`. So people get
+  Sourcerer.zip instead, built by `git archive` with no prefix, which has the
+  launchers at its top. The updater's Beta channel reads GitHub's archive of
+  `main` and must strip that one top folder itself.
 - **Everything here is written in English — file and folder names included.**
 
 ### Launchers
