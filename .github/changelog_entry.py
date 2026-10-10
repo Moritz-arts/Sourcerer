@@ -11,10 +11,9 @@ One line, not a paragraph. The reasoning is in the commit, a click away and
 never stale; this file answers the other question, with a list you can read in
 ten seconds and paste into a release.
 
-Called as: changelog_entry.py <new-version>
-Prints the entry body on stdout.
+Called as: changelog_entry.py <new-version>   writes the entry, prints its body
+           changelog_entry.py --last-subject  prints the last real commit's subject
 """
-import os
 import pathlib
 import re
 import subprocess
@@ -24,8 +23,10 @@ from datetime import date
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 CHANGELOG = ROOT / "Sourcerer_files" / "docs" / "CHANGELOG.md"
 
-#: The workflow's own commits. They say nothing a reader wants.
-_BUMP = re.compile(r"^v[\d.]+(\s*\[skip ci\])?$")
+#: Who makes the workflow's own commits. Matched by author, not by subject:
+#: the subject is the work's own line with " (v0.4)" added, so a pattern on it
+#: either misses those commits or catches somebody's.
+_BOT = "github-actions[bot]"
 
 #: What GitHub writes when a button is pressed. `git log --no-merges` drops a
 #: real merge commit, but a squash merge is an ordinary commit carrying the same
@@ -49,17 +50,18 @@ def previous_tag():
 def commits_since(tag):
     """Subject and body of every real commit since that tag, oldest first."""
     span = ("%s..HEAD" % tag) if tag else "HEAD"
-    # NUL between commits, \x01 between subject and body: a message can contain
+    # NUL between commits, \x01 between author, subject and body: a message can contain
     # any number of blank lines, so nothing printable can separate them.
-    raw = _git("log", span, "--no-merges", "--reverse", "--pretty=format:%s%x01%b%x00")
+    raw = _git("log", span, "--no-merges", "--reverse",
+               "--pretty=format:%an%x01%s%x01%b%x00")
     out = []
     for chunk in raw.split("\x00"):
         chunk = chunk.strip()
         if not chunk:
             continue
-        subject, _, body = chunk.partition("\x01")
+        author, subject, body = (chunk.split("\x01", 2) + ["", ""])[:3]
         subject = subject.strip()
-        if not subject or _BUMP.match(subject) or _MERGE.match(subject):
+        if not subject or author == _BOT or _MERGE.match(subject):
             continue
         out.append((subject, body.strip()))
     return out
@@ -100,19 +102,18 @@ def prepend(version, body):
 
 def main():
     if len(sys.argv) < 2:
-        sys.exit("usage: changelog_entry.py <new-version>")
-    version = sys.argv[1].lstrip("vV")
+        sys.exit("usage: changelog_entry.py <new-version> | --last-subject")
     commits = commits_since(previous_tag())
+    if sys.argv[1] == "--last-subject":
+        # For the bump commit's name: the last real commit of this version, not
+        # GitHub's "Merge pull request #4 from owner/branch", which names the
+        # button that was pressed and not the work.
+        print(commits[-1][0] if commits else "")
+        return
+    version = sys.argv[1].lstrip("vV")
     body = entry_body(commits)
     prepend(version, body)
     print(body)
-    # The last real commit of this version, for the bump commit to be named
-    # after -- not GitHub's "Merge pull request #4 from owner/branch", which
-    # describes the button that was pressed and not the work.
-    out_file = os.environ.get("GITHUB_OUTPUT")
-    if out_file and commits:
-        with open(out_file, "a", encoding="utf-8") as f:
-            f.write("subject=%s\n" % commits[-1][0].replace("\n", " "))
 
 
 if __name__ == "__main__":
