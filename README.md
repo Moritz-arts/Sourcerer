@@ -35,16 +35,19 @@ on macOS from python.org or Homebrew (`brew install python`).
 
 ## Use
 
-1. **+ Artist** — a name, notes, and the links of every place the artist posts,
-   one per line. Mastodon (and the fediverse) and Bluesky are downloaded from
-   today; other links are kept on the card until their site is supported.
-2. **Sync** on a card, or **Sync all** — the first sync fetches the whole
-   history, later ones only what is new. Originals, not previews.
-3. **Settings** — the library folder. Every artist gets a folder in it; link it
-   in TrackImage and new files appear there by themselves.
+1. **+ Karte** — the artist's name and the links of every place they post.
+   Mastodon (and the fediverse) and Bluesky are downloaded today; other links
+   stay on the card until their site is supported. Per card you choose the
+   folder layout (all together, or one folder per site) and what happens to the
+   same picture from several sites: keep all, keep the best quality, or prefer
+   one **master source**.
+2. **Aktualisieren** on a card, or **Alle aktualisieren** — the first sync
+   fetches the whole history, later ones only what is new. Originals, not
+   previews. Cards wait in a queue; a running one can be cancelled.
+3. **Settings** (the gear) — the library folder. Every artist gets a folder in
+   it; link it in TrackImage and new files appear there by themselves.
 
-A file you delete from the library is not downloaded again, and the same file
-posted on two sites is kept once.
+A file you delete from the library is not downloaded again.
 
 **macOS, first start:** a script downloaded from the internet is blocked once.
 Control-click `start-macos.command` › **Open** › **Open**. On macOS 15 and

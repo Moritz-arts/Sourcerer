@@ -7,10 +7,18 @@ project of TrackImage, built the same way: the repository *is* the program —
 what people download and unpack is these folders, unchanged.
 
 **Status: early development.** What exists: the three launchers with
-`launch.py` behind them; the program — a window with artist cards, settings
-and a background sync that downloads from Mastodon and Bluesky; and the
-workshop — these notes, the docs and the automation that versions every push.
-`Sourcerer_files/sourcerer/__init__.py` lists the program's layers.
+`launch.py` behind them; the program — a window with artist cards, a card
+dialog (sources, master source, folder layout, what to do with the same
+picture from two sources) and a queued background sync that downloads from
+Mastodon and Bluesky; and the workshop — these notes, the docs and the
+automation that versions every push. `Sourcerer_files/sourcerer/__init__.py`
+lists the program's layers.
+
+**The design is fixed by two mockups in `.claude/design/`** — the main window
+and the artist card dialog. The page in `Sourcerer_files/static/` follows them:
+their colours, sizes, wording and layout. Change the look there only with the
+user, and keep the mockups as the reference. The interface speaks German, as
+the mockups do; code, comments and file names stay English.
 
 ## Where the knowledge lives
 
@@ -217,6 +225,21 @@ Do not create releases or tags yourself, and do not push to `main`.
 - **pywebview 6 turned `FOLDER_DIALOG` into a deprecated function.** Passing it
   as the dialog type opens nothing; use `FileDialog.FOLDER` (with a fallback
   for 5.x), as `server.pick_folder` does.
+- **The same picture from two sources** is found by a 64-bit difference hash
+  (`imaging.py`, Pillow): ≤ 5 differing bits is one picture. Only *across*
+  sources — two similar posts on one site are usually two versions the artist
+  meant. Per artist: `keep_all`, `best` (highest resolution, then the larger
+  file; a better copy replaces a worse one already saved) or `master` (the
+  master source's copy wins, synced first so nothing is replaced back and
+  forth). Byte-identical files are kept once except under `keep_all`.
+  Replacing deletes only a file Sourcerer itself saved.
+- **Folder layout per artist:** `together` → `<library>/<artist>/`,
+  `per_source` → `<library>/<artist>/<site>/`. A change applies to new files.
+- **A sync scans first, then downloads**, so the card can show "lade 87 / 240".
+  Artists wait in a queue; cancelling stops after the current file. A source is
+  marked complete only after a sync went all the way without a failure.
+- **No CDN, ever.** The icons are inline SVG drawn after Tabler Icons (MIT,
+  `static/icons-LICENSE.txt`); fonts are the system's.
 - **The server listens on 127.0.0.1 only.** Nothing here is for other machines.
 
 ## House style

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="de">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -8,74 +8,159 @@
 <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
-<header class="top">
-  <div class="brand">Sourcerer <span id="version" class="muted"></span></div>
-  <div class="actions">
-    <button id="btn-add" class="primary">+ Artist</button>
-    <button id="btn-sync-all">Sync all</button>
-    <button id="btn-folder">Library</button>
-    <button id="btn-settings">Settings</button>
+<!-- Icons drawn after Tabler Icons (MIT, see icons-LICENSE.txt), kept here so
+     nothing is loaded from the internet. -->
+<svg class="sprite" aria-hidden="true">
+  <symbol id="i-photo-down" viewBox="0 0 24 24"><path d="M15 8h.01"/><path d="M12.5 21h-6.5a3 3 0 0 1 -3 -3v-12a3 3 0 0 1 3 -3h12a3 3 0 0 1 3 3v6.5"/><path d="M3 16l5 -5c.928 -.893 2.072 -.893 3 0l4 4"/><path d="M14 14l1 -1c.653 -.629 1.413 -.815 2.13 -.559"/><path d="M19 16v6"/><path d="M22 19l-3 3l-3 -3"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5l0 14"/><path d="M5 12l14 0"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8.1 8.1 0 0 0 -15.5 -2m-.5 -4v4h4"/><path d="M4 13a8.1 8.1 0 0 0 15.5 2m.5 4v-4h-4"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><path d="M10.325 4.317c.426 -1.756 2.924 -1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543 -.94 3.31 .826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756 .426 1.756 2.924 0 3.35a1.724 1.724 0 0 0 -1.066 2.573c.94 1.543 -.826 3.31 -2.37 2.37a1.724 1.724 0 0 0 -2.572 1.065c-.426 1.756 -2.924 1.756 -3.35 0a1.724 1.724 0 0 0 -2.573 -1.066c-1.543 .94 -3.31 -.826 -2.37 -2.37a1.724 1.724 0 0 0 -1.065 -2.572c-1.756 -.426 -1.756 -2.924 0 -3.35a1.724 1.724 0 0 0 1.066 -2.573c-.94 -1.543 .826 -3.31 2.37 -2.37c1 .608 2.296 .07 2.572 -1.065z"/><path d="M9 12a3 3 0 1 0 6 0a3 3 0 0 0 -6 0"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M5 4h4l3 3h7a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2v-11a2 2 0 0 1 2 -2"/></symbol>
+  <symbol id="i-dots" viewBox="0 0 24 24"><path d="M4 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0"/><path d="M11 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0"/><path d="M18 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6l-12 12"/><path d="M6 6l12 12"/></symbol>
+  <symbol id="i-crown" viewBox="0 0 24 24"><path d="M12 6l4 6l5 -4l-2 10h-14l-2 -10l5 4z"/></symbol>
+  <symbol id="i-point" viewBox="0 0 24 24"><path d="M8 12a4 4 0 1 0 8 0a4 4 0 1 0 -8 0"/></symbol>
+  <symbol id="i-activity" viewBox="0 0 24 24"><path d="M3 12h4l3 8l4 -16l3 8h4"/></symbol>
+  <symbol id="i-chevron-up" viewBox="0 0 24 24"><path d="M6 15l6 -6l6 6"/></symbol>
+  <symbol id="i-circle" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0"/></symbol>
+  <symbol id="i-circle-dot" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0"/><path d="M11 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" fill="currentColor"/></symbol>
+  <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M4 20h4l10.5 -10.5a2.828 2.828 0 1 0 -4 -4l-10.5 10.5v4"/><path d="M13.5 6.5l4 4"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7l16 0"/><path d="M10 11l0 6"/><path d="M14 11l0 6"/><path d="M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2 -2l1 -12"/><path d="M9 7v-3a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v3"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><path d="M3 10a7 7 0 1 0 14 0a7 7 0 1 0 -14 0"/><path d="M21 21l-6 -6"/></symbol>
+</svg>
+
+<div class="app">
+  <header class="toolbar">
+    <svg class="ic ic-brand"><use href="#i-photo-down"/></svg>
+    <span class="brand">Sourcerer</span><span id="version" class="muted small"></span>
+    <span class="grow"></span>
+    <button id="btn-add"><svg class="ic"><use href="#i-plus"/></svg> Karte</button>
+    <button id="btn-sync-all" class="primary"><svg class="ic"><use href="#i-refresh"/></svg> Alle aktualisieren</button>
+    <button id="btn-settings" class="icon" aria-label="Einstellungen" title="Einstellungen"><svg class="ic"><use href="#i-settings"/></svg></button>
+  </header>
+
+  <div class="filterbar">
+    <input id="search" type="text" placeholder="Artist suchen" autocomplete="off">
+    <select id="sort">
+      <option value="activity">Sortierung: neueste Aktivität</option>
+      <option value="name">Sortierung: Name</option>
+      <option value="files">Sortierung: Dateien</option>
+    </select>
   </div>
-</header>
 
-<main>
-  <div id="empty" class="empty hidden">
-    <h2>No artists yet</h2>
-    <p>Add an artist with the places they post — Sourcerer fetches every picture and
-       video from there into your library, and on each sync only what is new.</p>
-    <button class="primary" data-act="add">+ Add the first artist</button>
-  </div>
-  <div id="cards" class="cards"></div>
-</main>
+  <main id="main">
+    <div id="empty" class="empty hidden">
+      <svg class="ic ic-hero"><use href="#i-photo-down"/></svg>
+      <h2>Noch keine Künstlerkarten</h2>
+      <p>Lege eine Karte an und trage ein, wo der Artist postet. Sourcerer lädt alle
+         Bilder und Videos von dort in deine Bibliothek – bei jedem Sync nur, was neu ist.</p>
+      <button class="primary" data-act="add"><svg class="ic"><use href="#i-plus"/></svg> Erste Karte anlegen</button>
+    </div>
+    <p id="nomatch" class="nomatch hidden">Keine Karte passt zur Suche.</p>
+    <div id="cards" class="grid"></div>
+  </main>
 
-<footer class="status">
-  <span id="spinner" class="spinner hidden"></span>
-  <span id="status-text">Idle</span>
-  <button id="btn-log" class="link">Log</button>
-</footer>
+  <section id="logpanel" class="logpanel hidden"><pre id="log"></pre></section>
+  <footer class="activity">
+    <svg class="ic"><use href="#i-activity"/></svg>
+    <span id="activity-text" class="mono"></span>
+    <span class="grow"></span>
+    <span id="queue-text"></span>
+    <button id="btn-log" class="icon flat" aria-label="Protokoll" title="Protokoll"><svg class="ic"><use href="#i-chevron-up"/></svg></button>
+  </footer>
+</div>
 
-<dialog id="dlg-artist">
-  <form method="dialog" id="form-artist">
-    <h2 id="artist-title">New artist</h2>
-    <label>Name<input name="name" required autocomplete="off"></label>
-    <label>Notes<textarea name="notes" rows="2"></textarea></label>
-    <label>Sources <span class="muted">— one profile link per line</span>
-      <textarea name="sources" rows="5" placeholder="https://mastodon.social/@artist&#10;https://bsky.app/profile/artist.bsky.social"></textarea>
-    </label>
-    <p class="hint">Downloads from: <span id="sites"></span>. Other links are kept on the card
-       and fetched once their site is supported.</p>
-    <p id="artist-error" class="error"></p>
-    <div class="buttons">
-      <button type="button" id="btn-delete" class="danger hidden">Delete</button>
+<div id="menu" class="menu hidden" role="menu">
+  <button data-menu="edit"><svg class="ic"><use href="#i-pencil"/></svg> Bearbeiten</button>
+  <button data-menu="folder"><svg class="ic"><use href="#i-folder"/></svg> Ordner öffnen</button>
+  <button data-menu="delete" class="danger"><svg class="ic"><use href="#i-trash"/></svg> Löschen</button>
+</div>
+
+<dialog id="dlg-card" class="dlg">
+  <form id="form-card" method="dialog">
+    <div class="dlg-head">
+      <span id="card-title">Neue Künstlerkarte</span><span class="grow"></span>
+      <button type="button" class="icon flat" data-close aria-label="Schließen"><svg class="ic"><use href="#i-x"/></svg></button>
+    </div>
+    <div class="dlg-body">
+      <div class="namerow">
+        <div id="card-avatar" class="avatar"></div>
+        <label class="grow"><span class="label">Name</span><input name="name" autocomplete="off"></label>
+      </div>
+
+      <div>
+        <div class="section">Quellen</div>
+        <div id="src-list" class="srclist"></div>
+        <div class="addrow">
+          <input id="src-input" type="text" placeholder="https://bsky.app/profile/inkwell.bsky.social" autocomplete="off">
+          <button type="button" id="btn-src-add">Hinzufügen</button>
+        </div>
+        <p class="hint">Lädt heute von: <span id="sites"></span>. Andere Links bleiben auf der Karte
+           und werden geladen, sobald die Seite unterstützt wird.</p>
+      </div>
+
+      <div>
+        <div class="section">Ordner-Layout</div>
+        <div class="choices two">
+          <button type="button" class="choice" data-layout="together">
+            <div class="choice-title"><svg class="ic sm off"><use href="#i-circle"/></svg><svg class="ic sm on"><use href="#i-circle-dot"/></svg> Alle zusammen</div>
+            <div class="mono muted" id="layout-together"></div>
+          </button>
+          <button type="button" class="choice" data-layout="per_source">
+            <div class="choice-title"><svg class="ic sm off"><use href="#i-circle"/></svg><svg class="ic sm on"><use href="#i-circle-dot"/></svg> Pro Quelle</div>
+            <div class="mono muted" id="layout-per-source"></div>
+          </button>
+        </div>
+      </div>
+
+      <div>
+        <div class="section">Gleiche Bilder aus verschiedenen Quellen</div>
+        <div class="segmented">
+          <button type="button" data-dedupe="keep_all">Alle behalten</button>
+          <button type="button" data-dedupe="best">Beste Qualität</button>
+          <button type="button" data-dedupe="master">Master-Source</button>
+        </div>
+        <div id="master-row" class="masterrow">
+          <span class="muted">Master</span>
+          <select id="master-select"></select>
+        </div>
+        <p id="dedupe-hint" class="hint"></p>
+      </div>
+      <p id="card-error" class="error"></p>
+    </div>
+    <div class="dlg-foot">
+      <label class="check"><input type="checkbox" id="sync-now" checked> Direkt laden</label>
       <span class="grow"></span>
-      <button value="cancel" formnovalidate>Cancel</button>
-      <button id="btn-save" class="primary" value="save">Save</button>
+      <button type="button" data-close>Abbrechen</button>
+      <button type="submit" id="btn-card-save" class="primary">Anlegen</button>
     </div>
   </form>
 </dialog>
 
-<dialog id="dlg-settings">
-  <form method="dialog" id="form-settings">
-    <h2>Settings</h2>
-    <label>Library folder
-      <span class="row"><input name="library" required autocomplete="off">
-        <button type="button" id="btn-browse">Browse…</button></span>
-    </label>
-    <p class="hint">Every artist gets a folder in here. Link this folder in TrackImage and
-       new files show up there on their own.</p>
-    <p id="settings-error" class="error"></p>
-    <div class="buttons">
+<dialog id="dlg-settings" class="dlg">
+  <form id="form-settings" method="dialog">
+    <div class="dlg-head">
+      <span>Einstellungen</span><span class="grow"></span>
+      <button type="button" class="icon flat" data-close aria-label="Schließen"><svg class="ic"><use href="#i-x"/></svg></button>
+    </div>
+    <div class="dlg-body">
+      <div>
+        <div class="section">Bibliothek</div>
+        <div class="addrow">
+          <input name="library" autocomplete="off">
+          <button type="button" id="btn-browse">Durchsuchen…</button>
+        </div>
+        <p class="hint">Jede Künstlerkarte bekommt hier einen Ordner. Verknüpfe diesen Ordner in
+           TrackImage, dann tauchen neue Dateien dort von selbst auf.</p>
+      </div>
+      <p id="settings-error" class="error"></p>
+    </div>
+    <div class="dlg-foot">
       <span class="grow"></span>
-      <button value="cancel" formnovalidate>Cancel</button>
-      <button class="primary" value="save">Save</button>
+      <button type="button" data-close>Abbrechen</button>
+      <button type="submit" class="primary">Speichern</button>
     </div>
   </form>
-</dialog>
-
-<dialog id="dlg-log">
-  <h2>Log</h2>
-  <pre id="log"></pre>
-  <div class="buttons"><span class="grow"></span><button id="btn-log-close">Close</button></div>
 </dialog>
 
 <script src="/static/app.js"></script>
