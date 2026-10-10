@@ -3,5 +3,6 @@
 # and only when it changed since the last start. A line marked "# optional" may
 # fail to install without stopping the start: Sourcerer works without it.
 flask>=3.0          # the local web server the window talks to
+requests>=2.31      # downloads over kept-open connections: many files, one handshake per site
 pillow>=10.0        # fingerprints to find the same picture from another site; thumbnails
 pywebview>=5.0      # the app window itself; without it Sourcerer opens in the browser  # optional

@@ -21,6 +21,18 @@ def match(url):
     return bool(_URL.match(url.strip()))
 
 
+def normalize(url):
+    """https://bsky.app/profile/<handle>, also from a post's link."""
+    return "https://bsky.app/profile/%s" % _URL.match(url.strip()).group(1)
+
+
+def profile(url):
+    actor = _URL.match(url.strip()).group(1)
+    p = net.get_json(API + "app.bsky.actor.getProfile", {"actor": actor})
+    return {"name": p.get("displayName") or p.get("handle") or "",
+            "handle": "@" + p.get("handle", actor), "avatar": p.get("avatar") or ""}
+
+
 def _pds(did):
     """The server that holds the account's files."""
     if did.startswith("did:web:"):
@@ -78,7 +90,8 @@ def pages(url):
                         pds, urllib.parse.urlencode({"did": did, "cid": cid})),
                     post_url="https://bsky.app/profile/%s/post/%s" % (did, rkey),
                     posted=record.get("createdAt") or post.get("indexedAt") or "",
-                    name=cid[-16:], mime=mime))
+                    # Bluesky keeps no file names; the blob's id stands in for one.
+                    name=cid[-16:], mime=mime, filename=cid))
         yield page
         cursor = feed.get("cursor")
         if not cursor or not feed.get("feed"):

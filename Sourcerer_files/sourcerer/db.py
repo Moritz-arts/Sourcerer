@@ -61,6 +61,9 @@ COLUMNS = {
         "last_activity": "TEXT",          # last time something new arrived
         "last_new": "INTEGER NOT NULL DEFAULT 0",
         "last_failed": "INTEGER NOT NULL DEFAULT 0",
+        "folder": "TEXT",                 # chosen on the card; NULL: <library>/<name>
+        "avatar": "TEXT",                 # file name in Userdata/Avatars
+        "avatar_checked": "TEXT",         # when the profile picture was last looked for
     },
     "files": {
         "phash": "TEXT",                  # imaging fingerprint; NULL for video
@@ -93,7 +96,24 @@ def init():
 def get_setting(key, default=None):
     with connect() as con:
         row = con.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
-    return row["value"] if row else default
+    if row:
+        return row["value"]
+    return config.DEFAULTS.get(key) if default is None else default
+
+
+def settings():
+    with connect() as con:
+        stored = {r["key"]: r["value"] for r in con.execute("SELECT key, value FROM settings")}
+    return dict(config.DEFAULTS, **{k: v for k, v in stored.items() if k in config.DEFAULTS})
+
+
+def setting_int(key, low, high):
+    """An integer setting, kept inside the range the program can work with."""
+    try:
+        value = int(get_setting(key))
+    except (TypeError, ValueError):
+        value = int(config.DEFAULTS[key])
+    return max(low, min(high, value))
 
 
 def set_setting(key, value):

@@ -5,19 +5,41 @@ another machine.
 """
 import logging
 import os
+import platform
+import re
+import shutil
 import subprocess
 import sys
+import threading
+import time
+import urllib.parse
 
 from flask import Flask, abort, jsonify, request, send_file, send_from_directory
 
-from . import config, db, imaging, sources, sync
+from . import config, db, imaging, net, sources, sync, updater
 
 log = logging.getLogger(__name__)
 app = Flask(__name__, static_folder=None)
 WINDOW = None          # set by desktop.py when a pywebview window is open
-THUMBS = config.USERDATA / "Thumbs"
 LAYOUTS = ("together", "per_source")
 DEDUPES = ("keep_all", "best", "master")
+# What Settings may change, and the values each may take.
+CHOICES = {"filenames": ("original", "dated"), "theme": ("system", "light", "dark"),
+           "auto_sync": ("0", "1"), "channel": ("stable", "beta")}
+RANGES = {"card_size": (160, 420), "auto_hours": (1, 168), "parallel": (1, 16),
+          "per_host": (1, 8), "pace_ms": (0, 5000)}
+
+
+def _background(fn, *args):
+    threading.Thread(target=fn, args=args, daemon=True).start()
+
+
+def _status(s):
+    if not s["supported"]:
+        return "unsupported"
+    if s["last_error"]:
+        return "error"
+    return "ok" if s["last_checked"] else "unknown"
 
 
 def _artists():
@@ -35,34 +57,64 @@ def _artists():
                 # Recognised afresh on every read, so better detection reaches
                 # sources saved before it (a pixiv link once stored as Mastodon).
                 s.update(sources.describe(s["url"]), master=s["id"] == a["master_source_id"])
+                s["status"] = _status(s)
                 a["sources"].append(s)
             a["thumbs"] = [r[0] for r in con.execute(
                 "SELECT id FROM files WHERE artist_id = ? AND path IS NOT NULL AND width IS NOT NULL "
                 "ORDER BY COALESCE(posted, created) DESC, id DESC LIMIT 4", (a["id"],))]
-            a["folder"] = str(sync.artist_folder(a["name"]))
+            a["path"] = str(sync.artist_folder(a))
+            a["folder"] = a["folder"] or ""
     return artists
 
 
+def _display_name(name):
+    return re.sub(r"\s+", " ", name or "").strip()[:200]
+
+
+def name_from_url(url):
+    """A name when no site says one: the account part of the link."""
+    parts = [p for p in urllib.parse.urlparse(url).path.split("/") if p]
+    parts = [p for p in parts if p.lower() not in ("profile", "users", "user", "members", "media",
+                                                  "c", "u", "en", "gallery", "artworks")]
+    name = urllib.parse.unquote(parts[0] if parts else urllib.parse.urlparse(url).hostname or "")
+    name = name.lstrip("@").split("@", 1)[0]
+    name = re.sub(r"\.bsky\.social$", "", name)
+    return re.sub(r"\.\d+$", "", name)                    # XenForo: name.123
+
+
+def _guess_name(urls):
+    """The first source's own display name; failing that, the account in a link."""
+    for url in urls:
+        try:
+            info = sources.profile(url)
+            if info and info.get("name"):
+                return _display_name(info["name"])
+        except Exception as e:
+            log.info("no name from %s: %s", url, net.reason(e))
+    return _display_name(name_from_url(urls[0])) if urls else ""
+
+
 def _clean(body):
-    name = (body.get("name") or "").strip()
-    if not name:
-        return None, "Die Karte braucht einen Namen."
     urls = []
     for url in body.get("sources") or []:
-        url = _normal(url)
-        # Compared after completing them: "site/@a" and "https://site/@a" are one.
+        url = sources.normalize(url)
+        # Compared after normalising: "site/@a/media" and "https://site/@a" are one.
         if url and url not in urls:
             urls.append(url)
-    return {"name": name[:200], "urls": urls, "master": _normal(body.get("master") or ""),
+    name = _display_name(body.get("name")) or _guess_name(urls)
+    if not name:
+        return None, "Give the card a name or at least one link."
+    folder = (body.get("folder") or "").strip()
+    if folder:
+        folder = os.path.abspath(os.path.expanduser(folder))
+        try:
+            os.makedirs(folder, exist_ok=True)
+        except OSError as e:
+            return None, "This folder cannot be used: %s" % e
+    return {"name": name, "urls": urls, "master": sources.normalize(body.get("master") or ""),
+            "folder": folder or None,
             "layout": body.get("layout") if body.get("layout") in LAYOUTS else "together",
             "dedupe": body.get("dedupe") if body.get("dedupe") in DEDUPES else "best"}, None
-
-
-def _normal(url):
-    url = (url or "").strip().rstrip("/")
-    if url and "://" not in url:
-        url = "https://" + url
-    return url
 
 
 def _save(con, artist_id, data):
@@ -78,10 +130,34 @@ def _save(con, artist_id, data):
                         (artist_id, url, sources.kind_of(url)))
     master = con.execute("SELECT id FROM sources WHERE artist_id = ? AND url = ?",
                          (artist_id, data["master"])).fetchone()
-    con.execute("UPDATE artists SET name = ?, layout = ?, dedupe = ?, master_source_id = ? "
-                "WHERE id = ?", (data["name"], data["layout"], data["dedupe"],
-                                 master[0] if master else None, artist_id))
+    con.execute("UPDATE artists SET name = ?, layout = ?, dedupe = ?, master_source_id = ?, "
+                "folder = ? WHERE id = ?", (data["name"], data["layout"], data["dedupe"],
+                                            master[0] if master else None, data["folder"], artist_id))
 
+
+def _open(path):
+    os.makedirs(path, exist_ok=True)
+    if sys.platform == "win32":
+        os.startfile(path)
+    else:
+        subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", path])
+
+
+def _shutdown():
+    """Close Sourcerer so the update helper can take over."""
+    def run():
+        time.sleep(0.8)                         # the answer reaches the page first
+        if WINDOW is not None:
+            try:
+                WINDOW.destroy()
+                time.sleep(3)             # main() returns once the window is gone
+            except Exception:
+                pass
+        os._exit(0)
+    _background(run)
+
+
+# ---- page --------------------------------------------------------------------
 
 @app.get("/")
 def index():
@@ -93,17 +169,37 @@ def static_file(name):
     return send_from_directory(config.STATIC, name)
 
 
+@app.get("/favicon.ico")
+def favicon():
+    return send_from_directory(config.STATIC, "logo.svg", mimetype="image/svg+xml")
+
+
 @app.get("/api/state")
 def state():
     return jsonify(version=config.VERSION, library=sync.library(), sep=os.sep,
-                   sites=[s.LABEL for s in sources.SITES],
+                   sites=[s.LABEL for s in sources.SITES], settings=db.settings(),
                    artists=_artists(), sync=sync.status(), window=WINDOW is not None)
 
 
+# ---- artist cards --------------------------------------------------------------
+
 @app.post("/api/detect")
 def detect():
-    url = _normal((request.get_json(force=True) or {}).get("url"))
-    return jsonify(url=url, **sources.describe(url))
+    """What a pasted link is, and whether the account behind it answers."""
+    url = sources.normalize((request.get_json(force=True) or {}).get("url"))
+    if not url:
+        return jsonify(error="That is not a link."), 400
+    info = dict(url=url, name=_display_name(name_from_url(url)), **sources.describe(url))
+    if not info["supported"]:
+        info["status"] = "unsupported"
+        return jsonify(info)
+    try:
+        p = sources.profile(url) or {}
+        info.update(status="ok", name=_display_name(p.get("name")) or info["name"],
+                    handle=p.get("handle", ""))
+    except Exception as e:
+        info.update(status="error", error=net.reason(e))
+    return jsonify(info)
 
 
 @app.post("/api/artists")
@@ -115,6 +211,7 @@ def create_artist():
     with db.connect() as con:
         artist_id = con.execute("INSERT INTO artists (name) VALUES (?)", (data["name"],)).lastrowid
         _save(con, artist_id, data)
+    _background(sync.check_card, artist_id)
     if body.get("sync_now"):
         sync.enqueue([artist_id])
     return jsonify(id=artist_id)
@@ -127,23 +224,30 @@ def update_artist(artist_id):
     if error:
         return jsonify(error=error), 400
     with db.connect() as con:
-        row = con.execute("SELECT name FROM artists WHERE id = ?", (artist_id,)).fetchone()
+        row = con.execute("SELECT * FROM artists WHERE id = ?", (artist_id,)).fetchone()
         if not row:
-            return jsonify(error="Diese Karte gibt es nicht mehr."), 404
-        if row["name"] != data["name"]:
-            _rename_folder(con, artist_id, row["name"], data["name"])
+            return jsonify(error="This card no longer exists."), 404
+        _move_folder(con, artist_id, sync.artist_folder(row),
+                     sync.artist_folder(dict(row, name=data["name"], folder=data["folder"])))
         _save(con, artist_id, data)
+    _background(sync.check_card, artist_id)
     if body.get("sync_now"):
         sync.enqueue([artist_id])
     return jsonify(ok=True)
 
 
-def _rename_folder(con, artist_id, old, new):
-    """The folder follows the name, so one artist never ends up in two folders."""
-    src, dst = sync.artist_folder(old), sync.artist_folder(new)
+def _move_folder(con, artist_id, src, dst):
+    """The folder follows the card -- renamed or moved elsewhere -- so one artist
+    never ends up in two folders. Across drives that would mean copying the
+    whole collection inside a click; there the new files simply go to dst."""
     if src == dst or not src.is_dir() or dst.exists():
         return
-    os.rename(src, dst)
+    try:
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        os.rename(src, dst)
+    except OSError as e:
+        log.info("folder not moved (%s); new files go to %s", e, dst)
+        return
     for row in con.execute("SELECT id, path FROM files WHERE artist_id = ? AND path IS NOT NULL",
                            (artist_id,)).fetchall():
         if row["path"].startswith(str(src) + os.sep):
@@ -157,8 +261,21 @@ def delete_artist(artist_id):
     sync.cancel(artist_id)
     with db.connect() as con:
         con.execute("DELETE FROM artists WHERE id = ?", (artist_id,))
+    (config.AVATARS / ("%d.jpg" % artist_id)).unlink(missing_ok=True)
     return jsonify(ok=True)
 
+
+@app.get("/api/avatar/<int:artist_id>")
+def avatar(artist_id):
+    path = config.AVATARS / ("%d.jpg" % artist_id)
+    if not path.is_file():
+        abort(404)
+    resp = send_file(path, mimetype="image/jpeg")
+    resp.cache_control.max_age = 86400          # the page asks with ?v=<when it changed>
+    return resp
+
+
+# ---- syncing -------------------------------------------------------------------
 
 @app.post("/api/sync")
 def start_sync():
@@ -180,7 +297,7 @@ def sync_status():
 
 @app.get("/api/thumb/<int:file_id>")
 def thumb(file_id):
-    cached = THUMBS / ("%d.jpg" % file_id)
+    cached = config.THUMBS / ("%d.jpg" % file_id)
     if not cached.is_file():
         with db.connect() as con:
             row = con.execute("SELECT path FROM files WHERE id = ?", (file_id,)).fetchone()
@@ -195,45 +312,143 @@ def thumb(file_id):
     return resp
 
 
+# ---- settings --------------------------------------------------------------------
+
+@app.get("/api/settings")
+def get_settings():
+    return jsonify(settings=db.settings(), library=sync.library(),
+                   default_library=str(config.DEFAULT_LIBRARY))
+
+
 @app.put("/api/settings")
 def save_settings():
-    folder = ((request.get_json(force=True) or {}).get("library") or "").strip()
-    if not folder:
-        return jsonify(error="Bitte einen Ordner wählen."), 400
-    folder = os.path.abspath(os.path.expanduser(folder))
-    try:
-        os.makedirs(folder, exist_ok=True)
-    except OSError as e:
-        return jsonify(error="Dieser Ordner geht nicht: %s" % e), 400
-    db.set_setting("library", folder)
-    return jsonify(library=folder)
+    body = request.get_json(force=True) or {}
+    clean = {}
+    for key, value in body.items():
+        value = str(value).strip()
+        if key == "library":
+            if value:
+                value = os.path.abspath(os.path.expanduser(value))
+                try:
+                    os.makedirs(value, exist_ok=True)
+                except OSError as e:
+                    return jsonify(error="This folder cannot be used: %s" % e), 400
+        elif key in CHOICES:
+            if value not in CHOICES[key]:
+                return jsonify(error="Unknown value for %s." % key), 400
+        elif key in RANGES:
+            low, high = RANGES[key]
+            if not value.isdigit():
+                return jsonify(error="%s must be a number." % key), 400
+            value = str(max(low, min(high, int(value))))
+        else:
+            return jsonify(error="Unknown setting: %s." % key), 400
+        clean[key] = value
+    for key, value in clean.items():
+        db.set_setting(key, value)
+    net.configure(per_host=db.setting_int("per_host", 1, 8), pace_ms=db.setting_int("pace_ms", 0, 5000))
+    return get_settings()
 
 
 @app.post("/api/pick-folder")
 def pick_folder():
     if WINDOW is None:
-        return jsonify(error="Bitte den Pfad eintippen."), 501
+        return jsonify(error="Type the path in; the browser cannot show a folder dialog."), 501
     import webview
+    start = ((request.get_json(silent=True) or {}).get("start") or "").strip()
+    while start and not os.path.isdir(start):          # a folder not made yet: its parent
+        parent = os.path.dirname(start.rstrip("\\/"))
+        start = parent if parent != start else ""
     # pywebview 6 turned FOLDER_DIALOG into a deprecated function; passing it
     # as the dialog type opens no folder dialog at all. FileDialog is the 6.x way.
     folder = webview.FileDialog.FOLDER if hasattr(webview, "FileDialog") else webview.FOLDER_DIALOG
-    picked = WINDOW.create_file_dialog(folder, directory=sync.library())
+    picked = WINDOW.create_file_dialog(folder, directory=start or sync.library())
     return jsonify(path=picked[0] if picked else None)
 
 
-@app.post("/api/open-folder")
-def open_folder():
+@app.post("/api/open")
+def open_path():
     body = request.get_json(silent=True) or {}
-    path = sync.library()
-    if body.get("artist_id"):
+    target = body.get("target")
+    if target == "artist":
         with db.connect() as con:
-            row = con.execute("SELECT name FROM artists WHERE id = ?",
-                              (int(body["artist_id"]),)).fetchone()
-        if row:
-            path = str(sync.artist_folder(row["name"]))
-    os.makedirs(path, exist_ok=True)
-    if sys.platform == "win32":
-        os.startfile(path)
+            row = con.execute("SELECT * FROM artists WHERE id = ?",
+                              (int(body.get("artist_id") or 0),)).fetchone()
+        if not row:
+            abort(404)
+        path = str(sync.artist_folder(row))
     else:
-        subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", path])
+        path = {"library": sync.library(), "logs": str(config.LOG_DIR),
+                "program": str(config.INSTALL), "userdata": str(config.USERDATA)}.get(target)
+        if not path:
+            abort(400)
+    _open(path)
     return jsonify(ok=True)
+
+
+@app.get("/api/info")
+def info():
+    try:
+        lines = (config.LOG_DIR / "update.log").read_text(encoding="utf-8").splitlines()[-30:]
+    except OSError:
+        lines = []
+    return jsonify(version=config.VERSION, python=platform.python_version(),
+                   system="%s %s" % (platform.system(), platform.release()),
+                   program=str(config.INSTALL), userdata=str(config.USERDATA),
+                   library=sync.library(), repo="https://github.com/%s" % config.REPO,
+                   update_log=lines, window=WINDOW is not None)
+
+
+# ---- updates and repair --------------------------------------------------------------
+
+@app.get("/api/update/check")
+def update_check():
+    channel = request.args.get("channel") or db.get_setting("channel")
+    try:
+        return jsonify(updater.check("beta" if channel == "beta" else "stable"))
+    except Exception as e:
+        return jsonify(error="GitHub could not be asked: %s" % net.reason(e)), 502
+
+
+@app.post("/api/update/install")
+def update_install():
+    channel = (request.get_json(silent=True) or {}).get("channel") or db.get_setting("channel")
+    if sync.status()["running"]:
+        return jsonify(error="Wait for the running sync to finish, or cancel it."), 409
+    try:
+        result = updater.install("beta" if channel == "beta" else "stable")
+    except Exception as e:
+        log.exception("update failed")
+        return jsonify(error=net.reason(e)), 500
+    _shutdown()
+    return jsonify(result)
+
+
+@app.post("/api/repair")
+def repair():
+    action = (request.get_json(silent=True) or {}).get("action")
+    if action == "thumbs":
+        shutil.rmtree(config.THUMBS, ignore_errors=True)
+        return jsonify(message="Thumbnails are drawn again as the cards show them.")
+    if action == "avatars":
+        with db.connect() as con:
+            ids = [r[0] for r in con.execute("SELECT id FROM artists")]
+        _background(lambda: [sync.check_card(i) for i in ids])
+        return jsonify(message="Profile pictures and link checks are being refreshed.")
+    if action not in ("venv", "reinstall", "restart"):
+        abort(400)
+    if sync.status()["running"]:
+        return jsonify(error="Wait for the running sync to finish, or cancel it."), 409
+    try:
+        if action == "venv":
+            (config.USERDATA / "rebuild-venv").write_text("Settings > Repair\n", encoding="utf-8")
+            updater.restart()
+        elif action == "reinstall":
+            updater.reinstall()
+        else:
+            updater.restart()
+    except Exception as e:
+        log.exception("repair failed")
+        return jsonify(error=net.reason(e)), 500
+    _shutdown()
+    return jsonify(message="Sourcerer restarts in a moment.")

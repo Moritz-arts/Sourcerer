@@ -46,3 +46,12 @@ def thumbnail(src, dst, size=200):
             img = img.convert("RGB")
         dst.parent.mkdir(parents=True, exist_ok=True)
         img.save(dst, "JPEG", quality=82)
+
+
+def avatar(src, dst, size=128):
+    """A square profile picture: the middle of the source, scaled to size."""
+    with Image.open(src) as img:
+        img = ImageOps.exif_transpose(img).convert("RGB")
+        img = ImageOps.fit(img, (size, size), Image.LANCZOS)
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        img.save(dst, "JPEG", quality=88)

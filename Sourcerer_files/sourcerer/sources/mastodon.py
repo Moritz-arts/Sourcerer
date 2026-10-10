@@ -35,10 +35,31 @@ def match(url):
     return _parse(url) is not None
 
 
-def pages(url):
+def normalize(url):
+    """https://<server>/@<user>[@<home>], whatever page of the profile was given."""
+    m = _URL.match(url.strip())
+    return "https://%s/@%s%s" % (m.group(1), m.group(2), "@" + m.group(3) if m.group(3) else "")
+
+
+def _account(url):
     server, user = _parse(url)
+    return server, net.get_json("https://%s/api/v1/accounts/lookup" % server, {"acct": user})
+
+
+def profile(url):
+    server, account = _account(url)
+    # Display names carry custom emoji as :shortcode:, which no folder should.
+    name = re.sub(r":[\w+-]+:", "", account.get("display_name") or "").strip()
+    avatar = account.get("avatar_static") or account.get("avatar") or ""
+    return {"name": name or account.get("username") or "",
+            "handle": "@%s@%s" % (account.get("username", ""), server),
+            # An account without a picture gets the server's placeholder.
+            "avatar": "" if avatar.endswith("/missing.png") else avatar}
+
+
+def pages(url):
+    server, account = _account(url)
     base = "https://%s/api/v1" % server
-    account = net.get_json(base + "/accounts/lookup", {"acct": user})
     max_id = None
     while True:
         statuses = net.get_json(base + "/accounts/%s/statuses" % account["id"], {
@@ -60,8 +81,12 @@ def pages(url):
 
 def _media(server, status, media, src):
     from . import Media
+    url = urllib.parse.urljoin("https://%s/" % server, src)
     return Media(remote_key="mastodon:%s:%s" % (server.lower(), media["id"]),
-                 url=urllib.parse.urljoin("https://%s/" % server, src),
+                 url=url,
                  post_url=status.get("url") or status.get("uri") or "",
                  posted=status.get("created_at") or "",
-                 name=str(media["id"]))
+                 name=str(media["id"]),
+                 # The name the server stored the upload under -- the uploader's
+                 # own name is not published by Mastodon.
+                 filename=urllib.parse.unquote(urllib.parse.urlparse(url).path.rsplit("/", 1)[-1]))

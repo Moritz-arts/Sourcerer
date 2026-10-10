@@ -1,18 +1,18 @@
 <!doctype html>
-<html lang="de">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sourcerer</title>
-<link rel="icon" href="data:,">
+<link rel="icon" type="image/svg+xml" href="/static/logo.svg">
 <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
 <!-- Icons drawn after Tabler Icons (MIT, see icons-LICENSE.txt), kept here so
      nothing is loaded from the internet. -->
 <svg class="sprite" aria-hidden="true">
-  <symbol id="i-photo-down" viewBox="0 0 24 24"><path d="M15 8h.01"/><path d="M12.5 21h-6.5a3 3 0 0 1 -3 -3v-12a3 3 0 0 1 3 -3h12a3 3 0 0 1 3 3v6.5"/><path d="M3 16l5 -5c.928 -.893 2.072 -.893 3 0l4 4"/><path d="M14 14l1 -1c.653 -.629 1.413 -.815 2.13 -.559"/><path d="M19 16v6"/><path d="M22 19l-3 3l-3 -3"/></symbol>
   <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5l0 14"/><path d="M5 12l14 0"/></symbol>
+  <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12l14 0"/></symbol>
   <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8.1 8.1 0 0 0 -15.5 -2m-.5 -4v4h4"/><path d="M4 13a8.1 8.1 0 0 0 15.5 2m.5 4v-4h-4"/></symbol>
   <symbol id="i-settings" viewBox="0 0 24 24"><path d="M10.325 4.317c.426 -1.756 2.924 -1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543 -.94 3.31 .826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756 .426 1.756 2.924 0 3.35a1.724 1.724 0 0 0 -1.066 2.573c.94 1.543 -.826 3.31 -2.37 2.37a1.724 1.724 0 0 0 -2.572 1.065c-.426 1.756 -2.924 1.756 -3.35 0a1.724 1.724 0 0 0 -2.573 -1.066c-1.543 .94 -3.31 -.826 -2.37 -2.37a1.724 1.724 0 0 0 -1.065 -2.572c-1.756 -.426 -1.756 -2.924 0 -3.35a1.724 1.724 0 0 0 1.066 -2.573c-.94 -1.543 .826 -3.31 2.37 -2.37c1 .608 2.296 .07 2.572 -1.065z"/><path d="M9 12a3 3 0 1 0 6 0a3 3 0 0 0 -6 0"/></symbol>
   <symbol id="i-folder" viewBox="0 0 24 24"><path d="M5 4h4l3 3h7a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2v-11a2 2 0 0 1 2 -2"/></symbol>
@@ -20,105 +20,146 @@
   <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6l-12 12"/><path d="M6 6l12 12"/></symbol>
   <symbol id="i-crown" viewBox="0 0 24 24"><path d="M12 6l4 6l5 -4l-2 10h-14l-2 -10l5 4z"/></symbol>
   <symbol id="i-point" viewBox="0 0 24 24"><path d="M8 12a4 4 0 1 0 8 0a4 4 0 1 0 -8 0"/></symbol>
-  <symbol id="i-activity" viewBox="0 0 24 24"><path d="M3 12h4l3 8l4 -16l3 8h4"/></symbol>
   <symbol id="i-chevron-up" viewBox="0 0 24 24"><path d="M6 15l6 -6l6 6"/></symbol>
   <symbol id="i-circle" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0"/></symbol>
   <symbol id="i-circle-dot" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0"/><path d="M11 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" fill="currentColor"/></symbol>
   <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M4 20h4l10.5 -10.5a2.828 2.828 0 1 0 -4 -4l-10.5 10.5v4"/><path d="M13.5 6.5l4 4"/></symbol>
   <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7l16 0"/><path d="M10 11l0 6"/><path d="M14 11l0 6"/><path d="M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2 -2l1 -12"/><path d="M9 7v-3a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v3"/></symbol>
   <symbol id="i-search" viewBox="0 0 24 24"><path d="M3 10a7 7 0 1 0 14 0a7 7 0 1 0 -14 0"/><path d="M21 21l-6 -6"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0"/><path d="M9 12l2 2l4 -4"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 9v4"/><path d="M10.363 3.591l-8.106 13.534a1.914 1.914 0 0 0 1.636 2.871h16.214a1.914 1.914 0 0 0 1.636 -2.87l-8.106 -13.536a1.914 1.914 0 0 0 -3.274 0z"/><path d="M12 16h.01"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0"/><path d="M12 9h.01"/><path d="M11 12h1v4h1"/></symbol>
+  <symbol id="i-error" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0"/><path d="M10 10l4 4m0 -4l-4 4"/></symbol>
+  <symbol id="i-ban" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0"/><path d="M5.7 5.7l12.6 12.6"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4v16l13 -8z"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2 -2v-2"/><path d="M7 11l5 5l5 -5"/><path d="M12 4l0 12"/></symbol>
+  <symbol id="i-photo" viewBox="0 0 24 24"><path d="M15 8h.01"/><path d="M3 6a3 3 0 0 1 3 -3h12a3 3 0 0 1 3 3v12a3 3 0 0 1 -3 3h-12a3 3 0 0 1 -3 -3v-12z"/><path d="M3 16l5 -5c.928 -.893 2.072 -.893 3 0l5 5"/><path d="M14 14l1 -1c.928 -.893 2.072 -.893 3 0l3 3"/></symbol>
+  <symbol id="i-keyboard" viewBox="0 0 24 24"><path d="M2 8a2 2 0 0 1 2 -2h16a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-16a2 2 0 0 1 -2 -2z"/><path d="M6 10l0 .01"/><path d="M10 10l0 .01"/><path d="M14 10l0 .01"/><path d="M18 10l0 .01"/><path d="M6 14l0 .01"/><path d="M18 14l0 .01"/><path d="M10 14l4 .01"/></symbol>
+  <symbol id="i-palette" viewBox="0 0 24 24"><path d="M12 21a9 9 0 0 1 0 -18c4.97 0 9 3.582 9 8c0 1.06 -.474 2.078 -1.318 2.828c-.844 .75 -1.989 1.172 -3.182 1.172h-2.5a2 2 0 0 0 -1 3.75a1.3 1.3 0 0 1 -1 2.25"/><path d="M7.5 10.5a1 1 0 1 0 2 0a1 1 0 1 0 -2 0"/><path d="M11.5 7.5a1 1 0 1 0 2 0a1 1 0 1 0 -2 0"/><path d="M15.5 10.5a1 1 0 1 0 2 0a1 1 0 1 0 -2 0"/></symbol>
+  <symbol id="i-tool" viewBox="0 0 24 24"><path d="M7 10h3v-3l-3.5 -3.5a6 6 0 0 1 8 8l6 6a2 2 0 0 1 -3 3l-6 -6a6 6 0 0 1 -8 -8l3.5 3.5"/></symbol>
+  <symbol id="i-world" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0"/><path d="M3.6 9h16.8"/><path d="M3.6 15h16.8"/><path d="M11.5 3a17 17 0 0 0 0 18"/><path d="M12.5 3a17 17 0 0 1 0 18"/></symbol>
+  <symbol id="i-cloud-down" viewBox="0 0 24 24"><path d="M19 18a3.5 3.5 0 0 0 0 -7h-1a5 4.5 0 0 0 -11 -2a4.6 4.4 0 0 0 -2.1 8.4"/><path d="M12 13l0 9"/><path d="M9 19l3 3l3 -3"/></symbol>
+  <symbol id="i-external" viewBox="0 0 24 24"><path d="M12 6h-6a2 2 0 0 0 -2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-6"/><path d="M11 13l9 -9"/><path d="M15 4h5v5"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0"/><path d="M12 7v5l3 3"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6l11 0"/><path d="M9 12l11 0"/><path d="M9 18l11 0"/><path d="M5 6l0 .01"/><path d="M5 12l0 .01"/><path d="M5 18l0 .01"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24"><path d="M5 7a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2v10a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2z"/></symbol>
 </svg>
 
 <div class="app">
   <header class="toolbar">
-    <svg class="ic ic-brand"><use href="#i-photo-down"/></svg>
+    <img class="logo" src="/static/logo.svg" alt="">
     <span class="brand">Sourcerer</span><span id="version" class="muted small"></span>
     <span class="grow"></span>
-    <button id="btn-add"><svg class="ic"><use href="#i-plus"/></svg> Karte</button>
-    <button id="btn-sync-all" class="primary"><svg class="ic"><use href="#i-refresh"/></svg> Alle aktualisieren</button>
-    <button id="btn-settings" class="icon" aria-label="Einstellungen" title="Einstellungen"><svg class="ic"><use href="#i-settings"/></svg></button>
+    <button id="btn-add" title="New card (Ctrl+N)"><svg class="ic"><use href="#i-plus"/></svg> New card</button>
+    <button id="btn-sync-all" class="primary" title="Sync all cards (F5)"><svg class="ic"><use href="#i-refresh"/></svg> Sync all</button>
+    <button id="btn-settings" class="icon" aria-label="Settings" title="Settings (Ctrl+,)"><svg class="ic"><use href="#i-settings"/></svg><span id="update-dot" class="dot hidden"></span></button>
   </header>
 
   <div class="filterbar">
-    <input id="search" type="text" placeholder="Artist suchen" autocomplete="off">
-    <select id="sort">
-      <option value="activity">Sortierung: neueste Aktivität</option>
-      <option value="name">Sortierung: Name</option>
-      <option value="files">Sortierung: Dateien</option>
+    <div class="searchbox">
+      <svg class="ic"><use href="#i-search"/></svg>
+      <input id="search" type="text" placeholder="Search artists" autocomplete="off" title="Search (Ctrl+F)">
+    </div>
+    <select id="sort" aria-label="Sort">
+      <option value="activity">Newest activity</option>
+      <option value="name">Name</option>
+      <option value="files">Most files</option>
     </select>
+    <span class="grow"></span>
+    <div class="sizer" title="Card size (Ctrl + mouse wheel)">
+      <button id="btn-smaller" class="icon flat" aria-label="Smaller cards"><svg class="ic sm"><use href="#i-minus"/></svg></button>
+      <input id="size" type="range" min="160" max="420" step="10" aria-label="Card size">
+      <button id="btn-larger" class="icon flat" aria-label="Larger cards"><svg class="ic sm"><use href="#i-plus"/></svg></button>
+    </div>
   </div>
 
   <main id="main">
     <div id="empty" class="empty hidden">
-      <svg class="ic ic-hero"><use href="#i-photo-down"/></svg>
-      <h2>Noch keine Künstlerkarten</h2>
-      <p>Lege eine Karte an und trage ein, wo der Artist postet. Sourcerer lädt alle
-         Bilder und Videos von dort in deine Bibliothek – bei jedem Sync nur, was neu ist.</p>
-      <button class="primary" data-act="add"><svg class="ic"><use href="#i-plus"/></svg> Erste Karte anlegen</button>
+      <img class="logo-hero" src="/static/logo.svg" alt="">
+      <h2>No artist cards yet</h2>
+      <p>Create a card and add the places the artist posts. Sourcerer downloads every
+         picture and video from there into your library &ndash; and on every sync, only what is new.</p>
+      <button class="primary" data-act="add"><svg class="ic"><use href="#i-plus"/></svg> Create the first card</button>
     </div>
-    <p id="nomatch" class="nomatch hidden">Keine Karte passt zur Suche.</p>
+    <p id="nomatch" class="nomatch hidden">No card matches the search.</p>
     <div id="cards" class="grid"></div>
   </main>
 
-  <section id="logpanel" class="logpanel hidden"><pre id="log"></pre></section>
-  <footer class="activity">
-    <svg class="ic"><use href="#i-activity"/></svg>
-    <span id="activity-text" class="mono"></span>
-    <span class="grow"></span>
-    <span id="queue-text"></span>
-    <button id="btn-log" class="icon flat" aria-label="Protokoll" title="Protokoll"><svg class="ic"><use href="#i-chevron-up"/></svg></button>
-  </footer>
+  <section id="logpanel" class="logpanel hidden">
+    <div class="log-head">
+      <span class="section">Activity</span>
+      <div class="chips">
+        <button class="chip selected" data-log="all">All</button>
+        <button class="chip" data-log="problems">Problems</button>
+      </div>
+      <span class="grow"></span>
+      <button class="mini" data-open="logs"><svg class="ic"><use href="#i-folder"/></svg> Log files</button>
+    </div>
+    <ul id="log" class="loglist"></ul>
+  </section>
+  <footer id="activity" class="activity"></footer>
 </div>
 
 <div id="menu" class="menu hidden" role="menu">
-  <button data-menu="edit"><svg class="ic"><use href="#i-pencil"/></svg> Bearbeiten</button>
-  <button data-menu="folder"><svg class="ic"><use href="#i-folder"/></svg> Ordner öffnen</button>
-  <button data-menu="delete" class="danger"><svg class="ic"><use href="#i-trash"/></svg> Löschen</button>
+  <button data-menu="edit"><svg class="ic"><use href="#i-pencil"/></svg> Edit<span class="kbd">Enter</span></button>
+  <button data-menu="sync"><svg class="ic"><use href="#i-refresh"/></svg> Sync now<span class="kbd">U</span></button>
+  <button data-menu="delete" class="danger"><svg class="ic"><use href="#i-trash"/></svg> Delete<span class="kbd">Del</span></button>
 </div>
 
 <dialog id="dlg-card" class="dlg">
   <form id="form-card" method="dialog">
     <div class="dlg-head">
-      <span id="card-title">Neue Künstlerkarte</span><span class="grow"></span>
-      <button type="button" class="icon flat" data-close aria-label="Schließen"><svg class="ic"><use href="#i-x"/></svg></button>
+      <span id="card-title">New artist card</span><span class="grow"></span>
+      <button type="button" class="icon flat" data-close aria-label="Close"><svg class="ic"><use href="#i-x"/></svg></button>
     </div>
     <div class="dlg-body">
       <div class="namerow">
         <div id="card-avatar" class="avatar"></div>
-        <label class="grow"><span class="label">Name</span><input name="name" autocomplete="off"></label>
+        <label class="grow"><span class="label">Name</span><input name="name" autocomplete="off" placeholder="Taken from the first link if left empty"></label>
       </div>
 
       <div>
-        <div class="section">Quellen</div>
+        <div class="section">Sources</div>
         <div id="src-list" class="srclist"></div>
         <div class="addrow">
-          <input id="src-input" type="text" placeholder="https://bsky.app/profile/inkwell.bsky.social" autocomplete="off">
-          <button type="button" id="btn-src-add">Hinzufügen</button>
+          <input id="src-input" type="text" placeholder="Paste a profile link, e.g. bsky.app/profile/name or mastodon.social/@name" autocomplete="off">
+          <button type="button" id="btn-src-add">Add</button>
         </div>
-        <p class="hint">Lädt heute von: <span id="sites"></span>. Andere Links bleiben auf der Karte
-           und werden geladen, sobald die Seite unterstützt wird.</p>
+        <p class="hint">Downloads today from <span id="sites"></span>. Any page of a profile works
+           (its media tab, a single post) &ndash; Sourcerer finds the profile behind it. Links to other
+           sites stay on the card and are used as soon as Sourcerer supports them.</p>
       </div>
 
       <div>
-        <div class="section">Ordner-Layout</div>
+        <div class="section">Folder</div>
+        <div class="addrow tight">
+          <input id="card-folder" type="text" autocomplete="off">
+          <button type="button" id="btn-card-browse">Browse&hellip;</button>
+        </div>
+        <p class="hint">Left empty, the card gets its own folder in your library. Renaming the card
+           or choosing another folder moves the files along.</p>
+      </div>
+
+      <div>
+        <div class="section">Folder layout</div>
         <div class="choices two">
           <button type="button" class="choice" data-layout="together">
-            <div class="choice-title"><svg class="ic sm off"><use href="#i-circle"/></svg><svg class="ic sm on"><use href="#i-circle-dot"/></svg> Alle zusammen</div>
+            <div class="choice-title"><svg class="ic sm off"><use href="#i-circle"/></svg><svg class="ic sm on"><use href="#i-circle-dot"/></svg> All together</div>
             <div class="mono muted" id="layout-together"></div>
           </button>
           <button type="button" class="choice" data-layout="per_source">
-            <div class="choice-title"><svg class="ic sm off"><use href="#i-circle"/></svg><svg class="ic sm on"><use href="#i-circle-dot"/></svg> Pro Quelle</div>
+            <div class="choice-title"><svg class="ic sm off"><use href="#i-circle"/></svg><svg class="ic sm on"><use href="#i-circle-dot"/></svg> One folder per site</div>
             <div class="mono muted" id="layout-per-source"></div>
           </button>
         </div>
       </div>
 
       <div>
-        <div class="section">Gleiche Bilder aus verschiedenen Quellen</div>
+        <div class="section">The same picture on several sites</div>
         <div class="segmented">
-          <button type="button" data-dedupe="keep_all">Alle behalten</button>
-          <button type="button" data-dedupe="best">Beste Qualität</button>
-          <button type="button" data-dedupe="master">Master-Source</button>
+          <button type="button" data-dedupe="keep_all">Keep all</button>
+          <button type="button" data-dedupe="best">Best quality</button>
+          <button type="button" data-dedupe="master">Master source</button>
         </div>
         <div id="master-row" class="masterrow">
           <span class="muted">Master</span>
@@ -129,39 +170,201 @@
       <p id="card-error" class="error"></p>
     </div>
     <div class="dlg-foot">
-      <label class="check"><input type="checkbox" id="sync-now" checked> Direkt laden</label>
       <span class="grow"></span>
-      <button type="button" data-close>Abbrechen</button>
-      <button type="submit" id="btn-card-save" class="primary">Anlegen</button>
+      <button type="button" data-close>Cancel</button>
+      <button type="submit" id="btn-card-save" value="save">Create</button>
+      <button type="submit" id="btn-card-sync" value="sync" class="primary"><svg class="ic"><use href="#i-download"/></svg> <span>Create &amp; sync</span></button>
     </div>
   </form>
 </dialog>
 
-<dialog id="dlg-settings" class="dlg">
-  <form id="form-settings" method="dialog">
-    <div class="dlg-head">
-      <span>Einstellungen</span><span class="grow"></span>
-      <button type="button" class="icon flat" data-close aria-label="Schließen"><svg class="ic"><use href="#i-x"/></svg></button>
-    </div>
-    <div class="dlg-body">
-      <div>
-        <div class="section">Bibliothek</div>
-        <div class="addrow">
-          <input name="library" autocomplete="off">
-          <button type="button" id="btn-browse">Durchsuchen…</button>
+<dialog id="dlg-settings" class="dlg wide">
+  <div class="dlg-head">
+    <span>Settings</span><span class="grow"></span>
+    <button type="button" class="icon flat" data-close aria-label="Close"><svg class="ic"><use href="#i-x"/></svg></button>
+  </div>
+  <div class="settings">
+    <nav class="rail">
+      <button data-pane="library" class="selected"><svg class="ic"><use href="#i-folder"/></svg> Library</button>
+      <button data-pane="sync"><svg class="ic"><use href="#i-refresh"/></svg> Sync</button>
+      <button data-pane="network"><svg class="ic"><use href="#i-world"/></svg> Sites &amp; network</button>
+      <button data-pane="appearance"><svg class="ic"><use href="#i-palette"/></svg> Appearance</button>
+      <button data-pane="keys"><svg class="ic"><use href="#i-keyboard"/></svg> Keyboard &amp; mouse</button>
+      <button data-pane="updates"><svg class="ic"><use href="#i-cloud-down"/></svg> Updates<span id="update-dot-2" class="dot hidden"></span></button>
+      <button data-pane="repair"><svg class="ic"><use href="#i-tool"/></svg> Repair</button>
+      <button data-pane="about"><svg class="ic"><use href="#i-info"/></svg> About</button>
+    </nav>
+    <div class="panes">
+      <section data-pane="library">
+        <h3>Library</h3>
+        <div class="field">
+          <span class="label">Default library folder</span>
+          <div class="addrow tight">
+            <input id="set-library" type="text" autocomplete="off">
+            <button type="button" id="btn-browse">Browse&hellip;</button>
+            <button type="button" class="icon" data-open="library" title="Open"><svg class="ic"><use href="#i-external"/></svg></button>
+          </div>
+          <p class="hint">A card without a folder of its own gets one in here. Add this folder to
+             TrackImage and new files show up there by themselves.</p>
         </div>
-        <p class="hint">Jede Künstlerkarte bekommt hier einen Ordner. Verknüpfe diesen Ordner in
-           TrackImage, dann tauchen neue Dateien dort von selbst auf.</p>
-      </div>
-      <p id="settings-error" class="error"></p>
+        <div class="field">
+          <span class="label">File names</span>
+          <div class="segmented two">
+            <button type="button" data-set="filenames" data-value="original">Original name</button>
+            <button type="button" data-set="filenames" data-value="dated">Date + original name</button>
+          </div>
+          <p class="hint" id="filename-example"></p>
+        </div>
+      </section>
+
+      <section data-pane="sync">
+        <h3>Sync</h3>
+        <div class="row">
+          <div><div class="row-title">Automatic sync</div>
+            <p class="hint">Syncs every card on its own while Sourcerer is open.</p></div>
+          <label class="switch"><input type="checkbox" id="set-auto"><span></span></label>
+        </div>
+        <div class="row">
+          <div><div class="row-title">Every</div></div>
+          <select id="set-hours" class="narrow">
+            <option value="1">hour</option><option value="3">3 hours</option><option value="6">6 hours</option>
+            <option value="12">12 hours</option><option value="24">day</option><option value="168">week</option>
+          </select>
+        </div>
+        <div class="row">
+          <div><div class="row-title">Parallel downloads</div>
+            <p class="hint">Files downloaded at the same time. More is faster on a fast line.</p></div>
+          <select id="set-parallel" class="narrow">
+            <option>1</option><option>2</option><option>4</option><option>6</option><option>8</option>
+          </select>
+        </div>
+      </section>
+
+      <section data-pane="network">
+        <h3>Sites &amp; network</h3>
+        <p class="hint big">Sourcerer reads public posts through each site's official interface (the
+          Mastodon API, Bluesky's AT Protocol), as a known app: it names itself in every request and
+          never pretends to be a browser. These limits keep it well below what the sites allow, so
+          an account is never mistaken for an attack.</p>
+        <div class="row">
+          <div><div class="row-title">Connections per site</div>
+            <p class="hint">Requests to one site at the same time.</p></div>
+          <select id="set-perhost" class="narrow">
+            <option>1</option><option>2</option><option>3</option><option>4</option>
+          </select>
+        </div>
+        <div class="row">
+          <div><div class="row-title">Pause between requests</div>
+            <p class="hint">Per site. Longer is gentler, shorter is faster.</p></div>
+          <select id="set-pace" class="narrow">
+            <option value="0">none</option><option value="100">0.1 s</option><option value="250">0.25 s</option>
+            <option value="500">0.5 s</option><option value="1000">1 s</option><option value="2000">2 s</option>
+          </select>
+        </div>
+        <p class="hint">When a site says "too many requests", Sourcerer waits as long as the site asks
+          before it tries again. Automatic syncs start at a slightly different minute each time.</p>
+      </section>
+
+      <section data-pane="appearance">
+        <h3>Appearance</h3>
+        <div class="field">
+          <span class="label">Theme</span>
+          <div class="segmented">
+            <button type="button" data-set="theme" data-value="system">System</button>
+            <button type="button" data-set="theme" data-value="light">Light</button>
+            <button type="button" data-set="theme" data-value="dark">Dark</button>
+          </div>
+        </div>
+        <div class="field">
+          <span class="label">Card size</span>
+          <input id="set-size" type="range" min="160" max="420" step="10">
+          <p class="hint">Also with Ctrl + mouse wheel over the cards, or Ctrl + plus / minus.</p>
+        </div>
+      </section>
+
+      <section data-pane="keys">
+        <h3>Keyboard &amp; mouse</h3>
+        <table class="keys">
+          <tr><td><span class="kbd">Ctrl</span> <span class="kbd">N</span></td><td>New card</td></tr>
+          <tr><td><span class="kbd">Ctrl</span> <span class="kbd">F</span> &nbsp;or&nbsp; <span class="kbd">/</span></td><td>Search</td></tr>
+          <tr><td><span class="kbd">F5</span> &nbsp;or&nbsp; <span class="kbd">Ctrl</span> <span class="kbd">R</span></td><td>Sync all cards</td></tr>
+          <tr><td><span class="kbd">Ctrl</span> <span class="kbd">,</span></td><td>Settings</td></tr>
+          <tr><td><span class="kbd">Ctrl</span> <span class="kbd">L</span></td><td>Show or hide the activity log</td></tr>
+          <tr><td><span class="kbd">&larr;</span> <span class="kbd">&rarr;</span> <span class="kbd">&uarr;</span> <span class="kbd">&darr;</span> <span class="kbd">Home</span> <span class="kbd">End</span></td><td>Select a card</td></tr>
+          <tr><td><span class="kbd">Enter</span> &nbsp;or double-click</td><td>Edit the card</td></tr>
+          <tr><td><span class="kbd">U</span></td><td>Sync the card</td></tr>
+          <tr><td><span class="kbd">O</span> &nbsp;or click its folder</td><td>Open the card's folder</td></tr>
+          <tr><td><span class="kbd">Del</span></td><td>Delete the card</td></tr>
+          <tr><td>Right-click</td><td>The card's menu</td></tr>
+          <tr><td><span class="kbd">Ctrl</span> + wheel, <span class="kbd">Ctrl</span> <span class="kbd">+</span> <span class="kbd">&minus;</span> <span class="kbd">0</span></td><td>Card size, and back to normal</td></tr>
+          <tr><td><span class="kbd">Esc</span></td><td>Close the dialog, menu or search</td></tr>
+        </table>
+      </section>
+
+      <section data-pane="updates">
+        <h3>Updates</h3>
+        <div class="field">
+          <span class="label">Look for</span>
+          <div class="segmented two">
+            <button type="button" data-set="channel" data-value="stable">Stable &ndash; published releases</button>
+            <button type="button" data-set="channel" data-value="beta">Beta &ndash; every new build</button>
+          </div>
+        </div>
+        <div class="updatebox">
+          <div class="grow">
+            <div class="row-title">Installed: <span id="upd-current"></span></div>
+            <p class="hint" id="upd-status">Not checked yet.</p>
+          </div>
+          <button type="button" id="btn-check"><svg class="ic"><use href="#i-refresh"/></svg> Check now</button>
+          <button type="button" id="btn-install" class="primary hidden"><svg class="ic"><use href="#i-download"/></svg> <span>Install</span></button>
+        </div>
+        <pre id="upd-notes" class="notes hidden"></pre>
+        <p class="hint">An update replaces the program files and keeps your cards, settings and
+          library. Sourcerer restarts by itself.</p>
+        <details id="upd-log-box" class="hidden"><summary class="hint">Last update log</summary><pre id="upd-log" class="notes"></pre></details>
+      </section>
+
+      <section data-pane="repair">
+        <h3>Repair</h3>
+        <div class="row"><div><div class="row-title">Redraw thumbnails</div>
+          <p class="hint">The small pictures on the cards are made again.</p></div>
+          <button type="button" data-repair="thumbs">Redraw</button></div>
+        <div class="row"><div><div class="row-title">Check links and profile pictures</div>
+          <p class="hint">Every source is asked again; dots and pictures are refreshed.</p></div>
+          <button type="button" data-repair="avatars">Check</button></div>
+        <div class="row"><div><div class="row-title">Rebuild the Python environment</div>
+          <p class="hint">After errors about missing packages. Restarts; the first start takes a minute.</p></div>
+          <button type="button" data-repair="venv">Rebuild</button></div>
+        <div class="row"><div><div class="row-title">Reinstall this version</div>
+          <p class="hint">Downloads the installed version again and replaces damaged program files.</p></div>
+          <button type="button" data-repair="reinstall">Reinstall</button></div>
+        <div class="row"><div><div class="row-title">Restart Sourcerer</div></div>
+          <button type="button" data-repair="restart">Restart</button></div>
+        <div class="row"><div><div class="row-title">Log files</div>
+          <p class="hint">What Sourcerer did, for a bug report.</p></div>
+          <button type="button" data-open="logs">Open</button></div>
+      </section>
+
+      <section data-pane="about">
+        <div class="about">
+          <img class="logo-hero" src="/static/logo.svg" alt="">
+          <div><h3>Sourcerer <span id="about-version"></span></h3>
+            <p class="hint">Keeps every artist's pictures from every site in one library.</p></div>
+        </div>
+        <table class="facts" id="about-facts"></table>
+        <p class="hint">Icons after Tabler Icons (MIT). Source code and issues:
+          <a id="about-repo" href="#" target="_blank" rel="noopener"></a></p>
+      </section>
     </div>
-    <div class="dlg-foot">
-      <span class="grow"></span>
-      <button type="button" data-close>Abbrechen</button>
-      <button type="submit" class="primary">Speichern</button>
-    </div>
-  </form>
+  </div>
 </dialog>
+
+<div id="overlay" class="overlay hidden"><div class="overlay-box">
+  <img class="logo-hero spin" src="/static/logo.svg" alt="">
+  <h2 id="overlay-title">Restarting</h2>
+  <p id="overlay-text" class="muted"></p>
+</div></div>
+<div id="toasts" class="toasts"></div>
 
 <script src="/static/app.js"></script>
 </body>

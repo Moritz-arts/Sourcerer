@@ -11,6 +11,7 @@ import pathlib
 import shutil
 import subprocess
 import sys
+import time
 
 HERE = pathlib.Path(__file__).resolve().parent
 REQS = HERE / "requirements.txt"
@@ -22,6 +23,8 @@ STAMP = VENV / "requirements.installed"
 # pip caches in the user's home by default; kept here instead, nothing is
 # written outside the folder Sourcerer was unpacked into.
 PIP_CACHE = HERE / "venv" / "pip-cache"
+# Left by Settings > Repair: the environment is thrown away and built anew.
+REBUILD = HERE / "Userdata" / "rebuild-venv"
 
 
 def say(text=""):
@@ -107,6 +110,14 @@ def main():
     say(" Sourcerer v%s - Setup & Start" % version)
     say("========================================")
     say()
+    if REBUILD.exists():
+        say("Rebuilding the Python environment, as asked in Settings...")
+        for _ in range(20):            # Windows: the old interpreter may still be closing
+            shutil.rmtree(VENV, ignore_errors=True)
+            if not VENV.exists():
+                break
+            time.sleep(0.5)
+        REBUILD.unlink(missing_ok=True)
     if not healthy() and not create():
         return 1
     try:
@@ -117,7 +128,9 @@ def main():
         return 1
     say("[3/3] Starting Sourcerer...")
     say()
-    env = dict(os.environ, PYTHONNOUSERSITE="1")
+    # The updater waits for this process too: on Windows it stays, inside
+    # Sourcerer_files, for as long as Sourcerer runs.
+    env = dict(os.environ, PYTHONNOUSERSITE="1", SOURCERER_LAUNCHER_PID=str(os.getpid()))
     args = [str(venv_python()), str(HERE / "app.py")] + sys.argv[1:]
     if os.name == "nt":
         return subprocess.call(args, env=env)

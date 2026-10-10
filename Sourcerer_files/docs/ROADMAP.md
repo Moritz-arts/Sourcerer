@@ -56,23 +56,48 @@ add the one that replaced it.
 - 2026-10-10 — The program is built like TrackImage: Flask on 127.0.0.1, a
   pywebview window (the browser when that cannot open), vanilla JS, SQLite in
   `Userdata/`. — Same stack, same habits, one person maintaining both.
-- 2026-10-10 — Downloads go to `<library>/<artist>/<date>_<site>_<id>.<ext>`;
+- ~~2026-10-10 — Downloads go to `<library>/<artist>/<date>_<site>_<id>.<ext>`;
   a file is new when its remote key was never seen for the artist, and kept
   unless the same bytes are already there. — Sorted by date in any file
   manager; deleted files are not brought back; near-duplicates are left to
-  TrackImage, which already finds them.
+  TrackImage, which already finds them.~~ Replaced the same day.
+- 2026-10-10 — Files keep the name they have on the site (Bluesky has none:
+  the blob's id stands in); Settings can put the date in front. A file is new
+  when its remote key was never seen for the artist. — The user asked for the
+  original names; the date stays one click away.
 - 2026-10-10 — The window follows the original design mockups (kept in
   `.claude/design/`): card grid with avatar, folder, four thumbnails, badges
   and progress; card dialog with source list, master source, folder layout and
-  duplicate choice; activity bar with queue. German interface. — The user's
-  design, agreed before any code.
+  duplicate choice; activity bar with queue. — The user's design, agreed
+  before any code.
+- 2026-10-10 — Everything is English, the interface included. — The user's
+  call; replaces the German interface of the mockups.
+- 2026-10-10 — A card may have its own folder; empty means
+  `<library>/<name>`. Renaming a card or choosing another folder moves the
+  folder along when a rename can (same drive). — One artist never ends up in
+  two folders; copying a whole collection inside a click is not on.
+- 2026-10-10 — Updates and repair inside the program, like TrackImage:
+  Sourcerer.zip of the chosen channel is checked and unpacked into
+  `Userdata/_update/`, then a helper in the system temp folder, run by the
+  system's Python, swaps `Sourcerer_files/`, carries `Userdata/` and `venv/`
+  across, restores the old version on any failure and restarts. Repair
+  reinstalls the installed version from its tag. — Same rules as TrackImage's
+  updater, one implementation in Python for all three systems.
+- 2026-10-10 — Sites are treated gently: official public APIs, an honest
+  User-Agent, at most 2 requests per site at once with a pause between them,
+  Retry-After honoured, automatic syncs jittered. — Speed is not worth a
+  block; parallel downloads across sites and kept-alive connections make it
+  fast enough.
 - 2026-10-10 — The same picture from two sources is recognised by a
   difference hash (Pillow), and each artist chooses: keep all, best quality, or
   master source. Folder layout per artist: all together or per source. — What
   the card dialog mockup asks for; byte comparison alone misses every
   recompressed copy.
-- 2026-10-10 — HTTP with the standard library, no requests. — Two calls do not
-  justify a dependency on three systems.
+- ~~2026-10-10 — HTTP with the standard library, no requests. — Two calls do not
+  justify a dependency on three systems.~~ Replaced the same day.
+- 2026-10-10 — HTTP with `requests`: one session per thread, connections kept
+  alive. — Parallel downloads and reused connections are what made syncing
+  fast; the standard library opened a new TLS connection per file.
 - 2026-10-10 — Every new version also replaces Sourcerer.zip on the prerelease
   `beta`. — A clean download of the newest build without publishing a release
   by hand; Stable stays what was published deliberately.
@@ -89,17 +114,28 @@ add the one that replaced it.
       sync queue with progress and cancel, activity bar with log
 - [x] Same picture across sources: keep all / best quality / master source;
       folder layout together / per source
+- [x] English interface, logo and favicon; "+" tile; card size slider
+      (Ctrl + wheel); keyboard and mouse like TrackImage; right-click menu
+- [x] Card dialog: links normalised (`/media`, posts → profile), live dot per
+      link, name and profile picture from the links, own folder per card,
+      "Create" / "Create & sync"
+- [x] Original file names; parallel downloads; per-site limits
+- [x] Settings like TrackImage: library, file names, automatic sync,
+      parallel downloads, network limits, theme, card size, shortcuts,
+      updates (Stable / Beta), repair, about
+- [x] Updater and repair (reinstall, rebuild environment, redraw thumbnails,
+      re-check links, restart)
+- [x] Activity bar with progress, speed and queue; log with icons and a
+      "Problems" filter
 
 ## Next
 
-- [ ] Updater in the program, with a switch between two channels:
-      **Stable** — the newest GitHub release (its Sourcerer.zip);
-      **Beta** — the newest build of `main` (Sourcerer.zip on the `beta`
-      prerelease). Same rules as TrackImage's updater: verify the
-      archive, carry `Userdata/` and `venv/` across, keep the folder's name.
+- [ ] Sites that need a login: XenForo, X, Patreon, Pixiv, DeviantArt. A
+      login window in Sourcerer stores the session's cookies in `Userdata/`
+      (never logged, never committed); per source the dialog shows "account
+      ok" / "login needed", the toolbar which sites are logged in. Gentler
+      defaults there: one request at a time, longer pauses -- an account can
+      be locked.
+- [ ] Updater, first real run on Windows and macOS (simulated on Linux:
+      swap, rollback, restart)
 - [ ] Where Sourcerer hands files to TrackImage, and how duplicates are matched
-- [ ] Next sources: DeviantArt, Pixiv, X, Patreon, XenForo (most need a login
-      or cookies -- stored in `Userdata/`, never logged). The mockups already
-      show where: "Konto ok" / "Login nötig" per source in the card dialog, the
-      login state ("forum.example eingeloggt") in the toolbar.
-- [ ] Scheduled sync (every N hours while the window is open)

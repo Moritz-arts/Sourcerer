@@ -2,7 +2,8 @@
 
 Artists wait in a queue and are synced one at a time in a background thread;
 the window polls status(). Each sync first asks every source what is new,
-then downloads it -- so the card can say "87 / 240".
+then downloads it -- several files at once, within each site's limits (net.py)
+-- so the card can say "87 / 240" and the activity bar a speed.
 
 A file is new when its remote key was never seen for the artist: a file the
 user deleted from the library is not fetched again. What happens to the same
@@ -18,11 +19,15 @@ two versions the artist meant to post.
 """
 import collections
 import datetime
+import io
 import logging
 import os
 import pathlib
+import random
 import re
 import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 
 from . import config, db, imaging, net, sources
 
@@ -31,14 +36,17 @@ log = logging.getLogger(__name__)
 # The first sync of a source walks its whole history, page by page. A ceiling,
 # so an account with years of posts cannot keep a sync running for a day.
 MAX_PAGES = int(os.environ.get("SOURCERER_MAX_PAGES", "500"))
+AVATAR_DAYS = 7              # how often a profile picture is looked for again
 
 _lock = threading.Lock()
-_queue = []                    # artist ids waiting
-_current = None                # what the running sync is doing, for the window
+_save = threading.Lock()     # deciding and saving happen one file at a time
+_queue = []                  # artist ids waiting
+_current = None              # what the running sync is doing, for the window
 _worker = None
 _cancel = threading.Event()
-_state = {"message": "Bereit", "finished": None}
-_log = collections.deque(maxlen=400)
+_state = {"finished": None}
+_log = collections.deque(maxlen=300)
+_speed = collections.deque()  # (time, bytes) of the last seconds
 
 
 def _now():
@@ -47,37 +55,77 @@ def _now():
 
 def status():
     with _lock:
-        return {"running": _worker is not None, "current": dict(_current) if _current else None,
-                "queue": list(_queue), "message": _state["message"],
+        cur = dict(_current) if _current else None
+        if cur:
+            cur["speed"] = _rate()
+        return {"running": _worker is not None, "current": cur, "queue": list(_queue),
                 "finished": _state["finished"], "log": list(_log)}
 
 
-def _note(message, level=logging.INFO):
-    log.log(level, message)
+def event(kind, text, artist=None, **counts):
+    """One line of the activity log, with what the window needs to draw it."""
+    level = {"error": logging.ERROR, "warn": logging.WARNING}.get(kind, logging.INFO)
+    log.log(level, "%s%s", (artist["name"] + ": ") if artist else "", text)
     with _lock:
-        _state["message"] = message
-        _log.append("%s  %s" % (datetime.datetime.now().strftime("%H:%M:%S"), message))
+        _log.append(dict(counts, kind=kind, text=text, time=_now(),
+                         artist=artist["name"] if artist else "",
+                         artist_id=artist["id"] if artist else None))
 
+
+def _count_bytes(n):
+    with _lock:
+        _speed.append((time.monotonic(), n))
+
+
+def _rate():
+    """Bytes per second over the last five seconds. Called under _lock."""
+    cut = time.monotonic() - 5
+    while _speed and _speed[0][0] < cut:
+        _speed.popleft()
+    return int(sum(n for _, n in _speed) / 5)
+
+
+# ---- where files go -----------------------------------------------------------
 
 def library():
     return db.get_setting("library") or str(config.DEFAULT_LIBRARY)
 
 
 def safe_name(name):
-    """A folder name every system accepts: no reserved characters, no trailing dot."""
+    """A file or folder name every system accepts: no reserved characters, no trailing dot."""
     name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", name).strip().rstrip(".")
-    if name.upper() in {"CON", "PRN", "AUX", "NUL"} or re.fullmatch(r"(?i)(COM|LPT)\d", name):
+    if re.fullmatch(r"(?i)(CON|PRN|AUX|NUL|COM\d|LPT\d)(\..*)?", name):
         name = "_" + name
     return name[:120] or "Unnamed"
 
 
-def artist_folder(name):
-    return pathlib.Path(library()) / safe_name(name)
+def artist_folder(artist):
+    """The card's own folder if one was chosen, else <library>/<name>."""
+    if artist["folder"]:
+        return pathlib.Path(artist["folder"])
+    return pathlib.Path(library()) / safe_name(artist["name"])
 
 
 def target_folder(artist, label):
-    base = artist_folder(artist["name"])
+    base = artist_folder(artist)
     return base / safe_name(label) if artist["layout"] == "per_source" else base
+
+
+def _final_path(folder, media, ext, server_name, posted):
+    """The file's own name where the site has one; <date>_ in front if Settings say so."""
+    name = safe_name(server_name or media.filename or media.name)
+    stem, own = os.path.splitext(name)
+    # Keep an extension the name already has; add the one the content says.
+    if not own or len(own) > 6 or not re.fullmatch(r"\.[A-Za-z0-9]+", own):
+        stem, own = name, ext
+    if db.get_setting("filenames") == "dated" and posted:
+        stem = "%s_%s" % (posted[:10], stem)
+    path = folder / (stem + own)
+    n = 2
+    while path.exists():
+        path = folder / ("%s_%d%s" % (stem, n, own))
+        n += 1
+    return path
 
 
 # ---- queue ------------------------------------------------------------------
@@ -127,10 +175,98 @@ def _work():
             _sync_artist(artist_id)
         except Exception as e:                       # never leave a card stuck as running
             log.exception("sync failed")
-            _note("Sync fehlgeschlagen: %s" % e, logging.ERROR)
+            event("error", "Sync failed: %s" % net.reason(e))
         finally:
             with _lock:
                 _current = None
+
+
+def scheduler():
+    """Automatic sync: every card, every few hours, while Sourcerer runs."""
+    def run():
+        while True:
+            time.sleep(60)
+            try:
+                if db.get_setting("auto_sync") != "1":
+                    continue
+                hours = db.setting_int("auto_hours", 1, 168)
+                last = db.get_setting("last_auto") or ""
+                due = not last or (datetime.datetime.now(datetime.timezone.utc) -
+                                   datetime.datetime.fromisoformat(last)).total_seconds() >= hours * 3600
+                if due:
+                    db.set_setting("last_auto", datetime.datetime.now(datetime.timezone.utc).isoformat())
+                    # A few minutes either way, so syncs do not land on the same
+                    # second every day -- a regular robot is easier to spot.
+                    time.sleep(random.randint(0, 180))
+                    if enqueue():
+                        event("info", "Automatic sync started")
+            except Exception:
+                log.exception("scheduler")
+    threading.Thread(target=run, daemon=True, name="scheduler").start()
+
+
+# ---- profile pictures and names ---------------------------------------------------
+
+def _ordered_sources(con, artist):
+    """The card's sources, the master first: its picture and name are the ones meant."""
+    return con.execute("SELECT * FROM sources WHERE artist_id = ? ORDER BY (id = ?) DESC, id",
+                       (artist["id"], artist["master_source_id"] or 0)).fetchall()
+
+
+def _save_avatar(artist_id, url):
+    name = "%d.jpg" % artist_id
+    imaging.avatar(io.BytesIO(net.fetch_bytes(url)), config.AVATARS / name)
+    with db.connect() as con:
+        con.execute("UPDATE artists SET avatar = ?, avatar_checked = ? WHERE id = ?",
+                    (name, _now(), artist_id))
+
+
+def check_card(artist_id):
+    """Ask every source who the account is: the dots on the card, and the profile picture."""
+    with db.connect() as con:
+        artist = con.execute("SELECT * FROM artists WHERE id = ?", (artist_id,)).fetchone()
+        rows = _ordered_sources(con, artist) if artist else []
+    avatar = ""
+    for row in rows:
+        if not sources.site_for(row["url"]):
+            continue
+        error = None
+        try:
+            avatar = avatar or (sources.profile(row["url"]) or {}).get("avatar") or ""
+        except Exception as e:
+            error = net.reason(e)
+        with db.connect() as con:
+            con.execute("UPDATE sources SET last_checked = datetime('now'), last_error = ? "
+                        "WHERE id = ?", (error, row["id"]))
+    try:
+        if avatar:
+            _save_avatar(artist_id, avatar)
+    except Exception as e:
+        log.info("no profile picture for card %d: %s", artist_id, e)
+
+
+def refresh_avatar(artist_id, force=False):
+    """The profile picture again, at most every AVATAR_DAYS days -- artists change theirs."""
+    with db.connect() as con:
+        artist = con.execute("SELECT * FROM artists WHERE id = ?", (artist_id,)).fetchone()
+        rows = _ordered_sources(con, artist) if artist else []
+    if not artist:
+        return
+    if not force and artist["avatar_checked"]:
+        age = datetime.datetime.now(datetime.timezone.utc) - datetime.datetime.fromisoformat(
+            artist["avatar_checked"]).replace(tzinfo=datetime.timezone.utc)
+        if age.days < AVATAR_DAYS:
+            return
+    for row in rows:
+        try:
+            info = sources.profile(row["url"])
+            if info and info.get("avatar"):
+                _save_avatar(artist_id, info["avatar"])
+                return
+        except Exception as e:
+            log.info("no profile picture from %s: %s", row["url"], net.reason(e))
+    with db.connect() as con:
+        con.execute("UPDATE artists SET avatar_checked = ? WHERE id = ?", (_now(), artist_id))
 
 
 # ---- one artist ---------------------------------------------------------------
@@ -154,7 +290,9 @@ def _sync_artist(artist_id):
            "failed": 0, "file": "", "size": 0, "found": 0}
     with _lock:
         _current = cur
-    _note("%s: Quellen werden geprüft" % artist["name"])
+        _speed.clear()
+    event("start", "Checking %d %s" % (len(srcs), "source" if len(srcs) == 1 else "sources"), artist)
+    refresh_avatar(artist_id)
 
     todo, walked = [], {}
     for src in srcs:
@@ -166,8 +304,8 @@ def _sync_artist(artist_id):
             fresh, walked[src["id"]] = _scan(src, site, known, cur)
             todo += [(src, site, m) for m in fresh]
         except Exception as e:
-            error = str(e) or e.__class__.__name__
-            _note("%s: %s nicht erreichbar: %s" % (artist["name"], site.LABEL, error), logging.WARNING)
+            error = net.reason(e)
+            event("warn", "%s could not be reached: %s" % (site.LABEL, error), artist)
         with db.connect() as con:
             con.execute("UPDATE sources SET last_checked = datetime('now'), last_error = ? "
                         "WHERE id = ?", (error, src["id"]))
@@ -175,13 +313,19 @@ def _sync_artist(artist_id):
     with _lock:
         cur.update(phase="download", total=len(todo))
     failed_sources = set()
-    for src, site, media in todo:
+    net.configure(per_host=db.setting_int("per_host", 1, 8), pace_ms=db.setting_int("pace_ms", 0, 5000))
+
+    def one(job):
+        src, site, media = job
         if _cancel.is_set():
-            break
+            return
         if not _fetch(artist, src, site, media, cur):
             failed_sources.add(src["id"])
         with _lock:
             cur["done"] += 1
+
+    with ThreadPoolExecutor(max_workers=db.setting_int("parallel", 1, 16)) as pool:
+        list(pool.map(one, todo))
 
     cancelled = _cancel.is_set()
     with db.connect() as con:
@@ -193,9 +337,9 @@ def _sync_artist(artist_id):
         con.execute("UPDATE artists SET last_sync = ?, last_new = ?, last_failed = ?, "
                     "last_activity = CASE WHEN ? THEN ? ELSE last_activity END WHERE id = ?",
                     (_now(), cur["new"], cur["failed"], cur["new"] > 0, _now(), artist_id))
-    _note("%s: %s%d neu, %d Duplikate übersprungen, %d fehlgeschlagen." % (
-        artist["name"], "abgebrochen -- " if cancelled else "", cur["new"],
-        cur["duplicates"], cur["failed"]))
+    event("cancelled" if cancelled else ("done" if not cur["failed"] else "warn"),
+           "Cancelled" if cancelled else "Finished", artist,
+           new=cur["new"], duplicates=cur["duplicates"], failed=cur["failed"])
 
 
 def _scan(src, site, known, cur):
@@ -212,7 +356,7 @@ def _scan(src, site, known, cur):
         if src["complete"] and len(new) < len(page):
             return fresh, True
         if number >= MAX_PAGES:
-            _note("%s: nach %d Seiten angehalten, der nächste Sync macht weiter." % (
+            event("info", "%s: stopped after %d pages; the next sync carries on." % (
                 site.LABEL, number))
             return fresh, False
         if _cancel.is_set():
@@ -223,35 +367,36 @@ def _scan(src, site, known, cur):
 def _fetch(artist, src, site, media, cur):
     folder = target_folder(artist, site.LABEL)
     try:
-        part, sha, ext = net.download(media.url, folder, media.mime)
+        part, sha, ext, server_name = net.download(media.url, folder, media.mime, _count_bytes)
     except Exception as e:
-        _note("Download fehlgeschlagen: %s (%s)" % (media.post_url or media.url, e), logging.WARNING)
+        event("warn", "Download failed: %s (%s)" % (media.post_url or media.url, net.reason(e)), artist)
         with _lock:
             cur["failed"] += 1
         return False
     size = part.stat().st_size
     phash, width, height = imaging.info(part)
-    path = _final_path(folder, media, ext)
-    with _lock:
-        cur.update(file=path.name, size=size)
-    keep, replaces = _decide(artist, src, sha, phash, width, height, size)
-    with db.connect() as con:
-        if keep:
-            os.replace(part, path)
-            for old in replaces:
-                _remove(old["path"])
-                con.execute("UPDATE files SET path = NULL WHERE id = ?", (old["id"],))
-            with _lock:
-                cur["new"] += 1
-        else:
-            part.unlink(missing_ok=True)
-            with _lock:
-                cur["duplicates"] += 1
-        con.execute("INSERT OR IGNORE INTO files (artist_id, source_id, remote_key, sha256, path, "
-                    "post_url, posted, phash, width, height, size) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (artist["id"], src["id"], media.remote_key, sha, str(path) if keep else None,
-                     media.post_url, media.posted, phash, width, height, size))
+    with _save:
+        path = _final_path(folder, media, ext, server_name, media.posted)
+        with _lock:
+            cur.update(file=path.name, size=size)
+        keep, replaces = _decide(artist, src, sha, phash, width, height, size)
+        with db.connect() as con:
+            if keep:
+                os.replace(part, path)
+                for old in replaces:
+                    _remove(old["path"])
+                    con.execute("UPDATE files SET path = NULL WHERE id = ?", (old["id"],))
+                with _lock:
+                    cur["new"] += 1
+            else:
+                part.unlink(missing_ok=True)
+                with _lock:
+                    cur["duplicates"] += 1
+            con.execute("INSERT OR IGNORE INTO files (artist_id, source_id, remote_key, sha256, path, "
+                        "post_url, posted, phash, width, height, size) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (artist["id"], src["id"], media.remote_key, sha, str(path) if keep else None,
+                         media.post_url, media.posted, phash, width, height, size))
     return True
 
 
@@ -291,16 +436,3 @@ def _remove(path):
         os.remove(path)
     except OSError as e:
         log.warning("could not remove %s: %s", path, e)
-
-
-def _final_path(folder, media, ext):
-    """<date>_<site>_<id><ext>: sorts by date in any file manager."""
-    site = media.remote_key.split(":", 1)[0]
-    stem = "%s_%s_%s" % ((media.posted or "")[:10] or "undated", site,
-                         re.sub(r"[^A-Za-z0-9_-]", "", media.name)[-24:])
-    path = folder / (stem + ext)
-    n = 2
-    while path.exists():
-        path = folder / ("%s_%d%s" % (stem, n, ext))
-        n += 1
-    return path
