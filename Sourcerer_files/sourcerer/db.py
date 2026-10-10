@@ -48,6 +48,28 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 """
 
+# Columns added after the first version. A database made before them gets them
+# at start, so nothing a user already has needs to be thrown away.
+COLUMNS = {
+    "artists": {
+        # 'together': <artist>/ -- 'per_source': <artist>/<site>/
+        "layout": "TEXT NOT NULL DEFAULT 'together'",
+        # 'keep_all', 'best' (highest resolution wins) or 'master' (that source wins)
+        "dedupe": "TEXT NOT NULL DEFAULT 'best'",
+        "master_source_id": "INTEGER",
+        "last_sync": "TEXT",
+        "last_activity": "TEXT",          # last time something new arrived
+        "last_new": "INTEGER NOT NULL DEFAULT 0",
+        "last_failed": "INTEGER NOT NULL DEFAULT 0",
+    },
+    "files": {
+        "phash": "TEXT",                  # imaging fingerprint; NULL for video
+        "width": "INTEGER",
+        "height": "INTEGER",
+        "size": "INTEGER",
+    },
+}
+
 
 def connect():
     con = sqlite3.connect(config.DB_PATH, timeout=30)
@@ -61,6 +83,11 @@ def init():
     with connect() as con:
         con.execute("PRAGMA journal_mode = WAL")
         con.executescript(SCHEMA)
+        for table, columns in COLUMNS.items():
+            have = {row[1] for row in con.execute("PRAGMA table_info(%s)" % table)}
+            for name, decl in columns.items():
+                if name not in have:
+                    con.execute("ALTER TABLE %s ADD COLUMN %s %s" % (table, name, decl))
 
 
 def get_setting(key, default=None):

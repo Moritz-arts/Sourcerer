@@ -19,14 +19,16 @@ Sourcerer/                        <- what Sourcerer.zip unpacks to; move it free
     │   ├─ config.py              paths, version, user agent
     │   ├─ db.py                  SQLite: artists, sources, files, settings
     │   ├─ net.py                 HTTP (standard library): JSON, downloads
+    │   ├─ imaging.py             picture fingerprints, sizes, thumbnails (Pillow)
     │   ├─ sources/               one module per site
     │   │   ├─ __init__.py        Media, site_for(url), kind_of(url)
     │   │   ├─ mastodon.py        Mastodon / fediverse, public API
     │   │   └─ bluesky.py         Bluesky, public API, original blobs
-    │   ├─ sync.py                background sync, dedupe, file naming
+    │   ├─ sync.py                sync queue, scan then download, dedupe, folders
     │   ├─ server.py              Flask: /api/* and the page
     │   └─ desktop.py             main(): server thread, window or browser
-    ├─ static/                    the page: index.html, app.css, app.js
+    ├─ static/                    the page: index.html, app.css, app.js,
+    │                               icons-LICENSE.txt (inline icons after Tabler)
     ├─ docs/
     │   ├─ CHANGELOG.md           written by the workflow, never by hand
     │   ├─ FOLDER_MAP.md          this file
@@ -38,7 +40,9 @@ Sourcerer/                        <- what Sourcerer.zip unpacks to; move it free
     └─ Userdata/                  NOT shipped -- created on first start
         ├─ sourcerer.db           artists, sources, every file seen, settings
         ├─ Logs/sourcerer.log
-        └─ Library/               downloads, one folder per artist -- until
+        ├─ Thumbs/                card thumbnails, rebuilt when missing
+        └─ Library/               downloads, one folder per artist (and one per
+                                    site inside it, if the card says so) -- until
                                     another library folder is chosen in Settings
 ```
 
@@ -46,6 +50,7 @@ Only in the repository, never in the ZIP (`export-ignore` in `.gitattributes`):
 
 ```
 ├─ .claude/CLAUDE.md              rules and traps for whoever works on it
+├─ .claude/design/                the original design mockups the window follows
 ├─ .github/
 │   ├─ workflows/version-bump.yml raises the version on every push to main,
 │   │                               and puts that build on the `beta` prerelease

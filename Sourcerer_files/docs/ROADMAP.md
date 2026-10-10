@@ -61,6 +61,16 @@ add the one that replaced it.
   unless the same bytes are already there. — Sorted by date in any file
   manager; deleted files are not brought back; near-duplicates are left to
   TrackImage, which already finds them.
+- 2026-10-10 — The window follows the original design mockups (kept in
+  `.claude/design/`): card grid with avatar, folder, four thumbnails, badges
+  and progress; card dialog with source list, master source, folder layout and
+  duplicate choice; activity bar with queue. German interface. — The user's
+  design, agreed before any code.
+- 2026-10-10 — The same picture from two sources is recognised by a
+  difference hash (Pillow), and each artist chooses: keep all, best quality, or
+  master source. Folder layout per artist: all together or per source. — What
+  the card dialog mockup asks for; byte comparison alone misses every
+  recompressed copy.
 - 2026-10-10 — HTTP with the standard library, no requests. — Two calls do not
   justify a dependency on three systems.
 - 2026-10-10 — Every new version also replaces Sourcerer.zip on the prerelease
@@ -75,6 +85,10 @@ add the one that replaced it.
 - [x] Program skeleton: window, artist cards (name, notes, source links),
       settings (library folder), background sync with status and log
 - [x] First sources: Mastodon and Bluesky
+- [x] Design from the mockups: card grid, search and sort, card dialog,
+      sync queue with progress and cancel, activity bar with log
+- [x] Same picture across sources: keep all / best quality / master source;
+      folder layout together / per source
 
 ## Next
 
@@ -85,5 +99,7 @@ add the one that replaced it.
       archive, carry `Userdata/` and `venv/` across, keep the folder's name.
 - [ ] Where Sourcerer hands files to TrackImage, and how duplicates are matched
 - [ ] Next sources: DeviantArt, Pixiv, X, Patreon, XenForo (most need a login
-      or cookies -- stored in `Userdata/`, never logged)
+      or cookies -- stored in `Userdata/`, never logged). The mockups already
+      show where: "Konto ok" / "Login nötig" per source in the card dialog, the
+      login state ("forum.example eingeloggt") in the toolbar.
 - [ ] Scheduled sync (every N hours while the window is open)
