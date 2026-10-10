@@ -40,8 +40,9 @@ goto :fail
 :run
 call %PY% "%SDIR%\launch.py" %*
 set "RC=%errorlevel%"
-:: A double-clicked window closes the moment the program ends; stay open so
-:: what it said can be read.
+:: Closed normally, the console goes with the window. After an error a
+:: double-clicked console would vanish with the message, so it stays open.
+if "%RC%"=="0" exit /b 0
 echo.
 pause
 exit /b %RC%

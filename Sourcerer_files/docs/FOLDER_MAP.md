@@ -12,10 +12,21 @@ Sourcerer/                        <- what Sourcerer.zip unpacks to; move it free
 └─ Sourcerer_files/               everything Sourcerer owns
     ├─ launch.py                  shared by all three launchers: environment,
     │                               packages, then app.py
-    ├─ app.py                     the program's entry point
+    ├─ app.py                     the program's entry point: sourcerer.desktop.main()
     ├─ VERSION                    the version -- the one place it is defined
     ├─ requirements.txt           the packages, one list for all three systems
-    ├─ sourcerer/                 planned -- the Python package
+    ├─ sourcerer/                 the Python package; layers listed in __init__.py
+    │   ├─ config.py              paths, version, user agent
+    │   ├─ db.py                  SQLite: artists, sources, files, settings
+    │   ├─ net.py                 HTTP (standard library): JSON, downloads
+    │   ├─ sources/               one module per site
+    │   │   ├─ __init__.py        Media, site_for(url), kind_of(url)
+    │   │   ├─ mastodon.py        Mastodon / fediverse, public API
+    │   │   └─ bluesky.py         Bluesky, public API, original blobs
+    │   ├─ sync.py                background sync, dedupe, file naming
+    │   ├─ server.py              Flask: /api/* and the page
+    │   └─ desktop.py             main(): server thread, window or browser
+    ├─ static/                    the page: index.html, app.css, app.js
     ├─ docs/
     │   ├─ CHANGELOG.md           written by the workflow, never by hand
     │   ├─ FOLDER_MAP.md          this file
@@ -24,8 +35,11 @@ Sourcerer/                        <- what Sourcerer.zip unpacks to; move it free
     ├─ venv/                      NOT shipped -- launch.py builds it on first start
     │   ├─ windows/ linux/ macos/   one environment per system that started it
     │   └─ pip-cache/               pip's downloads, kept out of the user's home
-    └─ Userdata/                  NOT shipped, planned -- settings, logins,
-                                    tokens, cookies, logs, backups
+    └─ Userdata/                  NOT shipped -- created on first start
+        ├─ sourcerer.db           artists, sources, every file seen, settings
+        ├─ Logs/sourcerer.log
+        └─ Library/               downloads, one folder per artist -- until
+                                    another library folder is chosen in Settings
 ```
 
 Only in the repository, never in the ZIP (`export-ignore` in `.gitattributes`):
