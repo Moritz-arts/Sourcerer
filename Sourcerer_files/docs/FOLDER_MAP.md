@@ -16,18 +16,21 @@ Sourcerer/                        <- what Sourcerer.zip unpacks to; move it free
     ├─ VERSION                    the version -- the one place it is defined
     ├─ requirements.txt           the packages, one list for all three systems
     ├─ sourcerer/                 the Python package; layers listed in __init__.py
-    │   ├─ config.py              paths, version, user agent
+    │   ├─ config.py              paths, version, user agent, setting defaults
     │   ├─ db.py                  SQLite: artists, sources, files, settings
-    │   ├─ net.py                 HTTP (standard library): JSON, downloads
-    │   ├─ imaging.py             picture fingerprints, sizes, thumbnails (Pillow)
+    │   ├─ net.py                 HTTP (requests): JSON, downloads, per-site limits
+    │   ├─ imaging.py             fingerprints, sizes, thumbnails, avatars (Pillow)
     │   ├─ sources/               one module per site
-    │   │   ├─ __init__.py        Media, site_for(url), kind_of(url)
+    │   │   ├─ __init__.py        Media, site_for, normalize, describe, profile
     │   │   ├─ mastodon.py        Mastodon / fediverse, public API
     │   │   └─ bluesky.py         Bluesky, public API, original blobs
-    │   ├─ sync.py                sync queue, scan then download, dedupe, folders
+    │   ├─ sync.py                sync queue, scan then download, dedupe, folders,
+    │   │                           automatic sync, link checks, profile pictures
+    │   ├─ updater.py             updates and repair: Sourcerer.zip, the helper
     │   ├─ server.py              Flask: /api/* and the page
     │   └─ desktop.py             main(): server thread, window or browser
     ├─ static/                    the page: index.html, app.css, app.js,
+    │                               logo.svg (also the favicon),
     │                               icons-LICENSE.txt (inline icons after Tabler)
     ├─ docs/
     │   ├─ CHANGELOG.md           written by the workflow, never by hand
@@ -39,8 +42,13 @@ Sourcerer/                        <- what Sourcerer.zip unpacks to; move it free
     │   └─ pip-cache/               pip's downloads, kept out of the user's home
     └─ Userdata/                  NOT shipped -- created on first start
         ├─ sourcerer.db           artists, sources, every file seen, settings
-        ├─ Logs/sourcerer.log
+        ├─ Logs/                  sourcerer.log; update.log (the update helper's
+        │                           steps); console.log (a restart's output, Linux)
         ├─ Thumbs/                card thumbnails, rebuilt when missing
+        ├─ Avatars/               profile pictures, <card id>.jpg
+        ├─ _update/               an update being unpacked; gone after the swap
+        ├─ rebuild-venv           left by Settings › Repair; launch.py rebuilds
+        │                           the environment and removes it
         └─ Library/               downloads, one folder per artist (and one per
                                     site inside it, if the card says so) -- until
                                     another library folder is chosen in Settings

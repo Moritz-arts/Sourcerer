@@ -8,17 +8,20 @@ what people download and unpack is these folders, unchanged.
 
 **Status: early development.** What exists: the three launchers with
 `launch.py` behind them; the program — a window with artist cards, a card
-dialog (sources, master source, folder layout, what to do with the same
-picture from two sources) and a queued background sync that downloads from
-Mastodon and Bluesky; and the workshop — these notes, the docs and the
-automation that versions every push. `Sourcerer_files/sourcerer/__init__.py`
+dialog (sources with a live dot each, own folder, master source, folder
+layout, what to do with the same picture from two sources), a queued
+background sync that downloads from Mastodon and Bluesky, settings like
+TrackImage's, and an updater with Stable/Beta and repair; and the workshop —
+these notes, the docs and the automation that versions every push. `Sourcerer_files/sourcerer/__init__.py`
 lists the program's layers.
 
 **The design is fixed by two mockups in `.claude/design/`** — the main window
 and the artist card dialog. The page in `Sourcerer_files/static/` follows them:
-their colours, sizes, wording and layout. Change the look there only with the
-user, and keep the mockups as the reference. The interface speaks German, as
-the mockups do; code, comments and file names stay English.
+their colours, sizes and layout. Change the look there only with the user, and
+keep the mockups as the reference. **Everything is English** — the interface
+too (the user's decision; the mockups' German wording is superseded), as are
+code, comments and file names. The logo is `static/logo.svg`, also the
+favicon.
 
 ## Where the knowledge lives
 
@@ -125,7 +128,7 @@ Do not create releases or tags yourself, and do not push to `main`.
   contents to a log, never put a credential into a commit message, an issue or
   a test fixture.
 
-### Inherited from TrackImage — they apply here as soon as the updater exists
+### Inherited from TrackImage — they apply to the updater (`updater.py`)
 
 - **A tag must sit on a commit that contains the version it names.** The
   workflow tags its own bump commit for this reason; never tag by hand.
@@ -235,12 +238,43 @@ Do not create releases or tags yourself, and do not push to `main`.
   Replacing deletes only a file Sourcerer itself saved.
 - **Folder layout per artist:** `together` → `<library>/<artist>/`,
   `per_source` → `<library>/<artist>/<site>/`. A change applies to new files.
-- **A sync scans first, then downloads**, so the card can show "lade 87 / 240".
+- **A sync scans first, then downloads**, so the card can show "downloading 87 / 240".
   Artists wait in a queue; cancelling stops after the current file. A source is
   marked complete only after a sync went all the way without a failure.
 - **No CDN, ever.** The icons are inline SVG drawn after Tabler Icons (MIT,
   `static/icons-LICENSE.txt`); fonts are the system's.
 - **The server listens on 127.0.0.1 only.** Nothing here is for other machines.
+- **Be gentle with sites; it is what keeps users unblocked.** Every request
+  goes through `net.py`: an honest User-Agent, at most `per_host` requests per
+  site at once, `pace_ms` between them, Retry-After honoured. Never pretend to
+  be a browser on a public API, never bypass `_Polite`, and give a login site
+  gentler defaults than a public API -- there an account can be locked.
+- **A pasted link is normalised before it is stored.** `sources.normalize`
+  turns any page of a profile (`/media`, a post) into the profile; dedupe
+  happens after that. `remote_key` is untouched by it.
+- **File names are the site's own** (`Media.filename`, else the server's
+  Content-Disposition); Settings may put the date in front. Collisions get
+  `_2`, `_3`.
+- **A card's folder is `artists.folder`, or `<library>/<name>` when empty.**
+  Always go through `sync.artist_folder(row)`, never build the path by hand.
+
+### Updater
+
+- **On Windows three processes hold `Sourcerer_files/`:** the app, the venv's
+  `python.exe` (a stub that runs the real interpreter as its child) and
+  `launch.py`, which waits for it. The helper waits for all three
+  (`SOURCERER_LAUNCHER_PID` passes the last one along) and then retries the
+  rename for 90 s -- a rename is the only test that counts there.
+- **The helper runs on the system's Python, never the venv's**, and from the
+  temp folder: both the venv and the program are in the folder it replaces.
+- **The archive is checked before anything moves:** no absolute or `..`
+  paths, the files in `REQUIRED` present, `VERSION` the one announced.
+  GitHub's own archives (with their `Sourcerer-<ref>/` folder) are accepted
+  for repair only.
+- **Every exit path restarts Sourcerer and writes `Userdata/Logs/update.log`**;
+  the next start reads its last line into the activity log. Simulated on
+  Linux (swap, rollback, restart); the first real run on Windows and macOS is
+  still to be watched.
 
 ## House style
 

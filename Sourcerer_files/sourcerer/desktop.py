@@ -8,13 +8,15 @@ running until it is closed.
 import argparse
 import logging
 import logging.handlers
+import os
+import shutil
 import threading
 import time
 import webbrowser
 
 from werkzeug.serving import make_server
 
-from . import config, db, server
+from . import config, db, net, server, sync
 
 log = logging.getLogger("sourcerer")
 
@@ -35,6 +37,26 @@ def _logging():
     logging.getLogger("werkzeug").setLevel(logging.WARNING)
 
 
+def _after_update():
+    """The update helper's last lines, as one line in the activity log."""
+    if not os.environ.pop("SOURCERER_AFTER_UPDATE", ""):
+        return
+    try:
+        last = (config.LOG_DIR / "update.log").read_text(encoding="utf-8").splitlines()[-1]
+    except (OSError, IndexError):
+        last = ""
+    if last.endswith("  done"):
+        sync.event("done", "Updated to v%s" % config.VERSION)
+    elif last.endswith("  restarting"):
+        sync.event("info", "Restarted")
+    elif last.endswith("  old version restored"):
+        sync.event("error", "The update failed; the previous version was put back. "
+                   "Details: Settings > Updates")
+    else:
+        sync.event("error", "The update did not go through: %s -- see Settings > Updates"
+                   % last.split("  ", 1)[-1])
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="sourcerer")
     parser.add_argument("--browser", action="store_true", help="open in the browser, not a window")
@@ -44,6 +66,10 @@ def main(argv=None):
 
     _logging()
     db.init()
+    shutil.rmtree(config.UPDATE_DIR, ignore_errors=True)    # an update that never got installed
+    _after_update()
+    net.configure(per_host=db.setting_int("per_host", 1, 8), pace_ms=db.setting_int("pace_ms", 0, 5000))
+    sync.scheduler()
     httpd = make_server("127.0.0.1", args.port, server.app, threaded=True)
     url = "http://127.0.0.1:%d/" % httpd.server_port
     threading.Thread(target=httpd.serve_forever, daemon=True, name="server").start()
