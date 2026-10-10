@@ -5,6 +5,10 @@ automatically -- one line per change, newest first. A release is drafted by hand
 from the tag of whichever version is judged ready, and this is the text to paste
 into it.
 
+## v0.4 — 2026-10-10
+
+- English interface with settings, in-app updates, live link checks and faster, gentler downloads
+
 ## v0.3 — 2026-10-10
 
 - Every new version is downloadable as Sourcerer.zip from the beta prerelease
