@@ -1,0 +1,47 @@
+# A published release gets Sourcerer.zip: the program, with nothing around it.
+#
+# GitHub's own "Source code (zip)" wraps everything in a folder named after the
+# ref -- Sourcerer-main/, Sourcerer-0.4/ -- so unpacking it gives
+# Sourcerer/Sourcerer-main/ with the launchers one level further down than
+# anyone looks. Sourcerer.zip has the launchers at its top: "Extract All" on
+# Windows and a double-click on macOS both make exactly one folder, Sourcerer/,
+# with the launchers in it. GitHub's archive cannot be changed; this one is
+# what the README links to.
+#
+# Built with git archive from the release's tag, so .gitattributes applies as
+# it does to GitHub's archive: workshop files stay out, the .bat stays CRLF,
+# the shell launchers stay executable. Run it by hand (Actions > Attach
+# Sourcerer.zip > Run workflow) to rebuild the file for an existing release.
+name: Attach Sourcerer.zip
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag of the release to (re)build Sourcerer.zip for, e.g. v0.4
+        required: true
+
+jobs:
+  zip:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      # Through the environment, never interpolated into the script.
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build Sourcerer.zip and attach it to the release
+        run: |
+          git archive --format=zip -o Sourcerer.zip "$TAG"
+          unzip -l Sourcerer.zip
+          # The launchers must sit at the top -- that is the whole point.
+          unzip -l Sourcerer.zip | grep -q ' start-windows\.bat$'
+          gh release upload "$TAG" Sourcerer.zip --clobber

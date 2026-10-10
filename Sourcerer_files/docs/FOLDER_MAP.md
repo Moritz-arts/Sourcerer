@@ -4,7 +4,7 @@ Keep this file in step with the tree: a file added, moved or dropped is
 described here in the same commit. Entries marked *planned* do not exist yet.
 
 ```
-Sourcerer-<version>/              <- what the ZIP unpacks to; rename it freely
+Sourcerer/                        <- what Sourcerer.zip unpacks to; move it freely
 ├─ start-windows.bat              the launchers: find a Python 3.10+, hand over
 ├─ start-linux.sh                   to launch.py -- the only things a user starts
 ├─ start-macos.command
@@ -34,6 +34,7 @@ Only in the repository, never in the ZIP (`export-ignore` in `.gitattributes`):
 ├─ .claude/CLAUDE.md              rules and traps for whoever works on it
 ├─ .github/
 │   ├─ workflows/version-bump.yml raises the version on every push to main
+│   ├─ workflows/release-zip.yml  attaches Sourcerer.zip to a published release
 │   ├─ bump_version.py            rewrites the number everywhere it is written
 │   └─ changelog_entry.py         turns commit subjects into the changelog entry
 ├─ .gitattributes

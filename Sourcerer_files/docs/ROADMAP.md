@@ -49,6 +49,10 @@ add the one that replaced it.
   built by one system cannot run on another, and a broken one must heal itself.
 - 2026-10-10 — The notes for Claude live in `.claude/CLAUDE.md`, not in the
   root. — The root holds only what a user needs to start Sourcerer.
+- 2026-10-10 — Every published release gets `Sourcerer.zip`, with the
+  launchers at its top, built by a workflow. — GitHub's own archive wraps
+  everything in `Sourcerer-<ref>/`, so unpacking it gave two folder levels;
+  Sourcerer.zip unpacks to exactly one, `Sourcerer/`.
 
 ## Done
 
@@ -59,5 +63,10 @@ add the one that replaced it.
 ## Next
 
 - [ ] Program skeleton: the `sourcerer/` package, `Userdata/`, logging
+- [ ] Updater in the program, with a switch between two channels:
+      **Stable** — the newest GitHub release (its Sourcerer.zip);
+      **Beta** — the `main` branch as it stands (GitHub's archive of main, its
+      top folder stripped). Same rules as TrackImage's updater: verify the
+      archive, carry `Userdata/` and `venv/` across, keep the folder's name.
 - [ ] Where Sourcerer hands files to TrackImage, and how duplicates are matched
 - [ ] First source
