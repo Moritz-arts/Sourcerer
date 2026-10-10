@@ -8,10 +8,17 @@ A portable app for Windows, Linux and macOS that keeps per-artist media collecti
 
 ## Install
 
-1. Download **[Sourcerer.zip](https://github.com/Moritz-arts/Sourcerer/releases/latest/download/Sourcerer.zip)**
-   from the latest release and unpack it (Windows: right-click › **Extract
+1. Download **Sourcerer.zip** and unpack it (Windows: right-click › **Extract
    All**). You get one folder, `Sourcerer`, with everything in it — move it
    wherever you like.
+
+   | | |
+   |---|---|
+   | **Stable** | [Sourcerer.zip from the latest release](https://github.com/Moritz-arts/Sourcerer/releases/latest/download/Sourcerer.zip) — versions declared finished (from the first release on) |
+   | **Beta** | [Sourcerer.zip, newest build](https://github.com/Moritz-arts/Sourcerer/releases/download/beta/Sourcerer.zip) — every change, minutes after it is merged; untested |
+
+   Not the green **Code › Download ZIP** button: GitHub wraps that one in an
+   extra `Sourcerer-main` folder.
 2. Start it:
 
    | | |

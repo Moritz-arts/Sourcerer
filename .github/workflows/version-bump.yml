@@ -39,6 +39,7 @@ jobs:
           fetch-depth: 0
 
       - name: Raise the version, write the changelog, tag and push
+        id: bump
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -78,6 +79,7 @@ jobs:
             # Atomic: main and the tag land together or not at all. Pushed one
             # after the other, a failed tag push left a version nothing tags.
             if git push --atomic origin HEAD:main "v$VER"; then
+              echo "version=$VER" >> "$GITHUB_OUTPUT"
               {
                 printf '## v%s\n\n%s\n\n' "$VER" "$NOTES"
                 printf '_Draft a release from tag `v%s` and paste this._\n' "$VER"
@@ -89,3 +91,29 @@ jobs:
           done
           echo "main kept moving; the next push raises the version."
           exit 1
+
+      # The newest build as a download that unpacks to one folder. GitHub's
+      # "Code > Download ZIP" wraps everything in Sourcerer-main/ and cannot be
+      # told not to; Sourcerer.zip has the launchers at its top. One release,
+      # "beta", always holds it: its tag moves to the version just made and its
+      # Sourcerer.zip is replaced. A prerelease, so releases/latest -- the
+      # stable download -- stays whatever was published by hand.
+      - name: Publish the newest build as Sourcerer.zip (beta)
+        if: steps.bump.outputs.version
+        env:
+          VER: ${{ steps.bump.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          git archive --format=zip -o Sourcerer.zip "v$VER"
+          unzip -l Sourcerer.zip | grep -q ' start-windows\.bat$'
+          git tag -f beta "v$VER^{commit}"
+          git push -f origin refs/tags/beta
+          TITLE="Beta - newest build (v$VER)"
+          NOTES="Every change, minutes after it is merged -- untested, so bugs are part of the deal. Download Sourcerer.zip below and unpack it: you get one folder, Sourcerer. The stable download is the latest release."
+          if gh release view beta >/dev/null 2>&1; then
+            gh release edit beta --prerelease --title "$TITLE" --notes "$NOTES"
+          else
+            gh release create beta --prerelease --verify-tag --title "$TITLE" --notes "$NOTES"
+          fi
+          gh release upload beta Sourcerer.zip --clobber
