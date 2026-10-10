@@ -68,17 +68,33 @@ def create():
     return False
 
 
+def requirements():
+    """(required, optional) package specs from requirements.txt."""
+    required, optional = [], []
+    for line in REQS.read_text(encoding="utf-8").splitlines():
+        spec = line.split("#", 1)[0].strip()
+        if spec:
+            (optional if "# optional" in line else required).append(spec)
+    return required, optional
+
+
 def install():
     say("[2/3] Installing packages...")
     env = dict(os.environ, PIP_CACHE_DIR=str(PIP_CACHE),
                PIP_DISABLE_PIP_VERSION_CHECK="1", PYTHONNOUSERSITE="1")
-    rc = subprocess.call([str(venv_python()), "-m", "pip", "install", "-q",
-                          "-r", str(REQS)], env=env)
+    pip = [str(venv_python()), "-m", "pip", "install", "-q"]
+    required, optional = requirements()
     # Any non-zero code, negative ones included: a crash or Ctrl+Break must not
     # leave a stamp behind that skips the install on every start after.
-    if rc != 0:
+    if required and subprocess.call(pip + required, env=env) != 0:
         say("[ERROR] Installing packages failed, see above.")
         return False
+    # The window package needs things pip cannot always provide (a GUI toolkit
+    # on Linux, a .NET bridge on a brand-new Python); without it Sourcerer
+    # opens in the browser, which is no reason to refuse to start at all.
+    for spec in optional:
+        if subprocess.call(pip + [spec], env=env) != 0:
+            say("[note] %s did not install; Sourcerer works without it." % spec)
     STAMP.write_text(wanted(), encoding="utf-8")
     return True
 

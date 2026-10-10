@@ -1,3 +1,6 @@
 # Every package Sourcerer needs, one per line, each with what it is FOR.
 # The launchers install from this file -- the one list for all three systems --
-# and only when it changed since the last start.
+# and only when it changed since the last start. A line marked "# optional" may
+# fail to install without stopping the start: Sourcerer works without it.
+flask>=3.0          # the local web server the window talks to
+pywebview>=5.0      # the app window itself; without it Sourcerer opens in the browser  # optional

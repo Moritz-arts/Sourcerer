@@ -33,6 +33,19 @@ is written outside the folder.
 Needs Python 3.10 or newer — on Windows from [python.org](https://www.python.org/downloads/),
 on macOS from python.org or Homebrew (`brew install python`).
 
+## Use
+
+1. **+ Artist** — a name, notes, and the links of every place the artist posts,
+   one per line. Mastodon (and the fediverse) and Bluesky are downloaded from
+   today; other links are kept on the card until their site is supported.
+2. **Sync** on a card, or **Sync all** — the first sync fetches the whole
+   history, later ones only what is new. Originals, not previews.
+3. **Settings** — the library folder. Every artist gets a folder in it; link it
+   in TrackImage and new files appear there by themselves.
+
+A file you delete from the library is not downloaded again, and the same file
+posted on two sites is kept once.
+
 **macOS, first start:** a script downloaded from the internet is blocked once.
 Control-click `start-macos.command` › **Open** › **Open**. On macOS 15 and
 later: double-click it once, then **System Settings › Privacy & Security ›

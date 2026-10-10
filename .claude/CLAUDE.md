@@ -7,8 +7,10 @@ project of TrackImage, built the same way: the repository *is* the program —
 what people download and unpack is these folders, unchanged.
 
 **Status: early development.** What exists: the three launchers with
-`launch.py` behind them, a placeholder `app.py`, and the workshop — these notes, the docs and the automation that
-versions every push.
+`launch.py` behind them; the program — a window with artist cards, settings
+and a background sync that downloads from Mastodon and Bluesky; and the
+workshop — these notes, the docs and the automation that versions every push.
+`Sourcerer_files/sourcerer/__init__.py` lists the program's layers.
 
 ## Where the knowledge lives
 
@@ -200,22 +202,44 @@ Do not create releases or tags yourself, and do not push to `main`.
 - **Nothing is written outside the folder.** pip's cache is pointed into
   `venv/pip-cache`; keep it that way when adding anything that caches.
 
+### Program
+
+- **A new site is one module in `sourcerer/sources/`** with `KIND`, `LABEL`,
+  `match(url)` and `pages(url)` yielding lists of `Media`, newest first, then
+  added to `SITES`. Always fetch the original file, never a preview: Bluesky's
+  CDN recompresses, so its files come from the account's PDS (`getBlob`).
+- **`remote_key` is forever.** It decides whether a file is new; changing how
+  a site builds it makes every file of that site download again.
+- **A source's kind is recognised from its URL on every read**, not taken from
+  the column: better detection then fixes sources saved before it.
+- **Profile URLs lie about their site.** pixiv's `/users/123` matched the
+  fediverse pattern; `mastodon.py` keeps a list of hosts that are not.
+- **pywebview 6 turned `FOLDER_DIALOG` into a deprecated function.** Passing it
+  as the dialog type opens nothing; use `FileDialog.FOLDER` (with a fallback
+  for 5.x), as `server.pick_folder` does.
+- **The server listens on 127.0.0.1 only.** Nothing here is for other machines.
+
 ## House style
 
 Compact code, and comments that explain *why* — usually the thing that was
 wrong before, so the next reader does not undo the fix. Match the surrounding
-file; do not add a comment that only restates the line under it.
+file; do not add a comment that only restates the line under it. JavaScript is
+plain DOM code in `static/app.js`, no framework and no build step.
 
 ## Checks before pushing
 
 There is no test suite yet. Run at least:
 
 ```bash
-python3 -m py_compile .github/*.py Sourcerer_files/*.py
-python3 -c "import yaml; yaml.safe_load(open('.github/workflows/version-bump.yml'))"
+python3 -m py_compile .github/*.py Sourcerer_files/*.py Sourcerer_files/sourcerer/*.py Sourcerer_files/sourcerer/sources/*.py
+node --check Sourcerer_files/static/app.js
+python3 -c "import yaml; [yaml.safe_load(open(f)) for f in ('.github/workflows/version-bump.yml', '.github/workflows/release-zip.yml')]"
 sh -n start-linux.sh && sh -n start-macos.command
-sh ./start-linux.sh   # the whole start, end to end -- twice: build, then reuse
+sh ./start-linux.sh --no-open --port 8765   # the whole start; then use the page
 ```
+
+`--browser` opens the browser instead of the window, `--no-open` only serves,
+`--port` fixes the port; `SOURCERER_MAX_PAGES=1` keeps a test sync short.
 
 `start-windows.bat` cannot be checked on Linux; after changing it, start it on
 Windows once before pushing.

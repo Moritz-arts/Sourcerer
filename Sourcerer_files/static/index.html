@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sourcerer</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">Sourcerer <span id="version" class="muted"></span></div>
+  <div class="actions">
+    <button id="btn-add" class="primary">+ Artist</button>
+    <button id="btn-sync-all">Sync all</button>
+    <button id="btn-folder">Library</button>
+    <button id="btn-settings">Settings</button>
+  </div>
+</header>
+
+<main>
+  <div id="empty" class="empty hidden">
+    <h2>No artists yet</h2>
+    <p>Add an artist with the places they post — Sourcerer fetches every picture and
+       video from there into your library, and on each sync only what is new.</p>
+    <button class="primary" data-act="add">+ Add the first artist</button>
+  </div>
+  <div id="cards" class="cards"></div>
+</main>
+
+<footer class="status">
+  <span id="spinner" class="spinner hidden"></span>
+  <span id="status-text">Idle</span>
+  <button id="btn-log" class="link">Log</button>
+</footer>
+
+<dialog id="dlg-artist">
+  <form method="dialog" id="form-artist">
+    <h2 id="artist-title">New artist</h2>
+    <label>Name<input name="name" required autocomplete="off"></label>
+    <label>Notes<textarea name="notes" rows="2"></textarea></label>
+    <label>Sources <span class="muted">— one profile link per line</span>
+      <textarea name="sources" rows="5" placeholder="https://mastodon.social/@artist&#10;https://bsky.app/profile/artist.bsky.social"></textarea>
+    </label>
+    <p class="hint">Downloads from: <span id="sites"></span>. Other links are kept on the card
+       and fetched once their site is supported.</p>
+    <p id="artist-error" class="error"></p>
+    <div class="buttons">
+      <button type="button" id="btn-delete" class="danger hidden">Delete</button>
+      <span class="grow"></span>
+      <button value="cancel" formnovalidate>Cancel</button>
+      <button id="btn-save" class="primary" value="save">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlg-settings">
+  <form method="dialog" id="form-settings">
+    <h2>Settings</h2>
+    <label>Library folder
+      <span class="row"><input name="library" required autocomplete="off">
+        <button type="button" id="btn-browse">Browse…</button></span>
+    </label>
+    <p class="hint">Every artist gets a folder in here. Link this folder in TrackImage and
+       new files show up there on their own.</p>
+    <p id="settings-error" class="error"></p>
+    <div class="buttons">
+      <span class="grow"></span>
+      <button value="cancel" formnovalidate>Cancel</button>
+      <button class="primary" value="save">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlg-log">
+  <h2>Log</h2>
+  <pre id="log"></pre>
+  <div class="buttons"><span class="grow"></span><button id="btn-log-close">Close</button></div>
+</dialog>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
