@@ -45,23 +45,31 @@ def _logging():
 
 
 def _after_update():
-    """The update helper's last lines, as one line in the activity log."""
-    if not os.environ.pop("SOURCERER_AFTER_UPDATE", ""):
-        return
+    """The update helper's last run, once, as a line in the activity log -- also
+    when Sourcerer was started by hand afterwards, because the helper could not."""
+    os.environ.pop("SOURCERER_AFTER_UPDATE", None)
     try:
-        last = (config.LOG_DIR / "update.log").read_text(encoding="utf-8").splitlines()[-1]
-    except (OSError, IndexError):
-        last = ""
-    if last.endswith("  done"):
-        sync.event("done", "Updated to v%s" % config.VERSION)
-    elif last.endswith("  restarting"):
+        lines = (config.LOG_DIR / "update.log").read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return
+    starts = [i for i, line in enumerate(lines) if line.endswith("  waiting for Sourcerer to close")]
+    if not starts:
+        return
+    block = lines[starts[-1]:]
+    stamp = block[0][:19]
+    if stamp <= (db.get_setting("update_seen") or ""):
+        return
+    db.set_setting("update_seen", stamp)
+    text = "\n".join(block)
+    if "  restarting" in text:
         sync.event("info", "Restarted")
-    elif last.endswith("  old version restored"):
-        sync.event("error", "The update failed; the previous version was put back. "
-                   "Details: Settings > Updates")
+    elif "new version in place" in text:
+        sync.event("done", "Updated to v%s" % config.VERSION)
     else:
-        sync.event("error", "The update did not go through: %s -- see Settings > Updates"
-                   % last.split("  ", 1)[-1])
+        why = next((line.split("  ", 1)[-1] for line in block
+                    if any(w in line for w in ("failed", "could not", "broke", "RESTORE"))),
+                   block[-1].split("  ", 1)[-1])
+        sync.event("error", "The update did not go through: %s -- details in Settings > Updates" % why)
 
 
 def _announce(port):
