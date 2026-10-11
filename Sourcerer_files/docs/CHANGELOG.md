@@ -5,6 +5,10 @@ automatically -- one line per change, newest first. A release is drafted by hand
 from the tag of whichever version is judged ready, and this is the text to paste
 into it.
 
+## v0.5 — 2026-10-11
+
+- The console closes once Sourcerer is up; the card dialog has a field per site; logins under Settings > Accounts
+
 ## v0.4 — 2026-10-10
 
 - English interface with settings, in-app updates, live link checks and faster, gentler downloads
