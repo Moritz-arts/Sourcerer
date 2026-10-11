@@ -82,6 +82,7 @@ COLUMNS = {
     "sources": {
         # 'ok', 'warn' (works with a catch: login, bot check, slow down) or 'error'
         "last_level": "TEXT",
+        "walked": "TEXT",                 # when a sync last went through all of it
     },
     "files": {
         "phash": "TEXT",                  # imaging fingerprint; NULL for video

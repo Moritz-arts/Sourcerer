@@ -35,6 +35,9 @@ from .. import accounts, net
 KIND = "booru"
 LABEL = "Booru"
 MAX_NEW = 1000            # a big tag's first sync is spread over several
+# Old posts get the artist's tag later (a missing tag added, an alias merged);
+# they sit deep in the id order, where the early stop never looks.
+FULL_WALK_DAYS = 7
 
 # host: (engine, name, login (None, "optional", "recommended", "required"),
 #        where the API key is, API host if not the site's own)
@@ -114,9 +117,28 @@ def _query(url):
     return {k: v[0] for k, v in urllib.parse.parse_qs(urllib.parse.urlparse(url).query).items()}
 
 
+# Sort tags would replace the newest-first order the cursor walks along:
+# order:/sort: are dropped (any order is the same search), a favourites' or
+# pool's own order is refused -- without it, it would be another search.
+_SORTS = ("order:", "sort:")
+_OWN_ORDER = ("ordfav:", "ordpool:", "ordfavgroup:")
+
+
 def _tags(url):
-    # order: would replace the newest-first order the cursor walks along.
-    return " ".join(t for t in (_query(url).get("tags") or "").split() if not t.lower().startswith("order:"))
+    tags = [t for t in (_query(url).get("tags") or "").split() if not t.lower().startswith(_SORTS)]
+    if any(t.lower().startswith(_OWN_ORDER) for t in tags):
+        raise ValueError("Sourcerer walks a search newest first; ordfav: and ordpool: cannot be")
+    return " ".join(tags)
+
+
+def _search(url):
+    """(host, engine, tags) of a stored source; ValueError when it is no tag search --
+    an empty one would list every post on the site."""
+    host, engine = _site(url)
+    tags = _tags(url)
+    if not tags:
+        raise ValueError("Paste the artist's tag search from %s" % host)
+    return host, engine, tags
 
 
 def _search_url(host, engine, tags):
@@ -143,7 +165,7 @@ def normalize(url):
 
 
 def _artist_tag(host, engine, what, ref):
-    api = "https://%s/" % host
+    api = "https://%s/" % (BOORUS.get(host, (None,) * 5)[4] or host)      # e926: through e621.net
     if what == "artists":
         if not ref.isdigit():
             return ref
@@ -256,23 +278,34 @@ def _check(host, data):
 
 # ---- listing ---------------------------------------------------------------------------
 
+def _needs_key(url, host):
+    from . import LoginRequired
+    if login_need(url)[0] == "required" and not _secrets(host):
+        raise LoginRequired("%s needs an API key" % host)
+
+
 def profile(url):
-    """The artist as the tag names them, once the tag shows at least one post."""
-    host, engine = _site(url)
-    tags = _tags(url)
-    first = next(iter(_posts(host, engine, tags, None, 1)), None)
+    """The artist as the tag names them, once the tag shows at least one post.
+    from_link: the name is the link's own, not one the site states."""
+    from . import LoginRequired
+    host, engine, tags = _search(url)
+    _needs_key(url, host)
+    try:
+        first = next(iter(_posts(host, engine, tags, None, 1)), None)
+    except LookupError as e:
+        raise LoginRequired(str(e)) from e
     if first is None:
         raise RuntimeError("nothing tagged %s on %s" % (tags, host))
     name = _QUALIFIER.sub("", tags.split()[0]).replace("_", " ")
-    return {"name": name, "handle": "%s on %s" % (tags, BOORUS.get(host, (None, host))[1]), "avatar": ""}
+    return {"name": name, "handle": "%s on %s" % (tags, BOORUS.get(host, (None, host))[1]), "avatar": "",
+            "from_link": True}
 
 
 def pages(url):
     from . import LoginRequired
-    host, engine = _site(url)
-    tags, before = _tags(url), None
-    if login_need(url)[0] == "required" and not _secrets(host):
-        raise LoginRequired("%s needs an API key" % host)
+    host, engine, tags = _search(url)
+    before = None
+    _needs_key(url, host)
     while True:
         try:
             posts = _posts(host, engine, tags, before, PAGE[engine])
@@ -317,8 +350,13 @@ def _gelbooru(host, tags, pid, limit, data=None):
     if not text:                                          # no posts: an empty answer, not []
         return []
     if not text.startswith(("[", "{")):
-        # rule34.xxx: "Missing authentication. Go to api.rule34.xxx ..."
-        raise LookupError("%s: %s" % (host, html.unescape(re.sub(r"<[^>]+>", " ", text))[:120].strip()))
+        # rule34.xxx: "Missing authentication. Go to api.rule34.xxx ..." (a JSON
+        # string, or <error> in XML); others: <response success="false" reason="...">.
+        reason = re.search(r'reason="([^"]*)"', text)
+        msg = html.unescape(reason.group(1) if reason else re.sub(r"<[^>]+>", " ", text)).strip(' "')[:160]
+        if re.search(r"authenticat|api.?key", msg, re.I):
+            raise LookupError("%s: %s" % (host, msg))          # a login: pages() says so
+        raise RuntimeError("%s: %s" % (host, msg))
     data = json.loads(text)
     if isinstance(data, dict):                            # gelbooru.com: {"@attributes": ..., "post": [...]}
         data = data.get("post") or []
@@ -359,7 +397,9 @@ def _media(host, engine, p):
     if engine == "moebooru":                              # "yande.re 1198217 every tag of the post.jpg"
         name = "%s %s%s" % (same, p["id"], name[name.rfind("."):] if "." in name else "")
     return Media(remote_key="booru:%s:%s" % (same, p["id"]), url=src, post_url=post,
-                 posted=_date(p.get("created_at") or p.get("change")), name=str(p["id"]), filename=name,
+                 # Not "change": the self-hosted Gelbooru 0.2 sites have no upload
+                 # date, and the last edit is not one.
+                 posted=_date(p.get("created_at")), name=str(p["id"]), filename=name,
                  # Gelbooru's file hosts want to know the page a file is linked from.
                  headers={"Referer": "https://%s/" % host} if engine == "gelbooru" else None)
 

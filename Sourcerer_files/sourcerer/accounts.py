@@ -65,6 +65,11 @@ _XF_USER = re.compile(r"^[a-z0-9]*_?user$", re.I)
 _lock = threading.Lock()
 CHANGED = []                    # callbacks(key), after a login was saved or removed
 _pending = {}                   # key -> "waiting" | "done" | "failed: why" | "cancelled"
+_bases = {}                     # forum key -> base URL a login window was opened with
+
+
+def waiting(key):
+    return _pending.get(key) == "waiting"
 
 
 def host_of(url):
@@ -108,7 +113,7 @@ def describe(key, base=None):
         return SITES[key]
     if key.startswith("xenforo:"):
         host = key.split(":", 1)[1]
-        base = (base or (load(key) or {}).get("base") or "https://" + host).rstrip("/")
+        base = (base or _bases.get(key) or (load(key) or {}).get("base") or "https://" + host).rstrip("/")
         return (host, base + "/login/", (host,),
                 lambda c: any(_XF_USER.match(n) and v for n, v in c.items()))
     raise KeyError(key)
@@ -146,13 +151,22 @@ def _now():
     return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
 
 
+def _theirs(cookies, domains):
+    """The cookies of these domains and their subdomains -- not evil-x.com's for x.com."""
+    def ok(c):
+        dom = c["domain"].lstrip(".").lower()
+        return any(dom == d or dom.endswith("." + d) for d in domains)
+    return [c for c in cookies if ok(c)]
+
+
 def save(key, cookies, how, **extra):
     """cookies: [{name, value, domain, path, expires}] -- only those of the site's domains.
     extra: ua (the login window's User-Agent), base (a forum's base URL)."""
     domains = describe(key, extra.get("base"))[2]
-    keep = [c for c in cookies if any(c["domain"].lstrip(".").endswith(d) for d in domains)]
+    keep = _theirs(cookies, domains)
     data = dict(extra, key=key, saved=_now(), how=how, cookies=keep, state="ok", checked=_now(), why="")
-    _write(key, data)
+    with _lock:
+        _write(key, data)
     log.info("%s: login saved (%d cookies, %s)", key, len(keep), how)
     _changed(key)
     return data
@@ -161,7 +175,8 @@ def save(key, cookies, how, **extra):
 def save_token(key, how, **secrets):
     """An oauth, password or api_key login: what the site handed out, and who it is (user)."""
     data = dict(secrets, key=key, saved=_now(), how=how, state="ok", checked=_now(), why="")
-    _write(key, data)
+    with _lock:
+        _write(key, data)
     log.info("%s: login saved (%s)", key, how)
     _changed(key)
     return data
@@ -195,11 +210,18 @@ def _write(key, data):
     os.replace(tmp, path)
 
 
-def mark(key, ok, why=""):
-    """What the last use or check of a login found: still valid, or run out."""
+def saved(key):
+    """When the login on disk was made: what a check judges is that one."""
+    return (load(key) or {}).get("saved")
+
+
+def mark(key, ok, why="", stamp=None):
+    """What the last use or check of a login found: still valid, or run out.
+    stamp: saved() of the login that was used -- a new login made while the
+    request was under way is not the one that failed."""
     with _lock:
         data = load(key)
-        if not data:
+        if not data or (stamp and data.get("saved") != stamp):
             return
         was = data.get("state")
         data.update(state="ok" if ok else "expired", why="" if ok else why, checked=_now())
@@ -319,6 +341,8 @@ def login_in_window(key, base=None, url=None, finish=None):
     the page that shows the code, and finish turns it into the saved login.
     """
     import webview
+    if base and key.startswith("xenforo:"):
+        _bases[key] = base.rstrip("/")
     if finish:
         title, ok = label(key), None
     else:
@@ -344,19 +368,19 @@ def _forum_says_logged_in(window):
         return False
 
 
-def _oauth_code(window):
-    """The code an authorize page hands out once the user said yes: Mastodon
-    and GoToSocial put it in the address (/oauth/authorize/native?code=...),
-    Pleroma and Akkoma on the page ("Token code is ...")."""
+def _oauth_code(window, host):
+    """The code the server's authorize page hands out once the user said yes:
+    Mastodon puts it in the address (/oauth/authorize/native?code=...), as
+    GoToSocial does (/oauth/oob), Pleroma and Akkoma on the page ("Token
+    code is ..."). Other pages' codes -- a sign-in provider's callback -- are not it."""
     try:
         parts = urllib.parse.urlparse(window.get_current_url() or "")
     except Exception:
         return None
-    if "oauth" not in parts.path:
+    if (parts.hostname or "").lower() != host or "oauth" not in parts.path:
         return None
-    code = (urllib.parse.parse_qs(parts.query).get("code") or [None])[0]
-    if code:
-        return code
+    if parts.path.rstrip("/") in ("/oauth/authorize/native", "/oauth/oob"):
+        return (urllib.parse.parse_qs(parts.query).get("code") or [None])[0]
     try:
         text = window.evaluate_js("document.body ? document.body.innerText : ''") or ""
     except Exception:
@@ -371,7 +395,7 @@ def _watch(key, window, ok, closed, extra, finish):
     while not closed.is_set() and time.monotonic() < deadline:
         time.sleep(1.5)
         if finish:
-            code = _oauth_code(window)
+            code = _oauth_code(window, key.split(":", 1)[1])
             if code:
                 break
             continue
@@ -434,7 +458,7 @@ def import_cookies_txt(key, text):
         domain, _subdomains, path, _secure, expires, name, value = parts[:7]
         cookies.append({"name": name, "value": value, "domain": domain, "path": path, "expires": expires})
     name, _url, domains, ok = describe(key)
-    mine = [c for c in cookies if any(c["domain"].lstrip(".").endswith(d) for d in domains)]
+    mine = _theirs(cookies, domains)
     if not ok({c["name"]: c["value"] for c in mine}):
         raise ValueError("This file holds no login for %s." % name)
     return len(save(key, mine, "cookies.txt")["cookies"])

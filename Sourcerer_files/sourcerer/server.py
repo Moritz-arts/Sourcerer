@@ -192,6 +192,26 @@ def _seen():
     LAST_SEEN[0] = time.monotonic()
 
 
+_LOCAL = ("127.0.0.1", "localhost")
+
+
+@app.before_request
+def _same_origin():
+    """Only Sourcerer's own page may change anything. Any web page in the
+    user's browser could otherwise POST to 127.0.0.1 -- a form needs no
+    permission -- and log accounts in or out, or start syncs. A page from
+    elsewhere names itself in Origin; a renamed host (DNS rebinding) shows in Host."""
+    if request.method in ("GET", "HEAD", "OPTIONS"):
+        return None
+    host = urllib.parse.urlsplit("//" + (request.host or ""))
+    origin = request.headers.get("Origin")
+    seen = urllib.parse.urlsplit(origin) if origin else None
+    if host.hostname not in _LOCAL or (seen is not None and (
+            seen.hostname not in _LOCAL or seen.port != host.port)):
+        abort(403)
+    return None
+
+
 @app.get("/api/ping")
 def ping():
     return jsonify(app="sourcerer", version=config.VERSION, pid=os.getpid())
@@ -244,7 +264,7 @@ def detect():
     try:
         p = sources.profile(url) or {}
         info.update(status="ok", name=_display_name(p.get("name")) or info["name"],
-                    handle=p.get("handle", ""), from_site=bool(p.get("name")))
+                    handle=p.get("handle", ""), from_site=bool(p.get("name")) and not p.get("from_link"))
     except Exception as e:
         why = net.reason(e)
         info.update(status="login" if why.startswith(net.LOGIN) else net.level(e), error=why)
@@ -544,8 +564,9 @@ def _account_key(body):
     elif key.startswith("xenforo:"):
         # A forum below the root: its base from the card's links, or from the
         # link the card dialog asks about before the card is saved.
+        url = body.get("url") or ""
         base = _forums().get(key.split(":", 1)[1]) or \
-            (accounts.forum_base(body["url"]) if body.get("url") else None)
+            (accounts.forum_base(url) if url and accounts.host_of(url) == key.split(":", 1)[1] else None)
     if not _shown(key):
         abort(400)
     return key, base
@@ -596,7 +617,10 @@ def account_login():
         return jsonify(error="No answer from the site: %s" % net.reason(e)), 502
     if WINDOW is None:
         return jsonify(error="Logging in needs Sourcerer's own window." +
-                       (" In the browser, import a cookies.txt instead." if how == "window" else "")), 501
+                       (" In the browser, import a cookies.txt instead." if how == "window" else ""),
+                       key=key), 501
+    if accounts.waiting(key):              # its window is open already
+        return jsonify(ok=True, key=key)
     if how == "oauth":
         from .sources import mastodon
         server = key.split(":", 1)[1]

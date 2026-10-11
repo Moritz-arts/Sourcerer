@@ -44,9 +44,10 @@ HOSTS = {"www.pixiv.net": (1, 1.5), "i.pximg.net": (2, 0.4), "www.patreon.com": 
          # The boorus' APIs: e621 asks for at most one request a second, the others
          # are run by volunteers on donated servers.
          "danbooru.donmai.us": (1, 1.0), "safebooru.donmai.us": (1, 1.0), "e621.net": (1, 1.0),
-         "e926.net": (1, 1.0), "gelbooru.com": (1, 1.0), "api.rule34.xxx": (1, 1.0),
+         "gelbooru.com": (1, 1.0), "api.rule34.xxx": (1, 1.0),
          "safebooru.org": (1, 1.0), "yande.re": (1, 1.0), "konachan.com": (1, 1.0),
-         "konachan.net": (1, 1.0), "www.sakugabooru.com": (1, 1.0)}
+         "konachan.net": (1, 1.0), "www.sakugabooru.com": (1, 1.0), "aibooru.online": (1, 1.0),
+         "xbooru.com": (1, 1.0), "tbib.org": (1, 1.0), "hypnohub.net": (1, 1.0)}
 # Not retried on a 429 or a bot check. pixiv's terms forbid "large numbers of
 # actions within a short period"; tools that kept retrying there had accounts restricted.
 STOP_HOSTS = {"www.pixiv.net"}
@@ -91,21 +92,44 @@ class _Tls13(HTTPAdapter):
         return super().proxy_manager_for(*args, **kwargs)
 
 
-# Hosts without TLS 1.3 get the usual handshake. They refuse 1.3 with an alert
-# (gelbooru.com) or simply hang up (Amazon's older load balancers) -- any
-# failed handshake but a certificate that does not check out.
+# Hosts (host[:port], as requests sends it) without TLS 1.3 get the usual
+# handshake. They refuse 1.3 with an alert (gelbooru.com) or simply hang up
+# (Amazon's older load balancers). An alert is proof at once, a hang-up only
+# the second time: once may be a passing fault, and the fallback is the very
+# handshake the bot checks refuse.
 _OLD_TLS = set()
+_hung_up = {}
+_NO_TLS13 = ("PROTOCOL_VERSION", "UNSUPPORTED_PROTOCOL", "WRONG_VERSION_NUMBER", "NO_PROTOCOLS_AVAILABLE")
 
 
-def _session(host=""):
+def _session():
     s = getattr(_local, "session", None)
     if s is None:
         s = _local.session = requests.Session()
         s.headers["User-Agent"] = config.USER_AGENT
         s.mount("https://", _Tls13())
-    if host in _OLD_TLS and "https://%s/" % host not in s.adapters:
-        s.mount("https://%s/" % host, HTTPAdapter())     # the longer prefix wins
+    for netloc in list(_OLD_TLS):
+        if "https://%s/" % netloc not in s.adapters:
+            s.mount("https://%s/" % netloc, HTTPAdapter())     # the longer prefix wins
     return s
+
+
+def _lacks_tls13(e, session):
+    """Whether a failed handshake shows that its server -- the request's own or
+    a redirect's -- speaks no TLS 1.3. Judged by what this attempt used: a
+    thread that tried 1.3 while another one found out is not a second failure."""
+    url = e.request.url if getattr(e, "request", None) is not None else ""
+    netloc = urllib.parse.urlparse(url).netloc.lower()
+    if not netloc or "CERTIFICATE" in str(e) or not isinstance(session.get_adapter(url), _Tls13):
+        return False
+    with _lock:
+        if netloc not in _OLD_TLS:
+            _hung_up[netloc] = _hung_up.get(netloc, 0) + 1
+            if not any(m in str(e) for m in _NO_TLS13) and _hung_up[netloc] < 2:
+                return False
+            _OLD_TLS.add(netloc)
+            log.info("%s speaks no TLS 1.3; using TLS 1.2 there", netloc)
+    return True
 
 
 class _Polite:
@@ -147,11 +171,12 @@ def _get(url, params=None, stream=False, headers=None, method="GET", data=None, 
     headers = dict(accounts.headers_for(url), **(headers or {}))
     host = urllib.parse.urlparse(url).hostname or ""
     tries = RETRIES if method == "GET" else 1
-    attempt = 0
+    attempt = handshakes = 0
     while attempt < tries:
+        session = _session()
         try:
-            resp = _session(host).request(method, url, params=params, stream=stream, timeout=TIMEOUT,
-                                          headers=headers, data=data, json=json)
+            resp = session.request(method, url, params=params, stream=stream, timeout=TIMEOUT,
+                                   headers=headers, data=data, json=json)
             if resp.headers.get("cf-mitigated") == "challenge":
                 resp.close()
                 raise SlowDown("%s showed a bot check; the next sync tries again" % host)
@@ -172,12 +197,16 @@ def _get(url, params=None, stream=False, headers=None, method="GET", data=None, 
                 continue
             resp.raise_for_status()
             return resp
-        except requests.exceptions.SSLError as e:
-            if host in _OLD_TLS or "CERTIFICATE" in str(e):
-                raise
-            log.info("%s speaks no TLS 1.3; using TLS 1.2 there", host)
-            _OLD_TLS.add(host)                   # and the same attempt again, the old way
-        except (requests.ConnectionError, requests.Timeout):
+        except (requests.ConnectionError, requests.Timeout) as e:
+            if isinstance(e, requests.exceptions.SSLError):
+                if "CERTIFICATE" in str(e):          # does not get better by asking again
+                    raise
+                if _lacks_tls13(e, session):
+                    continue                     # the same attempt again, the old way
+                if handshakes < 2:               # a failed handshake sent nothing: safe for a POST too
+                    handshakes += 1
+                    time.sleep(1)
+                    continue
             if attempt >= tries - 1:
                 raise
             time.sleep(3 * (attempt + 1))
@@ -229,7 +258,8 @@ def get_json(url, params=None, headers=None):
 def post_json(url, data=None, json=None, headers=None):
     """A login's request (a token, a session): sent once, the answer as JSON."""
     with _Polite(url):
-        return _get(url, headers=headers, method="POST", data=data, json=json).json()
+        resp = _get(url, headers=headers, method="POST", data=data, json=json)
+        return resp.json() if resp.content.strip() else {}     # Bluesky's deleteSession: nothing
 
 
 def get_text(url, params=None, headers=None):

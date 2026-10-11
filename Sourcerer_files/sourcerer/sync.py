@@ -225,10 +225,10 @@ def scheduler():
 
 # ---- logins ---------------------------------------------------------------------------
 
-def _login_ran_out(key, label):
+def _login_ran_out(key, label, stamp=None):
     was = (accounts.load(key) or {}).get("state")
-    accounts.mark(key, False, "the site no longer accepts the login")
-    if was != "expired":                   # once, not on every sync and check
+    accounts.mark(key, False, "the site no longer accepts the login", stamp)
+    if was != "expired" and (accounts.load(key) or {}).get("state") == "expired":   # once, not on every sync
         event("error", "%s: the login has run out -- log in again under Settings > Accounts" % label)
 
 
@@ -272,6 +272,7 @@ def check_accounts(keys=None):
         if not a["logged_in"] or (keys and a["key"] not in keys):
             continue
         name = a["label"] if a["group"] != "Mastodon" else "Mastodon (%s)" % a["label"]
+        stamp = accounts.saved(a["key"])
         try:
             ok = _still_logged_in(a["key"])
         except Exception as e:             # no answer says nothing about the login
@@ -280,9 +281,9 @@ def check_accounts(keys=None):
             continue
         found[name] = ok
         if ok is True:
-            accounts.mark(a["key"], True)
+            accounts.mark(a["key"], True, stamp=stamp)
         elif ok is False:
-            _login_ran_out(a["key"], a["label"])
+            _login_ran_out(a["key"], a["label"], stamp)
     return found
 
 
@@ -443,16 +444,17 @@ def _sync_artist(artist_id):
         site = sources.site_for(src["url"])
         login = sources.account_key(src["url"])
         login = login if login and accounts.logged_in(login) else None
+        stamp = accounts.saved(login) if login else None
         error = level = None
         try:
             fresh, walked[src["id"]] = _scan(src, site, known, cur)
             todo += [(src, site, m) for m in fresh]
-            if login:
-                accounts.mark(login, True)
+            # No "still logged in" from a scan that went well: Mastodon and Bluesky
+            # read as a visitor when a login died, Patreon answers one as a guest.
         except Exception as e:
             error, level = net.reason(e), net.level(e)
             if login and error.startswith(net.LOGIN):
-                _login_ran_out(login, site.LABEL)
+                _login_ran_out(login, site.LABEL, stamp)
             else:
                 event("warn", "%s could not be reached: %s" % (site.LABEL, error), artist)
         with db.connect() as con:
@@ -482,13 +484,27 @@ def _sync_artist(artist_id):
         # then the next one walks the whole history again and finds what is missing.
         for sid, ok in walked.items():
             if ok and not cancelled and sid not in failed_sources:
-                con.execute("UPDATE sources SET complete = 1 WHERE id = ?", (sid,))
+                con.execute("UPDATE sources SET complete = 1, walked = ? WHERE id = ?", (_now(), sid))
         con.execute("UPDATE artists SET last_sync = ?, last_new = ?, last_failed = ?, "
                     "last_activity = CASE WHEN ? THEN ? ELSE last_activity END WHERE id = ?",
                     (_now(), cur["new"], cur["failed"], cur["new"] > 0, _now(), artist_id))
     event("cancelled" if cancelled else ("done" if not cur["failed"] else "warn"),
            "Cancelled" if cancelled else "Finished", artist,
            new=cur["new"], duplicates=cur["duplicates"], failed=cur["failed"], existing=cur["existing"])
+
+
+def _walk_again(src, site):
+    """A site whose old posts can join a source later -- a booru post tagged
+    with the artist years after it was uploaded -- is walked all the way now
+    and then (the site's FULL_WALK_DAYS)."""
+    days = getattr(site, "FULL_WALK_DAYS", 0)
+    if not days:
+        return False
+    try:
+        last = datetime.datetime.fromisoformat(src["walked"] or "").replace(tzinfo=datetime.timezone.utc)
+    except ValueError:                     # never walked since the column came
+        return True
+    return (datetime.datetime.now(datetime.timezone.utc) - last).days >= days
 
 
 def _scan(src, site, known, cur):
@@ -509,7 +525,7 @@ def _scan(src, site, known, cur):
             return fresh, False
         # Newest first: once a page holds something already seen, everything
         # older was seen too -- but only after one sync has gone all the way.
-        if src["complete"] and len(new) < len(page):
+        if src["complete"] and len(new) < len(page) and not _walk_again(src, site):
             return fresh, True
         if number >= MAX_PAGES:
             event("info", "%s: stopped after %d pages; the next sync carries on." % (
