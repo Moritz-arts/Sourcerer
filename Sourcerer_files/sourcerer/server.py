@@ -3,11 +3,11 @@
 It listens on 127.0.0.1 only -- nothing here is meant to be reachable from
 another machine.
 """
+import datetime
 import logging
 import os
 import platform
 import re
-import shutil
 import subprocess
 import sys
 import threading
@@ -28,7 +28,7 @@ DEDUPES = ("keep_all", "best", "master")
 # What Settings may change, and the values each may take.
 CHOICES = {"filenames": ("original", "dated"), "theme": ("system", "light", "dark"),
            "auto_sync": ("0", "1"), "channel": ("stable", "beta")}
-RANGES = {"card_size": (160, 420), "auto_hours": (1, 168), "parallel": (1, 16),
+RANGES = {"card_size": (160, 800), "auto_hours": (1, 168), "parallel": (1, 16),
           "per_host": (1, 8), "pace_ms": (0, 5000)}
 
 
@@ -37,10 +37,15 @@ def _background(fn, *args):
 
 
 def _status(s):
+    """What the dot says: ok (green); login or warn (yellow -- it works, with a
+    catch: a login, a bot check, a site asking to slow down); error or
+    unsupported (red -- nothing comes from it); unknown (grey, not checked yet)."""
     if not s["supported"]:
         return "unsupported"
     if s["last_error"]:
-        return "login" if s["last_error"].startswith(net.LOGIN) else "error"
+        if s["last_error"].startswith(net.LOGIN):
+            return "login"
+        return "warn" if s.get("last_level") == "warn" else "error"
     return "ok" if s["last_checked"] else "unknown"
 
 
@@ -61,9 +66,12 @@ def _artists():
                 s.update(sources.describe(s["url"]), master=s["id"] == a["master_source_id"])
                 s["status"] = _status(s)
                 a["sources"].append(s)
-            a["thumbs"] = [r[0] for r in con.execute(
-                "SELECT id FROM files WHERE artist_id = ? AND path IS NOT NULL AND width IS NOT NULL "
-                "ORDER BY COALESCE(posted, created) DESC, id DESC LIMIT 4", (a["id"],))]
+            # ?v= the file's own hash: a row id can come back after a delete,
+            # and the browser must not show the old picture for it.
+            a["thumbs"] = [{"id": r[0], "v": (r[1] or "")[:12]} for r in con.execute(
+                "SELECT id, sha256 FROM files WHERE artist_id = ? AND path IS NOT NULL "
+                "AND width IS NOT NULL ORDER BY COALESCE(posted, created) DESC, id DESC LIMIT 4",
+                (a["id"],))]
             a["path"] = str(sync.artist_folder(a))
             a["folder"] = a["folder"] or ""
     return artists
@@ -214,6 +222,7 @@ def state():
     return jsonify(version=config.VERSION, library=sync.library(), sep=os.sep,
                    sites=[s.LABEL for s in sources.SITES], settings=db.settings(),
                    fields=[{"label": label, "example": example} for label, example in sources.FIELDS],
+                   logins=accounts.problems(),
                    artists=_artists(), sync=sync.status(), window=WINDOW is not None)
 
 
@@ -235,7 +244,7 @@ def detect():
                     handle=p.get("handle", ""))
     except Exception as e:
         why = net.reason(e)
-        info.update(status="login" if why.startswith(net.LOGIN) else "error", error=why)
+        info.update(status="login" if why.startswith(net.LOGIN) else net.level(e), error=why)
     return jsonify(info)
 
 
@@ -267,6 +276,7 @@ def update_artist(artist_id):
         _move_folder(con, artist_id, sync.artist_folder(row),
                      sync.artist_folder(dict(row, name=data["name"], folder=data["folder"])))
         _save(con, artist_id, data)
+    sync.name_avatar(artist_id)                  # the picture's file is named after the artist
     _background(sync.check_card, artist_id)
     if body.get("sync_now"):
         sync.enqueue([artist_id])
@@ -295,17 +305,27 @@ def _move_folder(con, artist_id, src, dst):
 @app.delete("/api/artists/<int:artist_id>")
 def delete_artist(artist_id):
     # The files stay on disk: they are the user's now, in the user's library.
+    # What Sourcerer knew about them goes to the archive, so a card made again
+    # for this artist takes them over instead of downloading them once more.
     sync.cancel(artist_id)
     with db.connect() as con:
+        row = con.execute("SELECT avatar FROM artists WHERE id = ?", (artist_id,)).fetchone()
+        con.execute("INSERT OR REPLACE INTO archive (remote_key, sha256, path, post_url, posted, "
+                    "phash, width, height, size) SELECT remote_key, sha256, path, post_url, posted, "
+                    "phash, width, height, size FROM files WHERE artist_id = ? AND path IS NOT NULL",
+                    (artist_id,))
         con.execute("DELETE FROM artists WHERE id = ?", (artist_id,))
-    (config.AVATARS / ("%d.jpg" % artist_id)).unlink(missing_ok=True)
+    if row and row["avatar"]:
+        (config.AVATARS / row["avatar"]).unlink(missing_ok=True)
     return jsonify(ok=True)
 
 
 @app.get("/api/avatar/<int:artist_id>")
 def avatar(artist_id):
-    path = config.AVATARS / ("%d.jpg" % artist_id)
-    if not path.is_file():
+    with db.connect() as con:
+        row = con.execute("SELECT avatar FROM artists WHERE id = ?", (artist_id,)).fetchone()
+    path = config.AVATARS / row["avatar"] if row and row["avatar"] else None
+    if not path or not path.is_file():
         abort(404)
     resp = send_file(path, mimetype="image/jpeg")
     resp.cache_control.max_age = 86400          # the page asks with ?v=<when it changed>
@@ -334,19 +354,29 @@ def sync_status():
 
 @app.get("/api/thumb/<int:file_id>")
 def thumb(file_id):
-    cached = config.THUMBS / ("%d.jpg" % file_id)
-    if not cached.is_file():
-        with db.connect() as con:
-            row = con.execute("SELECT path FROM files WHERE id = ?", (file_id,)).fetchone()
-        if not row or not row["path"] or not os.path.isfile(row["path"]):
-            abort(404)
-        try:
-            imaging.thumbnail(row["path"], cached)
-        except Exception:
-            abort(404)
-    resp = send_file(cached, mimetype="image/jpeg")
-    resp.cache_control.max_age = 86400
+    """A downloaded picture, made small in memory -- no thumbnail files on disk."""
+    with db.connect() as con:
+        row = con.execute("SELECT path FROM files WHERE id = ?", (file_id,)).fetchone()
+    if not row or not row["path"] or not os.path.isfile(row["path"]):
+        abort(404)
+    try:
+        data = imaging.preview(row["path"])
+    except Exception:
+        abort(404)
+    resp = app.response_class(data, mimetype="image/jpeg")
+    resp.cache_control.max_age = 7 * 86400       # the page asks with ?v=<the file's hash>
     return resp
+
+
+@app.post("/api/open-url")
+def open_url():
+    """A source's page in the system's browser -- not inside Sourcerer's window."""
+    url = (request.get_json(force=True) or {}).get("url") or ""
+    if not re.match(r"^https?://", url):
+        abort(400)
+    import webbrowser
+    webbrowser.open(url)
+    return jsonify(ok=True)
 
 
 # ---- settings --------------------------------------------------------------------
@@ -429,7 +459,8 @@ def info():
         lines = (config.LOG_DIR / "update.log").read_text(encoding="utf-8").splitlines()[-30:]
     except OSError:
         lines = []
-    return jsonify(version=config.VERSION, python=platform.python_version(),
+    from .sources import _gdl
+    return jsonify(version=config.VERSION, python=platform.python_version(), gallery_dl=_gdl.version(),
                    system="%s %s" % (platform.system(), platform.release()),
                    program=str(config.INSTALL), userdata=str(config.USERDATA),
                    library=sync.library(), repo="https://github.com/%s" % config.REPO,
@@ -438,48 +469,77 @@ def info():
 
 # ---- accounts -----------------------------------------------------------------------
 
-def _forum_hosts():
+def _login_changed(key):
+    """A login opens (or closes) older posts the early stop would never reach
+    again: the sources it covers walk their whole history on the next sync."""
     with db.connect() as con:
-        urls = [r[0] for r in con.execute("SELECT url FROM sources")]
-    return [accounts.host_of(u) for u in urls if sources.describe(u)["label"] == "XenForo"]
+        for row in con.execute("SELECT id, url FROM sources").fetchall():
+            if accounts.account_for(row["url"]) == key or \
+                    (key.startswith("xenforo:") and accounts.host_of(row["url"]) == key.split(":", 1)[1]):
+                con.execute("UPDATE sources SET complete = 0 WHERE id = ?", (row["id"],))
+
+
+accounts.CHANGED.append(_login_changed)
+
+
+def _forums():
+    """{host: base URL} of every XenForo forum a card links to."""
+    with db.connect() as con:
+        urls = [r[0] for r in con.execute("SELECT url FROM sources ORDER BY id")]
+    out = {}
+    for u in urls:
+        if sources.describe(u)["label"] == "XenForo":
+            out.setdefault(accounts.host_of(u), accounts.forum_base(u))
+    return out
 
 
 def _account_key(body):
-    key = (body.get("key") or "").strip().lower()
+    """(key, the forum's base URL or None) of the account a request names."""
+    key, base = (body.get("key") or "").strip().lower(), None
     if body.get("forum"):                      # a forum typed in by hand: its host is the key
-        key = "xenforo:" + accounts.host_of(sources.normalize(body["forum"]))
+        base = accounts.forum_base(body["forum"].strip())
+        key = "xenforo:" + accounts.host_of(base)
+    elif key.startswith("xenforo:"):
+        base = _forums().get(key.split(":", 1)[1])
     try:
-        accounts.describe(key)
+        accounts.describe(key, base)
     except KeyError:
         abort(400)
-    return key
+    return key, base
 
 
 @app.get("/api/accounts")
 def get_accounts():
-    return jsonify(accounts=accounts.accounts(_forum_hosts()), window=WINDOW is not None)
+    return jsonify(accounts=accounts.accounts(_forums()), window=WINDOW is not None)
 
 
 @app.post("/api/accounts/login")
 def account_login():
-    key = _account_key(request.get_json(force=True) or {})
+    key, base = _account_key(request.get_json(force=True) or {})
     if WINDOW is None:
         return jsonify(error="Logging in needs Sourcerer's own window. In the browser, "
                              "import a cookies.txt instead."), 501
-    accounts.login_in_window(key)
+    accounts.login_in_window(key, base)
     return jsonify(ok=True, key=key)
+
+
+@app.post("/api/accounts/check")
+def account_check():
+    key, _base = _account_key(request.get_json(force=True) or {})
+    sync.check_accounts([key])
+    return get_accounts()
 
 
 @app.post("/api/accounts/logout")
 def account_logout():
-    accounts.logout(_account_key(request.get_json(force=True) or {}))
+    accounts.logout(_account_key(request.get_json(force=True) or {})[0])
     return jsonify(ok=True)
 
 
 @app.post("/api/accounts/import")
 def account_import():
     body = request.get_json(force=True) or {}
-    key = _account_key(body)
+    key, _base = _account_key(body)
     try:
         n = accounts.import_cookies_txt(key, body.get("text") or "")
     except ValueError as e:
@@ -488,6 +548,17 @@ def account_import():
 
 
 # ---- updates and repair --------------------------------------------------------------
+
+@app.post("/api/update/gallery-dl")
+def update_gallery_dl():
+    from .sources import _gdl
+    try:
+        version = _gdl.upgrade()
+    except Exception as e:
+        return jsonify(error=str(e)), 500
+    db.set_setting("gdl_updated", datetime.datetime.now(datetime.timezone.utc).isoformat())
+    return jsonify(version=version)
+
 
 @app.get("/api/update/check")
 def update_check():
@@ -515,9 +586,6 @@ def update_install():
 @app.post("/api/repair")
 def repair():
     action = (request.get_json(silent=True) or {}).get("action")
-    if action == "thumbs":
-        shutil.rmtree(config.THUMBS, ignore_errors=True)
-        return jsonify(message="Thumbnails are drawn again as the cards show them.")
     if action == "avatars":
         with db.connect() as con:
             ids = [r[0] for r in con.execute("SELECT id FROM artists")]

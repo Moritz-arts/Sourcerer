@@ -23,7 +23,12 @@ Sourcerer/                        <- what Sourcerer.zip unpacks to; move it free
     │   ├─ sources/               one module per site
     │   │   ├─ __init__.py        Media, site_for, normalize, describe, profile
     │   │   ├─ mastodon.py        Mastodon / fediverse, public API
-    │   │   └─ bluesky.py         Bluesky, public API, original blobs
+    │   │   ├─ bluesky.py         Bluesky, public API, original blobs
+    │   │   ├─ pixiv.py           Pixiv, its own pages' JSON; originals need a Referer
+    │   │   ├─ patreon.py         Patreon, its own pages' JSON; media download_url
+    │   │   ├─ x.py               X, listed by gallery-dl, logged in
+    │   │   ├─ xenforo.py         XenForo forums (media gallery, albums, threads)
+    │   │   └─ _gdl.py            gallery-dl as a separate process: lists, never downloads
     │   ├─ sync.py                sync queue, scan then download, dedupe, folders,
     │   │                           automatic sync, link checks, profile pictures
     │   ├─ accounts.py            logins: login window, cookies.txt, saved cookies
@@ -49,8 +54,9 @@ Sourcerer/                        <- what Sourcerer.zip unpacks to; move it free
         │                           readable by this user only -- never shipped
         ├─ Logs/                  sourcerer.log; update.log (the update helper's
         │                           steps); console.log (the program's own output)
-        ├─ Thumbs/                card thumbnails, rebuilt when missing
-        ├─ Avatars/               profile pictures, <card id>.jpg
+        ├─ Avatars/               profile pictures, <artist>.jpg
+        ├─ gallery-dl/            gallery-dl's cache (its login state) and the
+        │                           config of a running listing (mode 600, deleted after)
         ├─ _update/               an update being unpacked; gone after the swap
         ├─ rebuild-venv           left by Settings › Repair; launch.py rebuilds
         │                           the environment and removes it

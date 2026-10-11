@@ -71,7 +71,7 @@
     <span class="grow"></span>
     <div class="sizer" title="Card size (Ctrl + mouse wheel)">
       <button id="btn-smaller" class="icon flat" aria-label="Smaller cards"><svg class="ic sm"><use href="#i-minus"/></svg></button>
-      <input id="size" type="range" min="160" max="420" step="10" aria-label="Card size">
+      <input id="size" type="range" min="160" max="800" step="10" aria-label="Card size">
       <button id="btn-larger" class="icon flat" aria-label="Larger cards"><svg class="ic sm"><use href="#i-plus"/></svg></button>
     </div>
   </div>
@@ -297,7 +297,7 @@
         </div>
         <div class="field">
           <span class="label">Card size</span>
-          <input id="set-size" type="range" min="160" max="420" step="10">
+          <input id="set-size" type="range" min="160" max="800" step="10">
           <p class="hint">Also with Ctrl + mouse wheel over the cards, or Ctrl + plus / minus.</p>
         </div>
       </section>
@@ -341,14 +341,15 @@
         <pre id="upd-notes" class="notes hidden"></pre>
         <p class="hint">An update replaces the program files and keeps your cards, settings and
           library. Sourcerer restarts by itself.</p>
+        <div class="row"><div><div class="row-title">Site support: gallery-dl <span id="gdl-version" class="muted"></span></div>
+          <p class="hint">Reads X and the forums. X changes often; Sourcerer brings this part up to date
+            once a week by itself, or now.</p></div>
+          <button type="button" id="btn-gdl">Update now</button></div>
         <details id="upd-log-box" class="hidden"><summary class="hint">Last update log</summary><pre id="upd-log" class="notes"></pre></details>
       </section>
 
       <section data-pane="repair">
         <h3>Repair</h3>
-        <div class="row"><div><div class="row-title">Redraw thumbnails</div>
-          <p class="hint">The small pictures on the cards are made again.</p></div>
-          <button type="button" data-repair="thumbs">Redraw</button></div>
         <div class="row"><div><div class="row-title">Check links and profile pictures</div>
           <p class="hint">Every source is asked again; dots and pictures are refreshed.</p></div>
           <button type="button" data-repair="avatars">Check</button></div>

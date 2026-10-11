@@ -15,12 +15,12 @@ sources, into a TrackImage library.
 
 | Site | Status |
 |---|---|
-| XenForo Media Gallery | not started |
+| XenForo Media Gallery | **works** on forums without a strict bot check — media gallery, albums, threads (gallery-dl); login per forum |
 | Mastodon (and the fediverse) | **works** — public posts, originals |
-| Patreon | not started |
+| Patreon | **works** — own code on Patreon's JSON; originals (`download_url`), uploader's names; patron posts with a login |
 | Bluesky | **works** — public posts, original blobs incl. video |
-| X | not started |
-| Pixiv | not started |
+| X | **works** with a login — listed by gallery-dl, originals (`name=orig`) |
+| Pixiv | **works** — own code on pixiv's AJAX JSON; R-18 with a login; ugoira as animated WebP |
 | DeviantArt | not started |
 
 ## Decisions
@@ -101,6 +101,29 @@ add the one that replaced it.
 - 2026-10-10 — Every new version also replaces Sourcerer.zip on the prerelease
   `beta`. — A clean download of the newest build without publishing a release
   by hand; Stable stays what was published deliberately.
+- 2026-10-11 — X and XenForo are listed by gallery-dl, run as a separate
+  process; Sourcerer downloads the files itself. — X's web API changes
+  almost weekly and gallery-dl follows it; a copy of our own would stay
+  broken until the next release. A separate process keeps gallery-dl's
+  GPL-2.0 apart from Sourcerer, which has no licence yet, and lets a pip
+  upgrade (weekly, or Settings › Updates) fix X between Sourcerer releases.
+- 2026-10-11 — Pixiv and Patreon in Sourcerer's own code, on the JSON their
+  own pages read. — gallery-dl needs an OAuth refresh token for pixiv and
+  poses as the pixiv/Patreon mobile apps (Patreon blocked outdated app
+  versions in March 2026, breaking it); the JSON is simpler and honest.
+- 2026-10-11 — User-Agent `Mozilla/5.0 (compatible; Sourcerer/<v>; +repo)`.
+  — Still names Sourcerer, in the form crawlers use; pixiv's Cloudflare
+  challenged every logged-in request whose UA did not start with Mozilla/5.0.
+- 2026-10-11 — A file already there is taken over, not downloaded again:
+  from the archive of deleted cards (by remote key), else by its own name in
+  the card's folder. — Deleting and remaking a card downloaded everything a
+  second time, as `name_2.jpg`.
+- 2026-10-11 — Card pictures are made in memory from the downloads; no
+  thumbnail files. Avatars are `Avatars/<artist>.jpg`. — The user wants no
+  picture stored twice; SQLite hands out a deleted row's id again, so
+  pictures keyed by id could show the wrong artist.
+- 2026-10-11 — Logins are checked after every sync that uses them and every
+  6 hours; one that ran out shows as a warning until it is renewed.
 
 ## Done
 
@@ -127,15 +150,24 @@ add the one that replaced it.
       re-check links, restart)
 - [x] Activity bar with progress, speed and queue; log with icons and a
       "Problems" filter
+- [x] The console closes once Sourcerer is up; one Sourcerer at a time
+- [x] Card dialog with a field per site; gallery button on the card
+- [x] Logins in Sourcerer's own window (cookies only, never passwords),
+      cookies.txt import; a warning when a login runs out
+- [x] Pixiv, Patreon, X, XenForo
+- [x] Files already there are taken over, not downloaded again (archive of
+      deleted cards, original names in the folder)
+- [x] Card pictures made in memory from the downloads; avatars named after
+      the artist; dots green / yellow / red; links on the card open the site
 
 ## Next
 
-- [ ] Sites that need a login: XenForo, X, Patreon, Pixiv, DeviantArt. A
-      login window in Sourcerer stores the session's cookies in `Userdata/`
-      (never logged, never committed); per source the dialog shows "account
-      ok" / "login needed", the toolbar which sites are logged in. Gentler
-      defaults there: one request at a time, longer pauses -- an account can
-      be locked.
+- [ ] Forums with a strict bot check (VerticalScope's `xf_is_suspected_bot`
+      409, Cloudflare challenges): fetch their pages through the login
+      window's browser engine, which passes where Python's requests do not.
+- [ ] A licence for Sourcerer. Until there is one, gallery-dl (GPL-2.0)
+      stays a separate process.
+- [ ] DeviantArt (gallery-dl lists it without a login, but not always the original)
 - [ ] Updater, first real run on Windows and macOS (simulated on Linux:
       swap, rollback, restart)
 - [ ] Where Sourcerer hands files to TrackImage, and how duplicates are matched

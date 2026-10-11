@@ -98,6 +98,10 @@ def main(argv=None):
     _logging()
     db.init()
     shutil.rmtree(config.UPDATE_DIR, ignore_errors=True)    # an update that never got installed
+    # Up to v0.5 the cards' pictures were copied into Userdata/Thumbs; they are
+    # made in memory now, and the copies are only clutter.
+    shutil.rmtree(config.USERDATA / "Thumbs", ignore_errors=True)
+    sync.name_avatars()
     _after_update()
     net.configure(per_host=db.setting_int("per_host", 1, 8), pace_ms=db.setting_int("pace_ms", 0, 5000))
     sync.scheduler()

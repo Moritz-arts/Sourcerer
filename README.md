@@ -58,33 +58,52 @@ Open Anyway**.
    parallel downloads, how gently sites are treated, theme, card size,
    updates (**Stable** or **Beta**) and repair.
 
-A file you delete from the library is not downloaded again.
+A file you delete from the library is not downloaded again, and a file that
+is already there is not downloaded twice: delete a card and make it again, or
+point a card at a folder you collected by hand, and Sourcerer takes over what
+it finds under the files' own names.
 
 Shortcuts: `Ctrl+N` new card, `Ctrl+F` search, `F5` sync all, `Ctrl+,`
 settings, arrow keys select a card, `Enter` edits it, `U` syncs it, `Del`
 deletes it, `Ctrl` + mouse wheel sizes the cards, right-click opens a card's
 menu. The full list is in Settings › Keyboard & mouse.
 
-Today Mastodon (and the fediverse) and Bluesky are downloaded. Links to other
-sites stay on the card until their site is supported.
+Sites downloaded today: **Bluesky**, **Mastodon** (and the fediverse),
+**Pixiv**, **Patreon**, **X** and **XenForo** forums (a member's media
+gallery, an album or a thread). Links to other sites stay on the card until
+their site is supported. The dot beside each link says how it fares: green
+works, yellow works with a catch (a login, a bot check, a site asking to slow
+down), red does not work, grey is not checked yet.
+
+**Accounts** (Settings › Accounts): X needs a login, Pixiv shows R-18 works
+and Patreon a patron's posts only to a logged-in account, and many forums
+show their media to members only. Log in once in Sourcerer's own window;
+Sourcerer keeps that site's cookies on this computer, never the password.
+When a login runs out, the bottom bar says so until you log in again.
 
 ## How Sourcerer talks to sites
 
-Sourcerer reads public posts through each site's official interface — the
-Mastodon API and Bluesky's AT Protocol — not by scraping web pages. It says
-who it is in every request (`Sourcerer/<version>`, with a link to this
-repository) and never pretends to be a browser. To stay far below what the
+Sourcerer reads posts through the interfaces the sites' own pages use — the
+Mastodon API, Bluesky's AT Protocol, Pixiv's and Patreon's JSON — and says who
+it is in every request (`Mozilla/5.0 (compatible; Sourcerer/<version>; +<this
+repository>)`, the form search engines use). To stay far below what the
 sites allow:
 
 - at most 2 requests to one site at a time, with a pause between them
-  (both adjustable in Settings › Sites & network);
-- a "too many requests" answer is waited out for as long as the site asks;
+  (both adjustable in Settings › Sites & network), and stricter limits
+  where a site asks for them: Pixiv one request every 1.5 s, Patreon one a
+  second, X 1.5–3 s between pages;
+- a "too many requests" answer is waited out for as long as the site asks —
+  on Pixiv the sync stops and the next one carries on;
+- a first sync of a big Pixiv or X account takes a few hundred files at a
+  time and continues with the next sync;
 - after the first sync, only the newest posts are looked at;
 - automatic syncs start at a slightly different minute every time.
 
-Public posts need no account, so there is no account that could be locked.
-Sites that need a login (X, Patreon, Pixiv, XenForo forums) are not supported
-yet; they will come with the same care and gentle defaults.
+X is read with [gallery-dl](https://codeberg.org/mikf/gallery-dl), which keeps
+up with X's ever-changing insides; Sourcerer updates it once a week (or in
+Settings › Updates). A logged-in account is still an account that X can
+lock: Sourcerer keeps its X traffic low and stops at once when X objects.
 
 ## Layout
 

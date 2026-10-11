@@ -5,17 +5,20 @@
     normalize(url)       the profile URL behind any page of it (a post, /media, ...)
     profile(url)         {"name", "handle", "avatar"}: who the account is
     pages(url)           yields lists of Media, newest first, one API page each
+    MAX_NEW (optional)   at most this many new files per sync; the next carries on
 
 A site that is not here yet is still accepted as a source and shown as "not
 supported yet", so an artist card can list every place the artist posts.
 """
+import logging
 import re
 import urllib.parse
 from dataclasses import dataclass
 
-from . import bluesky, mastodon
+from . import bluesky, mastodon, patreon, pixiv, x, xenforo
 
-SITES = [bluesky, mastodon]
+SITES = [bluesky, pixiv, x, patreon, xenforo, mastodon]
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -28,6 +31,12 @@ class Media:
     mime: str = ""       # content type when the site states it
     filename: str = ""   # the file's own name on the site, when it has one
     headers: dict = None  # what the file's host wants with the request (pixiv: a Referer)
+    # fetch(folder, progress) -> net.download's tuple, for a file whose address
+    # costs a request of its own: asked for when it downloads, not while scanning.
+    fetch: object = None
+    # Glob patterns a copy already in the card's folder would match, where the
+    # name is not known before the download (pixiv's hashed names).
+    local: list = None
 
 
 class LoginRequired(Exception):
@@ -69,7 +78,6 @@ _TAILS = {
     "Pixiv": r"^((?:/[a-z]{2})?/users/\d+)(?:/(?:artworks|illustrations|manga|bookmarks/.*).*)?/?$",
     "DeviantArt": r"^(/[^/?#]+)(?:/(?:gallery|art|favourites|posts)(?:/.*)?)?/?$",
     "Instagram": r"^(/[^/?#]+)(?:/(?:reels|tagged|p/.*))?/?$",
-    "Patreon": r"^(/(?:c/)?[^/?#]+)(?:/(?:posts|about|membership).*)?/?$",
 }
 
 
@@ -93,7 +101,11 @@ def normalize(url):
     url = url.split("#", 1)[0].rstrip("/")
     site = site_for(url)
     if site:
-        return site.normalize(url)
+        try:
+            return site.normalize(url)
+        except Exception as e:        # a work's link that needs a request: keep it as it is
+            log.info("could not normalise %s: %s", url, e)
+            return url
     name = _known(url)
     parts = urllib.parse.urlparse(url)
     if name in _TAILS:

@@ -11,7 +11,6 @@ REPO = "Moritz-arts/Sourcerer"
 USERDATA = ROOT / "Userdata"
 DB_PATH = USERDATA / "sourcerer.db"
 LOG_DIR = USERDATA / "Logs"
-THUMBS = USERDATA / "Thumbs"
 AVATARS = USERDATA / "Avatars"
 # An update is unpacked here: inside Userdata, which the update carries
 # across, so the install folder never shows a stray staging folder.
@@ -20,7 +19,10 @@ UPDATE_DIR = USERDATA / "_update"
 # installation, so nothing is written elsewhere without being asked.
 DEFAULT_LIBRARY = USERDATA / "Library"
 
-USER_AGENT = "Sourcerer/%s (+https://github.com/%s)" % (VERSION, REPO)
+# The crawler convention (as Googlebot's): "Mozilla/5.0 (compatible; ...)" names
+# Sourcerer and where it comes from, and passes the CDNs that challenge any
+# User-Agent not starting with Mozilla/5.0 -- pixiv's Cloudflare did, for logged-in requests.
+USER_AGENT = "Mozilla/5.0 (compatible; Sourcerer/%s; +https://github.com/%s)" % (VERSION, REPO)
 
 # Every setting and what it is until somebody changes it. Stored as text.
 DEFAULTS = {
@@ -35,4 +37,5 @@ DEFAULTS = {
     "per_host": "2",            # downloads at once from one site
     "pace_ms": "250",           # pause between two requests to one site
     "channel": "stable",        # updates: 'stable' (releases) or 'beta' (newest build)
+    "gdl_updated": "",          # when gallery-dl was last brought up to date (weekly)
 }
