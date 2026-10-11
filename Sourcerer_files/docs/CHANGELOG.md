@@ -5,6 +5,12 @@ automatically -- one line per change, newest first. A release is drafted by hand
 from the tag of whichever version is judged ready, and this is the text to paste
 into it.
 
+## v0.7 — 2026-10-11
+
+- Updates leave Userdata and venv where they are, log every step at once, and report a failed update on the next start
+- Logins for every site, boorus as a source, and Mastodon servers and forums with a bot check work again
+- Logins and boorus hold up under review: no lasting TLS downgrade, foreign pages refused, dead logins read as a visitor
+
 ## v0.6 — 2026-10-11
 
 - Pixiv, Patreon, X and XenForo forums are downloaded; files already there are not downloaded again; a warning when a login runs out
