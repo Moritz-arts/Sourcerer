@@ -8,17 +8,24 @@ stricter ones (HOSTS). A 429 or 5xx is waited out, honouring Retry-After,
 except on the hosts in STOP_HOSTS: there the source stops and the next sync
 carries on. Sourcerer says who it is in its User-Agent and never pretends to
 be a browser on the public APIs it uses.
+
+Connections are TLS 1.3 only, on Python's own defaults (_Tls13): bot checks
+(baraag.net's, the big forum networks') refuse the handshake urllib3 makes --
+the one every Python scraper makes -- whatever the headers say. A server
+without TLS 1.3 is remembered and gets the usual handshake (_OLD_TLS).
 """
 import hashlib
 import logging
 import mimetypes
 import os
 import re
+import ssl
 import threading
 import time
 import urllib.parse
 
 import requests
+from requests.adapters import HTTPAdapter
 
 from . import accounts, config
 
@@ -33,7 +40,13 @@ _limits = {"per_host": 2, "pace": 0.25}
 
 # Sites stricter than Settings: (requests at once, seconds apart). With
 # Settings, the gentler of the two wins.
-HOSTS = {"www.pixiv.net": (1, 1.5), "i.pximg.net": (2, 0.4), "www.patreon.com": (1, 1.0)}
+HOSTS = {"www.pixiv.net": (1, 1.5), "i.pximg.net": (2, 0.4), "www.patreon.com": (1, 1.0),
+         # The boorus' APIs: e621 asks for at most one request a second, the others
+         # are run by volunteers on donated servers.
+         "danbooru.donmai.us": (1, 1.0), "safebooru.donmai.us": (1, 1.0), "e621.net": (1, 1.0),
+         "e926.net": (1, 1.0), "gelbooru.com": (1, 1.0), "api.rule34.xxx": (1, 1.0),
+         "safebooru.org": (1, 1.0), "yande.re": (1, 1.0), "konachan.com": (1, 1.0),
+         "konachan.net": (1, 1.0), "www.sakugabooru.com": (1, 1.0)}
 # Not retried on a 429 or a bot check. pixiv's terms forbid "large numbers of
 # actions within a short period"; tools that kept retrying there had accounts restricted.
 STOP_HOSTS = {"www.pixiv.net"}
@@ -58,11 +71,40 @@ def configure(per_host=None, pace_ms=None):
             _limits["pace"] = max(0, int(pace_ms)) / 1000.0
 
 
-def _session():
+def _tls13():
+    ctx = ssl.create_default_context()
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_3
+    return ctx
+
+
+class _Tls13(HTTPAdapter):
+    """Python's default TLS context, TLS 1.3 only. baraag.net answered 403
+    and VerticalScope's forums 409 (or nothing) to urllib3's handshake, while
+    this one, curl's and a browser's passed -- with the same honest headers."""
+
+    def init_poolmanager(self, *args, **kwargs):
+        kwargs["ssl_context"] = _tls13()
+        return super().init_poolmanager(*args, **kwargs)
+
+    def proxy_manager_for(self, *args, **kwargs):
+        kwargs["ssl_context"] = _tls13()
+        return super().proxy_manager_for(*args, **kwargs)
+
+
+# Hosts without TLS 1.3 get the usual handshake. They refuse 1.3 with an alert
+# (gelbooru.com) or simply hang up (Amazon's older load balancers) -- any
+# failed handshake but a certificate that does not check out.
+_OLD_TLS = set()
+
+
+def _session(host=""):
     s = getattr(_local, "session", None)
     if s is None:
         s = _local.session = requests.Session()
         s.headers["User-Agent"] = config.USER_AGENT
+        s.mount("https://", _Tls13())
+    if host in _OLD_TLS and "https://%s/" % host not in s.adapters:
+        s.mount("https://%s/" % host, HTTPAdapter())     # the longer prefix wins
     return s
 
 
@@ -92,35 +134,31 @@ class _Polite:
         self.sem.release()
 
 
-def _get(url, params=None, stream=False, headers=None):
+def _get(url, params=None, stream=False, headers=None, method="GET", data=None, json=None):
     """A response, retrying what passes with time. The caller holds _Polite(url).
 
-    A site the user logged in to gets its saved cookies (accounts.py) -- per
-    request, never in the shared session, so they reach no other host. As a
-    Cookie header of their own: requests' cookies= is sent in addition to what
-    the session caught from earlier answers, and pixiv read its guest
-    PHPSESSID from there first, so a logged-in sync silently ran as a guest.
+    A site the user logged in to gets what proves the login (accounts.py) --
+    per request, never in the shared session, so it reaches no other host.
+    Cookies go as a Cookie header of their own: requests' cookies= is sent in
+    addition to what the session caught from earlier answers, and pixiv read
+    its guest PHPSESSID from there first, so a logged-in sync silently ran as
+    a guest. A POST (a login's token) is sent once, never repeated.
     """
-    jar = accounts.cookies_for(url)
-    if jar:
-        headers = dict(headers or {}, Cookie="; ".join("%s=%s" % kv for kv in jar.items()))
-    ua = accounts.user_agent_for(url)          # a Cloudflare pass holds only with its browser's
-    if ua:
-        headers = dict(headers or {}, **{"User-Agent": ua})
+    headers = dict(accounts.headers_for(url), **(headers or {}))
     host = urllib.parse.urlparse(url).hostname or ""
-    for attempt in range(RETRIES):
+    tries = RETRIES if method == "GET" else 1
+    attempt = 0
+    while attempt < tries:
         try:
-            resp = _session().get(url, params=params, stream=stream, timeout=TIMEOUT,
-                                  headers=headers)
+            resp = _session(host).request(method, url, params=params, stream=stream, timeout=TIMEOUT,
+                                          headers=headers, data=data, json=json)
             if resp.headers.get("cf-mitigated") == "challenge":
                 resp.close()
                 raise SlowDown("%s showed a bot check; the next sync tries again" % host)
             if resp.status_code == 429 and host in STOP_HOSTS:
                 resp.close()
                 raise SlowDown("%s asks Sourcerer to slow down; the next sync carries on" % host)
-            if resp.status_code == 429 or resp.status_code >= 500:
-                if attempt == RETRIES - 1:
-                    resp.raise_for_status()
+            if (resp.status_code == 429 or resp.status_code >= 500) and attempt < tries - 1:
                 wait = resp.headers.get("Retry-After", "")
                 try:          # Patreon says it in the body: errors[0].retry_after_seconds
                     wait = wait or str(int(resp.json()["errors"][0]["retry_after_seconds"]))
@@ -128,16 +166,22 @@ def _get(url, params=None, stream=False, headers=None):
                     pass
                 resp.close()
                 delay = min(int(wait), 300) if wait.isdigit() else 5 * 2 ** attempt
-                log.info("%s answered %s; waiting %ss", urllib.parse.urlparse(url).hostname,
-                         resp.status_code, delay)
+                log.info("%s answered %s; waiting %ss", host, resp.status_code, delay)
                 time.sleep(delay)
+                attempt += 1
                 continue
             resp.raise_for_status()
             return resp
+        except requests.exceptions.SSLError as e:
+            if host in _OLD_TLS or "CERTIFICATE" in str(e):
+                raise
+            log.info("%s speaks no TLS 1.3; using TLS 1.2 there", host)
+            _OLD_TLS.add(host)                   # and the same attempt again, the old way
         except (requests.ConnectionError, requests.Timeout):
-            if attempt == RETRIES - 1:
+            if attempt >= tries - 1:
                 raise
             time.sleep(3 * (attempt + 1))
+            attempt += 1
     raise RuntimeError("no answer from %s" % url)
 
 
@@ -180,6 +224,12 @@ def get_json(url, params=None, headers=None):
     params = {k: v for k, v in (params or {}).items() if v is not None}
     with _Polite(url):
         return _get(url, params, headers=headers).json()
+
+
+def post_json(url, data=None, json=None, headers=None):
+    """A login's request (a token, a session): sent once, the answer as JSON."""
+    with _Polite(url):
+        return _get(url, headers=headers, method="POST", data=data, json=json).json()
 
 
 def get_text(url, params=None, headers=None):
@@ -227,6 +277,11 @@ def download(url, folder, mime_hint="", progress=None, headers=None):
 def _stream(url, part, digest, mime_hint, progress, headers):
     resp = _get(url, stream=True, headers=headers)
     try:
+        # A web page where a file should be: a hotlink guard or a login wall,
+        # never something to keep under a picture's name.
+        if (resp.headers.get("Content-Type") or "").startswith("text/html") and \
+                not mime_hint.startswith("text/html"):
+            raise RuntimeError("%s sent a web page instead of the file" % urllib.parse.urlparse(url).hostname)
         ext = extension(resp.headers.get("Content-Type") or mime_hint, url)
         name = _disposition_name(resp.headers.get("Content-Disposition"))
         with open(part, "wb") as out:

@@ -6,6 +6,10 @@
     profile(url)         {"name", "handle", "avatar"}: who the account is
     pages(url)           yields lists of Media, newest first, one API page each
     MAX_NEW (optional)   at most this many new files per sync; the next carries on
+    account_key(url)     the login (accounts.py) a source uses, if the site has logins
+    LOGIN (optional)     ("required" or "recommended", why) -- said in the card dialog
+                         while that login is missing; login_need(url) where it varies
+    still_logged_in(key) (optional) whether the site still takes a saved login
 
 A site that is not here yet is still accepted as a source and shown as "not
 supported yet", so an artist card can list every place the artist posts.
@@ -15,9 +19,10 @@ import re
 import urllib.parse
 from dataclasses import dataclass
 
-from . import bluesky, mastodon, patreon, pixiv, x, xenforo
+from . import bluesky, booru, mastodon, patreon, pixiv, x, xenforo
 
-SITES = [bluesky, pixiv, x, patreon, xenforo, mastodon]
+# booru before mastodon: a booru's /users/ pages look like the fediverse's.
+SITES = [bluesky, pixiv, x, patreon, xenforo, booru, mastodon]
 log = logging.getLogger(__name__)
 
 
@@ -50,6 +55,23 @@ def site_for(url):
     return None
 
 
+def account_key(url):
+    """The login a source would use, or None for a site without logins."""
+    site = site_for(url)
+    fn = getattr(site, "account_key", None)
+    return fn(url) if fn else None
+
+
+def login_need(url):
+    """(need, why): whether a link needs a login ("required"), works better with
+    one ("recommended") or not at all (None, "")."""
+    site = site_for(url)
+    if not site:
+        return None, ""
+    fn = getattr(site, "login_need", None)
+    return fn(url) if fn else getattr(site, "LOGIN", (None, ""))
+
+
 def kind_of(url):
     site = site_for(url)
     return site.KIND if site else "unsupported"
@@ -59,7 +81,8 @@ def kind_of(url):
 # Any other link -- a second account, another site -- goes into a row below.
 FIELDS = [("Bluesky", "bsky.app/profile/name"), ("Mastodon", "mastodon.social/@name"),
           ("XenForo", "forum.example/media/users/name.123"), ("Patreon", "patreon.com/name"),
-          ("X", "x.com/name"), ("Pixiv", "pixiv.net/users/12345")]
+          ("X", "x.com/name"), ("Pixiv", "pixiv.net/users/12345"),
+          ("Booru", "danbooru.donmai.us/posts?tags=artist_name")]
 
 
 # Sites an artist card may list before Sourcerer can download from them, so the

@@ -10,8 +10,9 @@ what people download and unpack is these folders, unchanged.
 `launch.py` behind them; the program — a window with artist cards, a card
 dialog (sources with a live dot each, own folder, master source, folder
 layout, what to do with the same picture from two sources), a queued
-background sync that downloads from Bluesky, Mastodon, Pixiv, Patreon, X and
-XenForo forums, logins in its own window, settings like TrackImage's, and an
+background sync that downloads from Bluesky, Mastodon, Pixiv, Patreon, X,
+XenForo forums and boorus, a login for every site (checked at each start),
+settings like TrackImage's, and an
 updater with Stable/Beta and repair; and the workshop —
 these notes, the docs and the automation that versions every push. `Sourcerer_files/sourcerer/__init__.py`
 lists the program's layers.
@@ -283,7 +284,9 @@ Do not create releases or tags yourself, and do not push to `main`.
 - **An expired login often fails silently.** Patreon's /api/posts answers an
   expired session_id as a guest; pixiv answers 401. Check the login itself
   (`patreon.whoami`, `sync._still_logged_in`) and mark it (`accounts.mark`);
-  a login that ran out shows as a warning until renewed.
+  a login that ran out shows as a warning until renewed. Every start checks
+  each saved login once (`sync.check_accounts_at_start`) and says the
+  outcome in the activity log.
 - **Originals, again:** Patreon's `image_urls.original` is a re-encode -- use
   the media's `download_url`. pixiv's original names often carry a hash
   that cannot be guessed (`<id>-<hash>_p0.jpg`): resolve them at download
@@ -293,10 +296,43 @@ Do not create releases or tags yourself, and do not push to `main`.
   cookies reach it through a mode-600 config file per run, never the command
   line; its cache (login state) lives in `Userdata/gallery-dl/`. An expired X
   session shows up as a login-page redirect and a bare "403 Forbidden".
-- **Many forums take Python for a bot** where curl passes, whatever the
-  headers (VerticalScope: 409 and `xf_is_suspected_bot`; Cloudflare: 403
-  challenge). `net.reason` says so. Such forums need the login window's
-  browser engine; that is not built yet.
+- **Bot checks read the TLS handshake, not the headers.** baraag.net
+  answered 403 and VerticalScope's forums 409 (`xf_is_suspected_bot`) or
+  nothing to requests/urllib3 -- with any headers -- while curl passed:
+  urllib3's handshake is the one every Python scraper makes. Python's own
+  default context limited to TLS 1.3 passes (`net._Tls13`, and
+  gallery-dl's `tls12: false` for forums). A host without TLS 1.3
+  (gelbooru.com refuses it, old Amazon balancers hang up) is remembered in
+  `net._OLD_TLS` and gets the usual handshake. It changes nothing about who
+  Sourcerer says it is. A Cloudflare challenge (e926, some forums) is
+  another matter: only a browser passes it -- the login window's
+  `cf_clearance` for a forum.
+- **Four ways to log in** (`accounts.kind`): `window` (cookies: X, Patreon,
+  Pixiv, `xenforo:<host>`), `oauth` (Mastodon, `mastodon:<server>`: the
+  server's own Authorize page in the login window, out-of-band redirect,
+  read-only token), `password` (Bluesky: an app password opens a session;
+  the account's real password is refused -- its JWT says
+  `com.atproto.access` instead of `appPass`), `api_key` (`booru:<host>`).
+  Cookies go to a site's hosts through `net.py`; tokens and keys are added
+  by the site's module to its API requests only. A source names its login
+  with `account_key(url)` and says how much it needs one with `LOGIN` /
+  `login_need(url)`, which the card dialog shows under the link.
+- **Boorus** (`sources/booru.py`): never fetch rule34.xxx itself (an image
+  captcha) -- its API is api.rule34.xxx, its images wimg.rule34.xxx (api-cdn
+  sometimes answers with a hotlink page; `net` refuses an HTML answer
+  where a file should be). gelbooru.com answers its API only with a key
+  (401, empty body); rule34 says "Missing authentication" with a 200.
+  Danbooru allows two tags per search; page with `page=b<id>` and `id:<N`,
+  never page numbers (capped at 1000). e926 is asked through e621.net
+  with `rating:s`. Mirrors that share post ids and files (konachan.net,
+  e926, safebooru.donmai.us) key their files as the main site
+  (`SAME_POSTS`), so one post is one file. Moebooru gets no login: its
+  API shows guests everything. realbooru's API is switched off.
+- **Bluesky allows only a few new sessions a day** (10 per identifier at
+  the entryway). Never call createSession on your own: keep and rotate the
+  refresh token; a dead one is an expired login, not a reason to log in
+  again. Renew by the token's own lifetime (exp - iat from when it came),
+  not the computer's clock, and once more on `ExpiredToken`.
 - **A file already there is never downloaded again** (`sync._adopt`): the
   `archive` table keeps what deleted cards had, and a file under its own name
   in the card's folder (`_local_names`, `Media.local`) is taken over.

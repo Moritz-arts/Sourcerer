@@ -267,18 +267,12 @@
 
       <section data-pane="accounts">
         <h3>Accounts</h3>
-        <p class="hint big">X, Patreon, Pixiv and many forums show everything only to members. Log in
-          once: the site's own login page opens in a window of Sourcerer's, and as soon as you are in,
-          Sourcerer keeps that site's cookies on this computer &ndash; never your password, and nowhere else.
-          On a forum, tick "Stay logged in".</p>
+        <p class="hint big">Some sites show everything only to members, others nothing at all without
+          a login. Log in once: X, Patreon, Pixiv, forums and Mastodon open their own login page in a window
+          of Sourcerer's; Bluesky takes an app password, a booru the API key from your account settings.
+          Sourcerer keeps what proves the login on this computer &ndash; never your password, and nowhere
+          else &ndash; and checks every login at each start. On a forum, tick "Stay logged in".</p>
         <div id="acc-list"></div>
-        <div class="field acc-forum">
-          <span class="label">Another XenForo forum</span>
-          <div class="addrow tight">
-            <input id="acc-forum" type="text" placeholder="forum.example.com" autocomplete="off">
-            <button type="button" id="btn-acc-forum">Log in</button>
-          </div>
-        </div>
         <p class="hint">Sourcerer open in the browser instead of its own window? Export the site's cookies
           with a browser extension such as "Get cookies.txt LOCALLY" and import the file with
           <b>Import&hellip;</b>. Log out deletes what Sourcerer kept.</p>

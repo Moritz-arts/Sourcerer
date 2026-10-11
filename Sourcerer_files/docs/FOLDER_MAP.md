@@ -18,16 +18,17 @@ Sourcerer/                        <- what Sourcerer.zip unpacks to; move it free
     ├─ sourcerer/                 the Python package; layers listed in __init__.py
     │   ├─ config.py              paths, version, user agent, setting defaults
     │   ├─ db.py                  SQLite: artists, sources, files, settings
-    │   ├─ net.py                 HTTP (requests): JSON, downloads, per-site limits
+    │   ├─ net.py                 HTTP (requests, TLS 1.3 first): JSON, downloads, per-site limits
     │   ├─ imaging.py             fingerprints, sizes, thumbnails, avatars (Pillow)
     │   ├─ sources/               one module per site
     │   │   ├─ __init__.py        Media, site_for, normalize, describe, profile
-    │   │   ├─ mastodon.py        Mastodon / fediverse, public API
-    │   │   ├─ bluesky.py         Bluesky, public API, original blobs
+    │   │   ├─ mastodon.py        Mastodon / fediverse, its API; login per server (OAuth)
+    │   │   ├─ bluesky.py         Bluesky, its API, original blobs; login with an app password
     │   │   ├─ pixiv.py           Pixiv, its own pages' JSON; originals need a Referer
     │   │   ├─ patreon.py         Patreon, its own pages' JSON; media download_url
     │   │   ├─ x.py               X, listed by gallery-dl, logged in
     │   │   ├─ xenforo.py         XenForo forums (media gallery, albums, threads)
+    │   │   ├─ booru.py           boorus: Danbooru / e621, Gelbooru 0.2, Moebooru; API keys
     │   │   └─ _gdl.py            gallery-dl as a separate process: lists, never downloads
     │   ├─ sync.py                sync queue, scan then download, dedupe, folders,
     │   │                           automatic sync, link checks, profile pictures
@@ -50,8 +51,9 @@ Sourcerer/                        <- what Sourcerer.zip unpacks to; move it free
         ├─ sourcerer.db           artists, sources, every file seen, settings
         ├─ running.json           the running Sourcerer's pid and port: launch.py
         │                           waits for it, a second start uses it
-        ├─ Accounts/              logins: one file of cookies per site or forum,
-        │                           readable by this user only -- never shipped
+        ├─ Accounts/              logins: one file per site, forum, Mastodon server or
+        │                           booru -- cookies, a token, a session or an API key,
+        │                           readable by this user only, never shipped
         ├─ Logs/                  sourcerer.log; update.log (the update helper's
         │                           steps); console.log (the program's own output)
         ├─ Avatars/               profile pictures, <artist>.jpg

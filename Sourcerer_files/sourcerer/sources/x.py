@@ -23,6 +23,7 @@ _RESERVED = {"home", "i", "explore", "search", "settings", "notifications", "mes
              "intent", "share", "hashtag", "login", "logout", "signup", "tos", "privacy", "jobs"}
 OPTIONS = {"sleep-request": "1.5-3.0", "ratelimit": "wait", "locked": "abort",
            "retweets": False, "quoted": False, "text-tweets": False, "videos": True}
+LOGIN = ("required", "X shows a profile's media only to logged-in accounts.")
 FIELDS = {"url": "{_url!j}", "tweet": "{tweet_id!j}", "num": "{num!j}", "key": "{filename!j}",
           "ext": "{extension!j}", "date": '"{date:%Y-%m-%dT%H:%M:%SZ}"', "user": "{author[name]!j}"}
 
@@ -34,6 +35,10 @@ def match(url):
 
 def _name(url):
     return _URL.match(url.strip()).group(1)
+
+
+def account_key(url):
+    return "x"
 
 
 def normalize(url):

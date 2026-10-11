@@ -36,6 +36,7 @@ _TEASERS = {"clip_start_screen", "video_preview", "vertical_video_preview"}
 _CAMPAIGN_FIELDS = "name,url,vanity,avatar_photo_url,avatar_photo_image_urls"
 _campaigns = {}      # url -> (when, campaign): the profile and the pages of one sync ask once
 CAMPAIGN_SECONDS = 600
+LOGIN = ("recommended", "Logged out, only public posts come; a patron's posts need the login.")
 
 
 def _parse(url):
@@ -66,6 +67,10 @@ def _parse(url):
 
 def match(url):
     return _parse(url) is not None
+
+
+def account_key(url):
+    return "patreon"
 
 
 def normalize(url):
@@ -155,6 +160,10 @@ def pages(url):
         cursor = (((doc.get("meta") or {}).get("pagination") or {}).get("cursors") or {}).get("next")
         if not cursor or not doc.get("data"):
             return
+
+
+def still_logged_in(key):
+    return whoami() is not None
 
 
 def whoami():

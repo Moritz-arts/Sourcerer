@@ -84,7 +84,7 @@ button.flat { border-color: transparent; }
 button.mini { font-size: 12px; padding: 3px 8px; }
 button.danger { color: var(--text-danger); }
 
-input[type=text], input:not([type]), select {
+input[type=text], input[type=password], input:not([type]), select {
   font: inherit; font-size: 13px; height: 30px; padding: 4px 10px; width: 100%;
   background: var(--surface-2); color: var(--text-primary);
   border: .5px solid var(--border-strong); border-radius: 6px; outline: none;
@@ -296,6 +296,12 @@ p.error:empty { display: none; }   /* p only: a status dot is .dot.error, and em
 .srcrow .crown { color: var(--text-warning); }
 .srcrow .point { color: var(--text-muted); }
 .srcempty { padding: 10px; font-size: 13px; color: var(--text-muted); }
+.srcnote { display: flex; align-items: center; gap: 8px; margin: 0 6px 6px 38px; padding: 5px 6px 5px 10px; border-radius: var(--radius);
+  background: var(--bg-warning); color: var(--text-warning); font-size: 12px; line-height: 1.4; }
+.srcnote span { flex: 1; min-width: 0; }
+.srcnote .ic { flex: none; }
+.srcnote.soft { background: none; color: var(--text-muted); padding-top: 0; margin-top: -4px; }
+.srcnote + .srcrow { border-top: .5px solid var(--border); }
 .addrow { display: flex; gap: 8px; margin-top: 8px; }
 .addrow.tight { margin-top: 0; }
 .addrow button { flex: none; }
@@ -341,6 +347,17 @@ p.error:empty { display: none; }   /* p only: a status dot is .dot.error, and em
 .row .hint { margin-top: 2px; }
 .row-title { font-size: 13px; font-weight: 500; }
 .row > button { flex: none; min-width: 96px; justify-content: center; }
+.row.focus .row-title { color: var(--text-accent); }
+.acc-group { font-size: 11px; font-weight: 500; letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted); margin: 18px 0 0; }
+.acc-add { padding: 8px 0 10px; border-bottom: .5px solid var(--border); }
+.acc-add .label { display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; }
+.acc-add select { flex: 1; }
+/* form.acc-form: .dlg form makes every form in a dialog a flex column. */
+.dlg form.acc-form { display: grid; grid-template-columns: max-content 1fr; gap: 6px 12px; align-items: center; padding: 4px 0 12px 22px;
+  border-bottom: .5px solid var(--border); font-size: 13px; }
+.acc-form label { color: var(--text-secondary); }
+.acc-form .hint, .acc-form p.error { margin: 0; }
+.acc-form input[type=password] { font: inherit; }
 .switch { position: relative; width: 38px; height: 22px; flex: none; cursor: pointer; }
 .switch input { opacity: 0; width: 0; height: 0; position: absolute; }
 .switch span { position: absolute; inset: 0; border-radius: 11px; background: var(--border-strong); transition: background .15s; }
