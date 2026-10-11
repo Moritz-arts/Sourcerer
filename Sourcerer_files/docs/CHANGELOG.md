@@ -5,6 +5,10 @@ automatically -- one line per change, newest first. A release is drafted by hand
 from the tag of whichever version is judged ready, and this is the text to paste
 into it.
 
+## v0.6 — 2026-10-11
+
+- Pixiv, Patreon, X and XenForo forums are downloaded; files already there are not downloaded again; a warning when a login runs out
+
 ## v0.5 — 2026-10-11
 
 - The console closes once Sourcerer is up; the card dialog has a field per site; logins under Settings > Accounts
