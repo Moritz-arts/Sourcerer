@@ -42,6 +42,8 @@
   <symbol id="i-external" viewBox="0 0 24 24"><path d="M12 6h-6a2 2 0 0 0 -2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-6"/><path d="M11 13l9 -9"/><path d="M15 4h5v5"/></symbol>
   <symbol id="i-clock" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0"/><path d="M12 7v5l3 3"/></symbol>
   <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6l11 0"/><path d="M9 12l11 0"/><path d="M9 18l11 0"/><path d="M5 6l0 .01"/><path d="M5 12l0 .01"/><path d="M5 18l0 .01"/></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24"><path d="M16.555 3.843l3.602 3.602a2.877 2.877 0 0 1 0 4.069l-2.643 2.643a2.877 2.877 0 0 1 -4.069 0l-.301 -.301l-6.558 6.558a2 2 0 0 1 -1.239 .578l-.175 .008h-1.172a1 1 0 0 1 -.993 -.883l-.007 -.117v-1.172a2 2 0 0 1 .467 -1.284l.119 -.13l.414 -.414h2v-2h2v-2l2.144 -2.144l-.301 -.301a2.877 2.877 0 0 1 0 -4.069l2.643 -2.643a2.877 2.877 0 0 1 4.069 0z"/><path d="M15 9h.01"/></symbol>
+  <symbol id="i-power" viewBox="0 0 24 24"><path d="M7 6a7.75 7.75 0 1 0 10 0"/><path d="M12 4l0 8"/></symbol>
   <symbol id="i-stop" viewBox="0 0 24 24"><path d="M5 7a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2v10a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2z"/></symbol>
 </svg>
 
@@ -52,6 +54,7 @@
     <span class="grow"></span>
     <button id="btn-add" title="New card (Ctrl+N)"><svg class="ic"><use href="#i-plus"/></svg> New card</button>
     <button id="btn-sync-all" class="primary" title="Sync all cards (F5)"><svg class="ic"><use href="#i-refresh"/></svg> Sync all</button>
+    <button id="btn-quit" class="icon hidden" aria-label="Quit" title="Quit Sourcerer"><svg class="ic"><use href="#i-power"/></svg></button>
     <button id="btn-settings" class="icon" aria-label="Settings" title="Settings (Ctrl+,)"><svg class="ic"><use href="#i-settings"/></svg><span id="update-dot" class="dot hidden"></span></button>
   </header>
 
@@ -121,13 +124,9 @@
       <div>
         <div class="section">Sources</div>
         <div id="src-list" class="srclist"></div>
-        <div class="addrow">
-          <input id="src-input" type="text" placeholder="Paste a profile link, e.g. bsky.app/profile/name or mastodon.social/@name" autocomplete="off">
-          <button type="button" id="btn-src-add">Add</button>
-        </div>
-        <p class="hint">Downloads today from <span id="sites"></span>. Any page of a profile works
-           (its media tab, a single post) &ndash; Sourcerer finds the profile behind it. Links to other
-           sites stay on the card and are used as soon as Sourcerer supports them.</p>
+        <button type="button" id="btn-src-add" class="addlink"><svg class="ic"><use href="#i-plus"/></svg> Add another link</button>
+        <p class="hint">Paste any page of a profile &ndash; its media tab, a single post &ndash; and
+           Sourcerer finds the profile behind it. Leave the fields of sites the artist is not on empty.</p>
       </div>
 
       <div>
@@ -188,6 +187,7 @@
       <button data-pane="library" class="selected"><svg class="ic"><use href="#i-folder"/></svg> Library</button>
       <button data-pane="sync"><svg class="ic"><use href="#i-refresh"/></svg> Sync</button>
       <button data-pane="network"><svg class="ic"><use href="#i-world"/></svg> Sites &amp; network</button>
+      <button data-pane="accounts"><svg class="ic"><use href="#i-key"/></svg> Accounts</button>
       <button data-pane="appearance"><svg class="ic"><use href="#i-palette"/></svg> Appearance</button>
       <button data-pane="keys"><svg class="ic"><use href="#i-keyboard"/></svg> Keyboard &amp; mouse</button>
       <button data-pane="updates"><svg class="ic"><use href="#i-cloud-down"/></svg> Updates<span id="update-dot-2" class="dot hidden"></span></button>
@@ -263,6 +263,26 @@
         </div>
         <p class="hint">When a site says "too many requests", Sourcerer waits as long as the site asks
           before it tries again. Automatic syncs start at a slightly different minute each time.</p>
+      </section>
+
+      <section data-pane="accounts">
+        <h3>Accounts</h3>
+        <p class="hint big">X, Patreon, Pixiv and many forums show everything only to members. Log in
+          once: the site's own login page opens in a window of Sourcerer's, and as soon as you are in,
+          Sourcerer keeps that site's cookies on this computer &ndash; never your password, and nowhere else.
+          On a forum, tick "Stay logged in".</p>
+        <div id="acc-list"></div>
+        <div class="field acc-forum">
+          <span class="label">Another XenForo forum</span>
+          <div class="addrow tight">
+            <input id="acc-forum" type="text" placeholder="forum.example.com" autocomplete="off">
+            <button type="button" id="btn-acc-forum">Log in</button>
+          </div>
+        </div>
+        <p class="hint">Sourcerer open in the browser instead of its own window? Export the site's cookies
+          with a browser extension such as "Get cookies.txt LOCALLY" and import the file with
+          <b>Import&hellip;</b>. Log out deletes what Sourcerer kept.</p>
+        <input type="file" id="acc-file" accept=".txt,text/plain" class="hidden">
       </section>
 
       <section data-pane="appearance">

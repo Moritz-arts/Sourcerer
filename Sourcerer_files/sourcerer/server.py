@@ -16,11 +16,13 @@ import urllib.parse
 
 from flask import Flask, abort, jsonify, request, send_file, send_from_directory
 
-from . import config, db, imaging, net, sources, sync, updater
+from . import accounts, config, db, imaging, net, sources, sync, updater
 
 log = logging.getLogger(__name__)
 app = Flask(__name__, static_folder=None)
 WINDOW = None          # set by desktop.py when a pywebview window is open
+URL = ""               # where this server answers, for a second start to open
+LAST_SEEN = [time.monotonic()]   # when a page last asked for anything
 LAYOUTS = ("together", "per_source")
 DEDUPES = ("keep_all", "best", "master")
 # What Settings may change, and the values each may take.
@@ -38,7 +40,7 @@ def _status(s):
     if not s["supported"]:
         return "unsupported"
     if s["last_error"]:
-        return "error"
+        return "login" if s["last_error"].startswith(net.LOGIN) else "error"
     return "ok" if s["last_checked"] else "unknown"
 
 
@@ -174,10 +176,44 @@ def favicon():
     return send_from_directory(config.STATIC, "logo.svg", mimetype="image/svg+xml")
 
 
+@app.before_request
+def _seen():
+    LAST_SEEN[0] = time.monotonic()
+
+
+@app.get("/api/ping")
+def ping():
+    return jsonify(app="sourcerer", version=config.VERSION, pid=os.getpid())
+
+
+@app.post("/api/focus")
+def focus():
+    """A second start of Sourcerer asks this one to come forward instead."""
+    if WINDOW is not None:
+        try:
+            WINDOW.restore()
+            WINDOW.show()
+            WINDOW.on_top = True          # the only way past Windows' focus-stealing guard
+            WINDOW.on_top = False
+        except Exception as e:
+            log.info("could not bring the window forward: %s", e)
+    else:
+        import webbrowser
+        webbrowser.open(URL)
+    return jsonify(ok=True)
+
+
+@app.post("/api/quit")
+def quit_app():
+    _shutdown()
+    return jsonify(ok=True)
+
+
 @app.get("/api/state")
 def state():
     return jsonify(version=config.VERSION, library=sync.library(), sep=os.sep,
                    sites=[s.LABEL for s in sources.SITES], settings=db.settings(),
+                   fields=[{"label": label, "example": example} for label, example in sources.FIELDS],
                    artists=_artists(), sync=sync.status(), window=WINDOW is not None)
 
 
@@ -198,7 +234,8 @@ def detect():
         info.update(status="ok", name=_display_name(p.get("name")) or info["name"],
                     handle=p.get("handle", ""))
     except Exception as e:
-        info.update(status="error", error=net.reason(e))
+        why = net.reason(e)
+        info.update(status="login" if why.startswith(net.LOGIN) else "error", error=why)
     return jsonify(info)
 
 
@@ -397,6 +434,57 @@ def info():
                    program=str(config.INSTALL), userdata=str(config.USERDATA),
                    library=sync.library(), repo="https://github.com/%s" % config.REPO,
                    update_log=lines, window=WINDOW is not None)
+
+
+# ---- accounts -----------------------------------------------------------------------
+
+def _forum_hosts():
+    with db.connect() as con:
+        urls = [r[0] for r in con.execute("SELECT url FROM sources")]
+    return [accounts.host_of(u) for u in urls if sources.describe(u)["label"] == "XenForo"]
+
+
+def _account_key(body):
+    key = (body.get("key") or "").strip().lower()
+    if body.get("forum"):                      # a forum typed in by hand: its host is the key
+        key = "xenforo:" + accounts.host_of(sources.normalize(body["forum"]))
+    try:
+        accounts.describe(key)
+    except KeyError:
+        abort(400)
+    return key
+
+
+@app.get("/api/accounts")
+def get_accounts():
+    return jsonify(accounts=accounts.accounts(_forum_hosts()), window=WINDOW is not None)
+
+
+@app.post("/api/accounts/login")
+def account_login():
+    key = _account_key(request.get_json(force=True) or {})
+    if WINDOW is None:
+        return jsonify(error="Logging in needs Sourcerer's own window. In the browser, "
+                             "import a cookies.txt instead."), 501
+    accounts.login_in_window(key)
+    return jsonify(ok=True, key=key)
+
+
+@app.post("/api/accounts/logout")
+def account_logout():
+    accounts.logout(_account_key(request.get_json(force=True) or {}))
+    return jsonify(ok=True)
+
+
+@app.post("/api/accounts/import")
+def account_import():
+    body = request.get_json(force=True) or {}
+    key = _account_key(body)
+    try:
+        n = accounts.import_cookies_txt(key, body.get("text") or "")
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
+    return jsonify(ok=True, key=key, cookies=n)
 
 
 # ---- updates and repair --------------------------------------------------------------

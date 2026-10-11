@@ -26,6 +26,7 @@ Sourcerer/                        <- what Sourcerer.zip unpacks to; move it free
     │   │   └─ bluesky.py         Bluesky, public API, original blobs
     │   ├─ sync.py                sync queue, scan then download, dedupe, folders,
     │   │                           automatic sync, link checks, profile pictures
+    │   ├─ accounts.py            logins: login window, cookies.txt, saved cookies
     │   ├─ updater.py             updates and repair: Sourcerer.zip, the helper
     │   ├─ server.py              Flask: /api/* and the page
     │   └─ desktop.py             main(): server thread, window or browser
@@ -42,8 +43,12 @@ Sourcerer/                        <- what Sourcerer.zip unpacks to; move it free
     │   └─ pip-cache/               pip's downloads, kept out of the user's home
     └─ Userdata/                  NOT shipped -- created on first start
         ├─ sourcerer.db           artists, sources, every file seen, settings
+        ├─ running.json           the running Sourcerer's pid and port: launch.py
+        │                           waits for it, a second start uses it
+        ├─ Accounts/              logins: one file of cookies per site or forum,
+        │                           readable by this user only -- never shipped
         ├─ Logs/                  sourcerer.log; update.log (the update helper's
-        │                           steps); console.log (a restart's output, Linux)
+        │                           steps); console.log (the program's own output)
         ├─ Thumbs/                card thumbnails, rebuilt when missing
         ├─ Avatars/               profile pictures, <card id>.jpg
         ├─ _update/               an update being unpacked; gone after the swap

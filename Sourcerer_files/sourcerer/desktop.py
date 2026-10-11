@@ -2,10 +2,15 @@
 
 The window is pywebview, as in TrackImage. Where it cannot open (the package
 did not install, no WebView2 on Windows, no GTK/Qt bindings on Linux), the
-same page opens in the default browser and this console keeps Sourcerer
-running until it is closed.
+same page opens in the default browser.
+
+launch.py starts this detached from its console (SOURCERER_DETACHED) and waits
+for Userdata/running.json, which says that Sourcerer serves and on which port.
+In the browser there is then no console to close: the page's Quit button ends
+Sourcerer, and so does a page that has not been open for IDLE_MINUTES.
 """
 import argparse
+import json
 import logging
 import logging.handlers
 import os
@@ -19,6 +24,8 @@ from werkzeug.serving import make_server
 from . import config, db, net, server, sync
 
 log = logging.getLogger("sourcerer")
+RUNNING = config.USERDATA / "running.json"
+IDLE_MINUTES = 15
 
 
 def _logging():
@@ -57,6 +64,30 @@ def _after_update():
                    % last.split("  ", 1)[-1])
 
 
+def _announce(port):
+    RUNNING.write_text(json.dumps({"app": "sourcerer", "pid": os.getpid(), "port": port,
+                                   "version": config.VERSION, "started": time.time()}),
+                       encoding="utf-8")
+
+
+def _forget():
+    try:
+        if json.loads(RUNNING.read_text(encoding="utf-8")).get("pid") == os.getpid():
+            RUNNING.unlink()
+    except (OSError, ValueError):
+        pass
+
+
+def _serve_until_idle():
+    """Browser mode without a console: run while a page is open, or a sync is."""
+    while True:
+        time.sleep(30)
+        if os.environ.get("SOURCERER_DETACHED") and not sync.status()["running"] and \
+                time.monotonic() - server.LAST_SEEN[0] > IDLE_MINUTES * 60:
+            log.info("No page open for %d minutes -- Sourcerer stops.", IDLE_MINUTES)
+            return 0
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="sourcerer")
     parser.add_argument("--browser", action="store_true", help="open in the browser, not a window")
@@ -74,23 +105,25 @@ def main(argv=None):
     url = "http://127.0.0.1:%d/" % httpd.server_port
     threading.Thread(target=httpd.serve_forever, daemon=True, name="server").start()
     log.info("Sourcerer v%s at %s", config.VERSION, url)
-
-    if not (args.browser or args.no_open):
-        try:
-            import webview
-            server.WINDOW = webview.create_window(
-                "Sourcerer v%s" % config.VERSION, url, width=1280, height=860, min_size=(760, 520))
-            webview.start()
-            return 0                                          # the window was closed
-        except Exception as e:
-            server.WINDOW = None
-            log.info("No app window (%s) -- opening the browser instead.", e)
-
-    if not args.no_open:
-        webbrowser.open(url)
-    print("\n  Sourcerer runs at %s -- close this window to stop it.\n" % url, flush=True)
+    server.URL = url
+    _announce(httpd.server_port)
     try:
-        while True:
-            time.sleep(3600)
+        if not (args.browser or args.no_open):
+            try:
+                import webview
+                server.WINDOW = webview.create_window(
+                    "Sourcerer v%s" % config.VERSION, url, width=1280, height=860, min_size=(760, 520))
+                webview.start()
+                return 0                                      # the window was closed
+            except Exception as e:
+                server.WINDOW = None
+                log.info("No app window (%s) -- opening the browser instead.", e)
+        if not args.no_open:
+            webbrowser.open(url)
+        if not os.environ.get("SOURCERER_DETACHED"):
+            print("\n  Sourcerer runs at %s -- close this window to stop it.\n" % url, flush=True)
+        return _serve_until_idle()
     except KeyboardInterrupt:
         return 0
+    finally:
+        _forget()

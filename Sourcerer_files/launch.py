@@ -6,15 +6,20 @@ written once, here, instead of three times in three shell languages that drift
 apart. Standard library only: it runs before any package is installed.
 """
 import hashlib
+import json
 import os
 import pathlib
 import shutil
 import subprocess
 import sys
 import time
+import urllib.request
 
 HERE = pathlib.Path(__file__).resolve().parent
 REQS = HERE / "requirements.txt"
+APP = HERE / "app.py"
+RUNNING = HERE / "Userdata" / "running.json"      # written by Sourcerer once it serves
+CONSOLE_LOG = HERE / "Userdata" / "Logs" / "console.log"
 SYSTEM = {"win32": "windows", "darwin": "macos"}.get(sys.platform, "linux")
 # One environment per system. The folder is portable, and one venv shared by
 # Windows and Linux -- a USB stick, a dual boot -- is one neither can run.
@@ -126,15 +131,96 @@ def main():
         current = ""
     if current != wanted() and not install():
         return 1
+    if already_running():
+        return 0
     say("[3/3] Starting Sourcerer...")
+    env = dict(os.environ, PYTHONNOUSERSITE="1")
+    args = [a for a in sys.argv[1:] if a != "--console"]
+    if "--console" in sys.argv[1:]:     # stay attached: every message on screen, for debugging
+        say()
+        cmd = [str(venv_python()), str(APP)] + args
+        if os.name == "nt":
+            return subprocess.call(cmd, env=env)
+        os.execve(cmd[0], cmd, env)
+    return start(args, env)
+
+
+def _local(path, data=None):
+    """A request to a Sourcerer on this machine -- never through a proxy."""
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    with opener.open(urllib.request.Request("http://127.0.0.1:%s" % path, data=data), timeout=2) as r:
+        return json.loads(r.read().decode("utf-8") or "{}")
+
+
+def _running(since=0.0):
+    """What the running Sourcerer wrote about itself, if it still answers."""
+    try:
+        info = json.loads(RUNNING.read_text(encoding="utf-8"))
+        if info.get("started", 0) >= since and \
+                _local("%s/api/ping" % info["port"]).get("app") == "sourcerer":
+            return info
+    except (OSError, ValueError, KeyError):
+        pass
+    return None
+
+
+def already_running():
+    """One Sourcerer at a time: a second start brings the first one forward."""
+    info = _running()
+    if not info:
+        return False
+    try:
+        _local("%s/api/focus" % info["port"], data=b"")
+    except (OSError, ValueError):
+        pass
+    say("Sourcerer is already running -- switched to it.")
+    return True
+
+
+def start(args, env):
+    """Start Sourcerer on its own and return as soon as it answers, so the console can close.
+
+    TrackImage's way: the console is there for the setup -- a first start
+    installs packages for minutes and has to show that it is working -- not
+    for the running program. On Windows pythonw.exe has no console at all;
+    elsewhere the program leaves the terminal's session. What it prints goes
+    to Userdata/Logs/console.log, which is shown here when the start fails.
+    """
+    pyw = VENV / "Scripts" / "pythonw.exe"
+    py = pyw if os.name == "nt" and pyw.is_file() else venv_python()
+    CONSOLE_LOG.parent.mkdir(parents=True, exist_ok=True)
+    since = time.time() - 1
+    with open(CONSOLE_LOG, "w", encoding="utf-8") as out:
+        kwargs = {"stdin": subprocess.DEVNULL, "stdout": out, "stderr": subprocess.STDOUT,
+                  "env": dict(env, SOURCERER_DETACHED="1"), "cwd": str(HERE)}
+        if os.name == "nt":
+            kwargs["creationflags"] = 0x00000008 | 0x00000200   # detached, own process group
+        else:
+            kwargs["start_new_session"] = True
+        proc = subprocess.Popen([str(py), str(APP)] + args, **kwargs)
+    say("Waiting for Sourcerer to answer...")
+    deadline = time.time() + 120
+    while time.time() < deadline:
+        info = _running(since)
+        if info:
+            say("Sourcerer is running at http://127.0.0.1:%s/" % info["port"])
+            if os.name != "nt":
+                say("This window is no longer needed.")
+            return 0
+        if proc.poll() is not None:
+            break
+        time.sleep(0.3)
     say()
-    # The updater waits for this process too: on Windows it stays, inside
-    # Sourcerer_files, for as long as Sourcerer runs.
-    env = dict(os.environ, PYTHONNOUSERSITE="1", SOURCERER_LAUNCHER_PID=str(os.getpid()))
-    args = [str(venv_python()), str(HERE / "app.py")] + sys.argv[1:]
-    if os.name == "nt":
-        return subprocess.call(args, env=env)
-    os.execve(args[0], args, env)   # app.py takes over this process and its exit code
+    say("[ERROR] Sourcerer did not start. Its last words:")
+    say()
+    try:
+        for line in CONSOLE_LOG.read_text(encoding="utf-8", errors="replace").splitlines()[-25:]:
+            say(line)
+    except OSError:
+        pass
+    say()
+    say("Start it with --console to watch it start, or see Userdata/Logs.")
+    return 1
 
 
 if __name__ == "__main__":

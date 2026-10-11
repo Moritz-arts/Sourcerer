@@ -2,7 +2,7 @@
 // Plain DOM code, no framework, no build step -- the same as TrackImage.
 
 var S = {
-  artists: [], sync: {}, library: "", window: false, sep: "/", sites: [], settings: {},
+  artists: [], sync: {}, library: "", window: false, sep: "/", sites: [], fields: [], settings: {},
   selected: null, menuFor: null, logFilter: "all", logSeen: "", update: null
 };
 var F = null;   // the card dialog's working copy: {id, sources, layout, dedupe, master, autoName}
@@ -107,7 +107,8 @@ function avatarHtml(a, cls, id) {
 }
 
 var STATUS_TEXT = { ok: "reachable", error: "", unsupported: "not supported yet",
-                    unknown: "not checked yet", checking: "checking…" };
+                    unknown: "not checked yet", checking: "checking…",
+                    login: "log in first: Settings › Accounts" };
 function statusText(s) { return s.status === "error" ? (s.error || s.last_error || "error") : STATUS_TEXT[s.status] || ""; }
 
 // ---- settings that change the look ----------------------------------------
@@ -211,6 +212,7 @@ function cardHtml(a) {
       ? '<button class="mini" data-act="cancel">Cancel</button>'
       : '<button class="mini" data-act="sync" aria-label="Sync now" title="Sync now (U)"' +
         (supported ? "" : " disabled") + ">" + icon("refresh") + "</button>" +
+        '<button class="mini" data-act="folder" aria-label="Open gallery" title="Open the downloaded gallery (O)">' + icon("folder") + "</button>" +
         '<button class="mini" data-act="more" aria-label="More" title="More">' + icon("dots") + "</button>") +
     "</div></div>";
 }
@@ -284,9 +286,10 @@ function toggleLog() {
 function load() {
   return api("GET", "/api/state").then(function (d) {
     S.artists = d.artists; S.sync = d.sync; S.library = d.library; S.window = d.window;
-    S.sep = d.sep; S.sites = d.sites; S.settings = d.settings;
+    S.sep = d.sep; S.sites = d.sites; S.fields = d.fields; S.settings = d.settings;
     $("version").textContent = "v" + d.version;
     if (S.selected && !artistById(S.selected)) S.selected = null;
+    $("btn-quit").classList.toggle("hidden", S.window);
     applySettings();
     render();
   });
@@ -452,17 +455,28 @@ function defaultFolder() {
   return S.library + S.sep + safeName(name || "Name");
 }
 
+function blankRow(field) {
+  return { field: field || null, url: "", label: field || "Link", supported: false,
+           status: "", error: "", handle: "", checked: "" };
+}
+function filledRows() { return F.rows.filter(function (r) { return r.url.trim(); }); }
+
 function openCard(a) {
   closeMenu();
   F = {
     id: a ? a.id : null, artist: a || null, autoName: "",
-    sources: a ? a.sources.map(function (s) {
-      return { url: s.url, label: s.label, supported: s.supported, status: s.status, error: s.last_error };
-    }) : [],
+    // One fixed field per site Sourcerer knows, then any further links.
+    rows: S.fields.map(function (f) { return blankRow(f.label); }),
     layout: a ? a.layout : "together",
     dedupe: a ? a.dedupe : "best",
     master: a ? (a.sources.filter(function (s) { return s.master; })[0] || {}).url || "" : ""
   };
+  (a ? a.sources : []).forEach(function (s) {
+    var slot = F.rows.filter(function (r) { return r.field === s.label && !r.url; })[0] || blankRow(null);
+    if (F.rows.indexOf(slot) < 0) F.rows.push(slot);
+    Object.assign(slot, { url: s.url, label: s.label, supported: s.supported, status: s.status,
+                          error: s.last_error || "", checked: s.url });
+  });
   var f = $("form-card");
   f.name.value = a ? a.name : "";
   $("card-folder").value = a ? a.folder : "";
@@ -470,104 +484,160 @@ function openCard(a) {
   $("btn-card-save").textContent = a ? "Save" : "Create";
   $("btn-card-sync").querySelector("span").textContent = a ? "Save & sync" : "Create & sync";
   $("btn-card-browse").classList.toggle("hidden", !S.window);
-  $("src-input").value = "";
   $("card-error").textContent = "";
-  $("sites").textContent = S.sites.join(" and ");
-  renderForm();
+  renderSources();
   $("dlg-card").showModal();
-  (a ? f.name : $("src-input")).focus();
+  (a ? f.name : document.querySelector(".srcinput")).focus();
   // The dots say what the last sync found; ask again now, so they are current.
-  F.sources.forEach(function (s) { if (s.supported) check(s); });
+  filledRows().forEach(function (r) { if (r.supported) check(r, true); });
 }
 
-function check(s) {
-  var form = F;
-  s.status = "checking";
-  return api("POST", "/api/detect", { url: s.url }).then(function (d) {
-    if (form !== F) return;
-    var twin = F.sources.filter(function (o) { return o !== s && o.url === d.url; })[0];
-    if (twin) F.sources.splice(F.sources.indexOf(s), 1);       // a second link to one profile
-    else {
-      s.url = d.url; s.label = d.label; s.supported = d.supported; s.status = d.status;
-      s.error = d.error || ""; s.handle = d.handle || "";
+// Normalises the row's link, says whether it answers, and moves a link pasted
+// into another site's field to that site's own field when it is free.
+function check(row, force) {
+  var form = F, url = row.url.trim();
+  if (!url) { Object.assign(row, blankRow(row.field)); return Promise.resolve(renderSources()); }
+  if (url === row.checked && !force) return Promise.resolve();
+  row.checked = url; row.status = "checking";
+  renderSources();
+  return api("POST", "/api/detect", { url: url }).then(function (d) {
+    if (form !== F || row.url.trim() !== url) return;              // typed on meanwhile
+    var drop = function (r) {
+      if (r.field) Object.assign(r, blankRow(r.field)); else F.rows.splice(F.rows.indexOf(r), 1);
+    };
+    if (F.rows.some(function (o) { return o !== row && o.url === d.url; })) {
+      drop(row);
+      toast("That link is on the card already.");
+      return renderSources();
     }
+    var target = row;
+    if (row.field !== d.label) {
+      var own = F.rows.filter(function (r) { return r.field === d.label && !r.url.trim(); })[0];
+      if (own) { drop(row); target = own; }
+    }
+    Object.assign(target, { url: d.url, checked: d.url, label: d.label, supported: d.supported,
+                            status: d.status, error: d.error || "", handle: d.handle || "" });
     // A name the site states beats one read from a link; one typed beats both.
     var name = $("form-card").name, fromSite = d.status === "ok";
     if (d.name && (!name.value.trim() || (name.value === F.autoName && fromSite && !F.autoFromSite))) {
       name.value = F.autoName = d.name; F.autoFromSite = fromSite;
     }
-    renderForm();
+    renderSources();
   }).catch(function (e) {
     if (form !== F) return;
-    s.status = "error"; s.error = e.message;
-    renderForm();
+    row.status = "error"; row.error = e.message;
+    renderSources();
   });
 }
 
-function renderForm() {
-  var name = $("form-card").name.value.trim();
-  $("card-avatar").outerHTML = avatarHtml(F.artist && F.artist.avatar ? F.artist : { name: name || "?" }, "lg", "card-avatar");
-
+function renderSources() {
+  // Re-drawn while somebody types in another field: keep the cursor where it was.
+  var el = document.activeElement, at = el && el.dataset ? el.dataset.row : null;
+  var pos = at != null ? el.selectionStart : 0;
   var master = F.dedupe === "master" ? F.master : "";
-  $("src-list").innerHTML = F.sources.length ? F.sources.map(function (s, i) {
-    var isMaster = master && s.url === master;
-    var mark = s.supported
+  $("src-list").innerHTML = F.rows.map(function (r, i) {
+    var filled = !!r.url.trim(), field = S.fields.filter(function (f) { return f.label === r.field; })[0];
+    var isMaster = filled && master && r.url === master;
+    var mark = filled && r.supported
       ? '<button type="button" data-src="master" data-i="' + i + '" title="' + (isMaster ? "Master source" : "Make this the master source") + '">' +
         (isMaster ? icon("crown", "crown") : icon("point", "point")) + "</button>"
       : '<button type="button" disabled>' + icon("point", "point") + "</button>";
-    var state = s.status === "unsupported" ? '<span class="badge warning">not supported yet</span>'
-      : '<span class="state' + (s.status === "error" ? " error" : "") + '" title="' + esc(statusText(s)) + '">' +
-        esc(s.status === "ok" && s.handle ? s.handle : statusText(s)) + "</span>";
-    return '<div class="srcrow">' + mark +
-      '<span class="site"><i class="dot ' + s.status + '" title="' + esc(statusText(s)) + '"></i>' + esc(s.label) + "</span>" +
-      '<span class="url" title="' + esc(s.url) + '">' + esc(shortUrl(s.url)) + "</span>" + state +
-      '<button type="button" data-src="remove" data-i="' + i + '" title="Remove">' + icon("x") + "</button></div>";
-  }).join("") : '<div class="srcempty">No source yet &ndash; paste a profile link below.</div>';
+    var state = !filled ? ""
+      : r.status === "checking" ? '<span class="state">checking…</span>'
+      : r.status === "unsupported" ? '<span class="badge warning">not supported yet</span>'
+      : r.status === "login" ? '<button type="button" class="badge warning" data-src="login" title="' + esc(r.error) + '">log in first</button>'
+      : '<span class="state' + (r.status === "error" ? " error" : "") + '" title="' + esc(statusText(r)) + '">' +
+        esc(r.status === "ok" && r.handle ? r.handle : statusText(r)) + "</span>";
+    return '<div class="srcrow' + (r.field ? "" : " extra") + '">' + mark +
+      '<span class="site"><i class="dot ' + (filled ? r.status : "blank") + '" title="' + esc(filled ? statusText(r) : "") + '"></i>' +
+      esc(r.field || (filled && r.label !== "…" ? r.label : "Link")) + "</span>" +
+      '<input type="text" class="srcinput" data-row="' + i + '" value="' + esc(r.url) + '" autocomplete="off" spellcheck="false" placeholder="' +
+      esc(field ? field.example : "Any other link – a second account, another site") + '">' + state +
+      (r.field ? "" : '<button type="button" data-src="remove" data-i="' + i + '" title="Remove">' + icon("x") + "</button>") + "</div>";
+  }).join("");
+  if (at != null) {
+    var again = document.querySelector('.srcinput[data-row="' + at + '"]');
+    if (again) { again.focus(); try { again.setSelectionRange(pos, pos); } catch (e) {} }
+  }
+  renderForm();
+}
+
+function renderForm() {
+  var name = $("form-card").name.value.trim(), rows = filledRows();
+  $("card-avatar").outerHTML = avatarHtml(F.artist && F.artist.avatar ? F.artist : { name: name || "?" }, "lg", "card-avatar");
 
   var base = $("card-folder").value.trim() || defaultFolder(), sep = S.sep;
   $("card-folder").placeholder = defaultFolder();
-  var labels = F.sources.filter(function (s) { return s.supported; }).map(function (s) { return s.label; })
+  var labels = rows.filter(function (r) { return r.supported; }).map(function (r) { return r.label; })
     .filter(function (l, i, all) { return all.indexOf(l) === i; });
-  if (!labels.length) labels = ["Mastodon", "Bluesky"];
+  if (!labels.length) labels = ["Bluesky", "Mastodon"];
   var leaf = base.split(/[\\\/]/).filter(Boolean).pop() || base;
   $("layout-together").textContent = leaf + sep;
   $("layout-per-source").textContent = labels.slice(0, 2).map(function (l) { return leaf + sep + l + sep; }).join(" · ");
   $$("[data-layout]").forEach(function (b) { b.classList.toggle("selected", b.dataset.layout === F.layout); });
 
   $$("[data-dedupe]").forEach(function (b) { b.classList.toggle("selected", b.dataset.dedupe === F.dedupe); });
-  var options = F.sources.filter(function (s) { return s.supported; });
+  var options = rows.filter(function (r) { return r.supported; });
   $("master-row").classList.toggle("hidden", F.dedupe !== "master");
   $("master-select").innerHTML = options.length
-    ? options.map(function (s) {
-        return '<option value="' + esc(s.url) + '"' + (s.url === F.master ? " selected" : "") + ">" +
-          esc(s.label + " – " + shortUrl(s.url)) + "</option>";
+    ? options.map(function (r) {
+        return '<option value="' + esc(r.url) + '"' + (r.url === F.master ? " selected" : "") + ">" +
+          esc(r.label + " – " + shortUrl(r.url)) + "</option>";
       }).join("")
     : '<option value="">Add a supported source first</option>';
-  if (F.dedupe === "master" && options.length && !options.some(function (s) { return s.url === F.master; })) {
+  if (F.dedupe === "master" && options.length && !options.some(function (r) { return r.url === F.master; })) {
     F.master = options[0].url;
   }
-  var masterLabel = (options.filter(function (s) { return s.url === F.master; })[0] || {}).label || "the master source";
+  var masterLabel = (options.filter(function (r) { return r.url === F.master; })[0] || {}).label || "the master source";
   $("dedupe-hint").textContent = DEDUPE_HINT[F.dedupe].replace("{m}", masterLabel);
 }
 
-function addSource() {
-  var input = $("src-input"), parts = input.value.split(/\s+/).filter(Boolean);
-  if (!parts.length) return Promise.resolve();
-  input.value = "";
-  return Promise.all(parts.map(function (url) {
-    if (F.sources.some(function (s) { return s.url === url; })) return null;
-    var s = { url: url, label: "…", supported: true, status: "checking" };
-    F.sources.push(s);
-    renderForm();
-    return check(s);
-  }));
+// Several links pasted at once: the first stays in the field, the rest get rows of their own.
+function takeLinks(input) {
+  var row = F.rows[+input.dataset.row], parts = input.value.split(/\s+/).filter(Boolean);
+  if (!row) return;
+  row.url = parts.shift() || "";
+  var more = parts.filter(function (u) { return !F.rows.some(function (r) { return r.url === u; }); })
+    .map(function (u) { var r = blankRow(null); r.url = u; F.rows.push(r); return r; });
+  check(row);
+  more.forEach(function (r) { check(r); });
 }
 
-$("btn-src-add").addEventListener("click", addSource);
-$("src-input").addEventListener("keydown", function (e) {
-  if (e.key === "Enter") { e.preventDefault(); addSource(); }
+function addRow() {
+  F.rows.push(blankRow(null));
+  renderSources();
+  var inputs = $$(".srcinput");
+  inputs[inputs.length - 1].focus();
+}
+
+$("src-list").addEventListener("input", function (e) {
+  var row = e.target.dataset && F.rows[+e.target.dataset.row];
+  if (!row) return;
+  row.url = e.target.value;
+  var dot = e.target.parentNode.querySelector(".dot");
+  if (dot) dot.className = "dot" + (row.url.trim() ? "" : " blank");   // not "empty": the empty-state class
 });
-$("src-input").addEventListener("paste", function () { setTimeout(addSource, 0); });
+$("src-list").addEventListener("change", function (e) { if (e.target.classList.contains("srcinput")) takeLinks(e.target); });
+$("src-list").addEventListener("paste", function (e) {
+  if (e.target.classList.contains("srcinput")) setTimeout(function () { takeLinks(e.target); }, 0);
+});
+$("src-list").addEventListener("keydown", function (e) {
+  if (e.key !== "Enter" || !e.target.classList.contains("srcinput")) return;
+  e.preventDefault();                       // Enter in a link field moves on; it does not save
+  var inputs = $$(".srcinput"), next = inputs[inputs.indexOf(e.target) + 1];
+  takeLinks(e.target);
+  if (next) next.focus(); else addRow();
+});
+$("src-list").addEventListener("click", function (e) {
+  var btn = e.target.closest("[data-src]");
+  if (!btn) return;
+  var r = F.rows[+btn.dataset.i];
+  if (btn.dataset.src === "login") return openSettings("accounts");
+  if (btn.dataset.src === "remove") F.rows.splice(+btn.dataset.i, 1);
+  else { F.master = r.url; F.dedupe = "master"; }
+  renderSources();
+});
+$("btn-src-add").addEventListener("click", addRow);
 $("form-card").name.addEventListener("input", renderForm);
 $("card-folder").addEventListener("input", renderForm);
 $("btn-card-browse").addEventListener("click", function () {
@@ -575,32 +645,23 @@ $("btn-card-browse").addEventListener("click", function () {
     if (d.path) { $("card-folder").value = d.path; renderForm(); }
   }).catch(fail);
 });
-
-$("src-list").addEventListener("click", function (e) {
-  var btn = e.target.closest("[data-src]");
-  if (!btn) return;
-  var s = F.sources[+btn.dataset.i];
-  if (btn.dataset.src === "remove") F.sources.splice(+btn.dataset.i, 1);
-  else { F.master = s.url; F.dedupe = "master"; }
-  renderForm();
-});
 $$("[data-layout]").forEach(function (b) {
   b.addEventListener("click", function () { F.layout = b.dataset.layout; renderForm(); });
 });
 $$("[data-dedupe]").forEach(function (b) {
-  b.addEventListener("click", function () { F.dedupe = b.dataset.dedupe; renderForm(); });
+  b.addEventListener("click", function () { F.dedupe = b.dataset.dedupe; renderSources(); });
 });
-$("master-select").addEventListener("change", function () { F.master = this.value; renderForm(); });
+$("master-select").addEventListener("change", function () { F.master = this.value; renderSources(); });
 
 $("form-card").addEventListener("submit", function (e) {
   e.preventDefault();
   var syncNow = !!(e.submitter && e.submitter.value === "sync");
-  // Enter in a half-typed link adds it; the card is saved with the next click.
-  if ($("src-input").value.trim() && !e.submitter) return addSource();
-  addSource().then(function () {
+  // A link typed but not left yet is checked first, so it is saved normalised.
+  Promise.all(filledRows().filter(function (r) { return r.url.trim() !== r.checked; })
+    .map(function (r) { return check(r); })).then(function () {
     var body = {
       name: e.target.name.value, folder: $("card-folder").value,
-      sources: F.sources.map(function (s) { return s.url; }),
+      sources: filledRows().map(function (r) { return r.url.trim(); }),
       layout: F.layout, dedupe: F.dedupe, master: F.dedupe === "master" ? F.master : "", sync_now: syncNow
     };
     return F.id ? api("PUT", "/api/artists/" + F.id, body) : api("POST", "/api/artists", body);
@@ -620,6 +681,7 @@ function showPane(name) {
   $$(".panes section").forEach(function (s) { s.classList.toggle("shown", s.dataset.pane === name); });
   if (name === "updates" && !S.update) checkUpdate(false);
   if (name === "about" || name === "updates") loadInfo();
+  if (name === "accounts") loadAccounts();
 }
 
 function fillSettings() {
@@ -676,6 +738,54 @@ $("set-size").addEventListener("input", function () { setSize(+this.value, true)
 $("btn-settings").addEventListener("click", function () { openSettings(S.update && S.update.available ? "updates" : null); });
 $$("[data-open]").forEach(function (b) {
   b.addEventListener("click", function () { api("POST", "/api/open", { target: b.dataset.open }).catch(fail); });
+});
+
+// ---- accounts ----------------------------------------------------------------
+
+var accTimer = null;
+function loadAccounts() {
+  clearTimeout(accTimer);
+  return api("GET", "/api/accounts").then(function (d) {
+    $("acc-list").innerHTML = d.accounts.map(function (a) {
+      var state = a.pending === "waiting" ? "Waiting for you to log in in the other window…"
+        : a.logged_in ? "Logged in" + (a.how ? " (" + a.how + ")" : "") + (a.saved ? " · " + ago(a.saved) : "")
+        : a.pending.indexOf("failed: ") === 0 ? a.pending.slice(8)
+        : a.pending === "cancelled" ? "Login window closed before the login was finished."
+        : "Not logged in";
+      var key = ' data-key="' + esc(a.key) + '"';
+      return '<div class="row"><div><div class="row-title"><i class="dot ' + (a.logged_in ? "ok" : "blank") + '"></i> ' +
+        esc(a.label) + (a.forum ? ' <span class="muted small">XenForo</span>' : "") + '</div><p class="hint">' + esc(state) + "</p></div>" +
+        (a.logged_in ? '<button type="button" data-acc="logout"' + key + ">Log out</button>"
+          : '<button type="button" class="primary" data-acc="login"' + key + (d.window ? "" : ' disabled title="Needs Sourcerer\'s own window"') + ">Log in</button>") +
+        '<button type="button" data-acc="import"' + key + ">Import&hellip;</button></div>";
+    }).join("");
+    $("btn-acc-forum").disabled = !d.window;
+    // While a login window is open, follow it; the row turns green by itself.
+    if (d.accounts.some(function (a) { return a.pending === "waiting"; }) && $("dlg-settings").open) {
+      accTimer = setTimeout(loadAccounts, 1500);
+    }
+  }).catch(fail);
+}
+
+$("acc-list").addEventListener("click", function (e) {
+  var b = e.target.closest("[data-acc]");
+  if (!b) return;
+  var key = b.dataset.key;
+  if (b.dataset.acc === "import") { S.importKey = key; $("acc-file").value = ""; return $("acc-file").click(); }
+  if (b.dataset.acc === "logout" && !confirm("Log out? Sourcerer forgets the cookies it kept for this site.")) return;
+  api("POST", "/api/accounts/" + b.dataset.acc, { key: key }).then(loadAccounts).catch(fail);
+});
+$("btn-acc-forum").addEventListener("click", function () {
+  var forum = $("acc-forum").value.trim();
+  if (!forum) return $("acc-forum").focus();
+  api("POST", "/api/accounts/login", { forum: forum }).then(function () { $("acc-forum").value = ""; loadAccounts(); }).catch(fail);
+});
+$("acc-file").addEventListener("change", function () {
+  var file = this.files[0];
+  if (!file) return;
+  file.text().then(function (text) {
+    return api("POST", "/api/accounts/import", { key: S.importKey, text: text });
+  }).then(function (d) { toast("Imported: " + plural(d.cookies, "cookie")); loadAccounts(); }).catch(fail);
 });
 
 function loadInfo() {
@@ -760,6 +870,9 @@ $$("[data-repair]").forEach(function (b) {
 
 // ---- the rest --------------------------------------------------------------
 
+$("dlg-settings").addEventListener("close", function () {
+  if ($("dlg-card").open) F.rows.forEach(function (r) { if (r.status === "login") check(r, true); });
+});
 $$("[data-close]").forEach(function (b) {
   b.addEventListener("click", function () { b.closest("dialog").close(); });
 });
@@ -771,6 +884,15 @@ $$("[data-log]").forEach(function (b) {
   });
 });
 $("btn-add").addEventListener("click", function () { openCard(null); });
+// Only in the browser: there the page is all there is, no window to close.
+$("btn-quit").addEventListener("click", function () {
+  if (!confirm("Quit Sourcerer? A running sync stops.")) return;
+  api("POST", "/api/quit").then(function () {
+    $("overlay-title").textContent = "Sourcerer has stopped";
+    $("overlay-text").textContent = "You can close this tab. The start file starts it again.";
+    $("overlay").classList.remove("hidden");
+  }).catch(fail);
+});
 $("btn-sync-all").addEventListener("click", function () { sync(null); });
 $("search").addEventListener("input", render);
 $("sort").addEventListener("change", render);

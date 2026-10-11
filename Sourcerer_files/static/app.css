@@ -269,7 +269,17 @@ main { flex: 1; overflow: auto; }
 .srclist { border: .5px solid var(--border-strong); border-radius: var(--radius); }
 .srcrow { display: flex; align-items: center; gap: 8px; padding: 5px 6px 5px 4px; font-size: 13px; min-height: 34px; }
 .srcrow + .srcrow { border-top: .5px solid var(--border); }
-.srcrow .site { min-width: 74px; color: var(--text-secondary); display: inline-flex; align-items: center; gap: 6px; }
+.srcrow .site { min-width: 86px; color: var(--text-secondary); display: inline-flex; align-items: center; gap: 6px; }
+.srcrow .srcinput {
+  flex: 1; min-width: 0; height: 28px; font: 12px var(--font-mono); padding: 3px 8px;
+  border-color: transparent; background: transparent;
+}
+.srcrow .srcinput:hover { border-color: var(--border-strong); }
+.srcrow .srcinput:focus { border-color: var(--border-accent); background: var(--surface-2); }
+.srcrow .srcinput::placeholder { color: var(--text-muted); opacity: .7; }
+.dot.blank { background: transparent; border: 1.5px solid var(--border-strong); opacity: 1; }
+.addlink { margin-top: 6px; border-color: transparent; color: var(--text-accent); padding: 4px 8px; font-size: 12px; }
+.addlink:hover:not(:disabled) { background: var(--bg-accent); }
 .srcrow .url { flex: 1; min-width: 0; font-family: var(--font-mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .srcrow .state { font-size: 11px; max-width: 42%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); }
 .srcrow .state.error { color: var(--text-danger); }
