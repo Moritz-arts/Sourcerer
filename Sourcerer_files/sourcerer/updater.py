@@ -153,14 +153,10 @@ def _base_python():
 def _launch_helper(swap):
     helper = pathlib.Path(tempfile.gettempdir()) / ("sourcerer-helper-%d.py" % os.getpid())
     helper.write_text(HELPER, encoding="utf-8")
-    # On Windows launch.py waits in its own process for this one, inside
-    # Sourcerer_files, and so does the venv's python.exe -- a stub that runs
-    # the real interpreter as its child. Both hold the folder until they are
-    # gone. On Linux and macOS launch.py replaced itself with this process.
-    pids = [os.getpid()]
-    if os.name == "nt":
-        pids += [os.getppid(), int(os.environ.get("SOURCERER_LAUNCHER_PID") or 0)]
-    pids = [p for p in pids if p > 0]
+    # On Windows the venv's pythonw.exe is a stub that runs the real
+    # interpreter as its child and waits for it -- inside Sourcerer_files, so
+    # it holds the folder too. launch.py itself left once Sourcerer answered.
+    pids = [os.getpid()] + ([os.getppid()] if os.name == "nt" else [])
     args = [_base_python(), str(helper), "--install", str(config.INSTALL),
             "--stage", STAGE_REL if swap else "-", "--pids", ",".join(map(str, pids))]
     kwargs = {"cwd": tempfile.gettempdir(), "stdin": subprocess.DEVNULL,

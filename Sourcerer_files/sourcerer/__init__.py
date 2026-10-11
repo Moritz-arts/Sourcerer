@@ -4,6 +4,7 @@ Layers, each importing only the ones above it:
 
     config     paths, the version, the user agent, setting defaults
     db         SQLite: artists, their sources, every file seen, settings
+    accounts   logins: session cookies per site, from a login window or cookies.txt
     net        HTTP (requests): JSON and downloads, polite to every site
     imaging    picture fingerprints, sizes, thumbnails, avatars (Pillow)
     sources/   one module per site; each turns a URL into pages of media

@@ -27,6 +27,11 @@ class Media:
     name: str            # short id, the file name's last resort
     mime: str = ""       # content type when the site states it
     filename: str = ""   # the file's own name on the site, when it has one
+    headers: dict = None  # what the file's host wants with the request (pixiv: a Referer)
+
+
+class LoginRequired(Exception):
+    """The site shows this only to members: log in under Settings > Accounts."""
 
 
 def site_for(url):
@@ -39,6 +44,13 @@ def site_for(url):
 def kind_of(url):
     site = site_for(url)
     return site.KIND if site else "unsupported"
+
+
+# The card dialog's fixed fields, in this order, each with an example link.
+# Any other link -- a second account, another site -- goes into a row below.
+FIELDS = [("Bluesky", "bsky.app/profile/name"), ("Mastodon", "mastodon.social/@name"),
+          ("XenForo", "forum.example/media/users/name.123"), ("Patreon", "patreon.com/name"),
+          ("X", "x.com/name"), ("Pixiv", "pixiv.net/users/12345")]
 
 
 # Sites an artist card may list before Sourcerer can download from them, so the

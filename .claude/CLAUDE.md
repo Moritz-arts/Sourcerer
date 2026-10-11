@@ -177,6 +177,20 @@ Do not create releases or tags yourself, and do not push to `main`.
   packages and starts `app.py` — once, in Python, testable on any system.
   Anything more goes into `launch.py`, not into three shell languages that
   drift apart. Packages live in `Sourcerer_files/requirements.txt`.
+- **The console is for the setup, not for the running program** (TrackImage's
+  way). `launch.py` starts `app.py` detached -- `pythonw.exe` on Windows, a
+  new session elsewhere -- and returns once `Userdata/running.json` names a
+  port that answers `/api/ping`; then the console closes. A start that fails
+  shows the tail of `Userdata/Logs/console.log` (the program's stdout and
+  stderr) and keeps the console open. `--console` keeps the program attached,
+  for debugging.
+- **One Sourcerer at a time.** A second start finds `running.json`, asks the
+  running one to come forward (`/api/focus`) and leaves. Requests to the
+  local server go through no proxy: `launch.py` builds its opener with an
+  empty `ProxyHandler`, since a system proxy would swallow 127.0.0.1.
+- **In the browser there is no console to close Sourcerer with.** The page
+  shows a Quit button there, and a detached Sourcerer without an open page
+  stops after 15 minutes when no sync runs.
 - **A venv is checked by running it, not by its file.** An interrupted first
   start leaves `python` without pip; after a Python upgrade or uninstall the
   venv points at an interpreter that is gone. `launch.py` runs `import pip` in
@@ -241,6 +255,9 @@ Do not create releases or tags yourself, and do not push to `main`.
 - **A sync scans first, then downloads**, so the card can show "downloading 87 / 240".
   Artists wait in a queue; cancelling stops after the current file. A source is
   marked complete only after a sync went all the way without a failure.
+- **CSS class names are global.** `.empty` is the empty-state block (10vh
+  margins): a status dot with that class grew 188 px tall. Name modifiers
+  for what they mean where they are (`.dot.blank`).
 - **No CDN, ever.** The icons are inline SVG drawn after Tabler Icons (MIT,
   `static/icons-LICENSE.txt`); fonts are the system's.
 - **The server listens on 127.0.0.1 only.** Nothing here is for other machines.
@@ -260,11 +277,11 @@ Do not create releases or tags yourself, and do not push to `main`.
 
 ### Updater
 
-- **On Windows three processes hold `Sourcerer_files/`:** the app, the venv's
-  `python.exe` (a stub that runs the real interpreter as its child) and
-  `launch.py`, which waits for it. The helper waits for all three
-  (`SOURCERER_LAUNCHER_PID` passes the last one along) and then retries the
-  rename for 90 s -- a rename is the only test that counts there.
+- **On Windows two processes hold `Sourcerer_files/`:** the app and the venv's
+  `pythonw.exe`, a stub that runs the real interpreter as its child and waits
+  for it. The helper waits for both (`getpid`, `getppid`) and then retries
+  the rename for 90 s -- a rename is the only test that counts there.
+  `launch.py` has left once Sourcerer answered.
 - **The helper runs on the system's Python, never the venv's**, and from the
   temp folder: both the venv and the program are in the folder it replaces.
 - **The archive is checked before anything moves:** no absolute or `..`

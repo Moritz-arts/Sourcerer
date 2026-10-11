@@ -18,7 +18,7 @@ import urllib.parse
 
 import requests
 
-from . import config
+from . import accounts, config
 
 log = logging.getLogger(__name__)
 TIMEOUT = (15, 60)          # connect, read
@@ -78,11 +78,16 @@ class _Polite:
         self.sem.release()
 
 
-def _get(url, params=None, stream=False):
-    """A response, retrying what passes with time. The caller holds _Polite(url)."""
+def _get(url, params=None, stream=False, headers=None):
+    """A response, retrying what passes with time. The caller holds _Polite(url).
+
+    A site the user logged in to gets its saved cookies (accounts.py) -- per
+    request, never in the shared session, so they reach no other host.
+    """
     for attempt in range(RETRIES):
         try:
-            resp = _session().get(url, params=params, stream=stream, timeout=TIMEOUT)
+            resp = _session().get(url, params=params, stream=stream, timeout=TIMEOUT,
+                                  headers=headers, cookies=accounts.cookies_for(url))
             if resp.status_code == 429 or resp.status_code >= 500:
                 if attempt == RETRIES - 1:
                     resp.raise_for_status()
@@ -102,11 +107,16 @@ def _get(url, params=None, stream=False):
     raise RuntimeError("no answer from %s" % url)
 
 
+LOGIN = "log in first: Settings > Accounts"
+
+
 def reason(e):
     """A failed request in a few words, for a card's dot and the activity log."""
+    if e.__class__.__name__ == "LoginRequired":
+        return LOGIN
     if isinstance(e, requests.HTTPError) and e.response is not None:
         code = e.response.status_code
-        return {401: "login required (401)", 403: "access refused (403)", 404: "not found (404)",
+        return {401: LOGIN + " (401)", 403: "access refused (403)", 404: "not found (404)",
                 410: "gone (410)", 429: "too many requests (429)"}.get(code, "HTTP %d" % code)
     if isinstance(e, requests.Timeout):
         return "no answer (timeout)"
@@ -115,10 +125,17 @@ def reason(e):
     return str(e) or e.__class__.__name__
 
 
-def get_json(url, params=None):
+def get_json(url, params=None, headers=None):
     params = {k: v for k, v in (params or {}).items() if v is not None}
     with _Polite(url):
-        return _get(url, params).json()
+        return _get(url, params, headers=headers).json()
+
+
+def get_text(url, params=None, headers=None):
+    """A page as text, for the sites that have no API (forums)."""
+    with _Polite(url):
+        resp = _get(url, params, headers=headers)
+        return resp.text, resp.url
 
 
 def extension(content_type, url="", fallback=".bin"):
@@ -142,7 +159,7 @@ def _disposition_name(header):
     return m.group(1).strip() if m else ""
 
 
-def download(url, folder, mime_hint="", progress=None):
+def download(url, folder, mime_hint="", progress=None, headers=None):
     """Stream url into folder/<random>.part.
 
     Returns (part_path, sha256, extension, the server's file name or "").
@@ -153,11 +170,11 @@ def download(url, folder, mime_hint="", progress=None):
     digest = hashlib.sha256()
     # The whole transfer counts against the site's limit, not just its start.
     with _Polite(url):
-        return _stream(url, part, digest, mime_hint, progress)
+        return _stream(url, part, digest, mime_hint, progress, headers)
 
 
-def _stream(url, part, digest, mime_hint, progress):
-    resp = _get(url, stream=True)
+def _stream(url, part, digest, mime_hint, progress, headers):
+    resp = _get(url, stream=True, headers=headers)
     try:
         ext = extension(resp.headers.get("Content-Type") or mime_hint, url)
         name = _disposition_name(resp.headers.get("Content-Disposition"))
@@ -175,10 +192,10 @@ def _stream(url, part, digest, mime_hint, progress):
     return part, digest.hexdigest(), ext, name
 
 
-def fetch_bytes(url, limit=10 << 20):
+def fetch_bytes(url, limit=10 << 20, headers=None):
     """A small file (a profile picture) as bytes."""
     with _Polite(url):
-        resp = _get(url, stream=True)
+        resp = _get(url, stream=True, headers=headers)
         try:
             data = resp.raw.read(limit + 1, decode_content=True)
         finally:

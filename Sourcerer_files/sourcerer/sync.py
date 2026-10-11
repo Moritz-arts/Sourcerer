@@ -213,9 +213,9 @@ def _ordered_sources(con, artist):
                        (artist["id"], artist["master_source_id"] or 0)).fetchall()
 
 
-def _save_avatar(artist_id, url):
+def _save_avatar(artist_id, url, headers=None):
     name = "%d.jpg" % artist_id
-    imaging.avatar(io.BytesIO(net.fetch_bytes(url)), config.AVATARS / name)
+    imaging.avatar(io.BytesIO(net.fetch_bytes(url, headers=headers)), config.AVATARS / name)
     with db.connect() as con:
         con.execute("UPDATE artists SET avatar = ?, avatar_checked = ? WHERE id = ?",
                     (name, _now(), artist_id))
@@ -226,21 +226,22 @@ def check_card(artist_id):
     with db.connect() as con:
         artist = con.execute("SELECT * FROM artists WHERE id = ?", (artist_id,)).fetchone()
         rows = _ordered_sources(con, artist) if artist else []
-    avatar = ""
+    found = None
     for row in rows:
         if not sources.site_for(row["url"]):
             continue
         error = None
         try:
-            avatar = avatar or (sources.profile(row["url"]) or {}).get("avatar") or ""
+            info = sources.profile(row["url"]) or {}
+            found = found or (info if info.get("avatar") else None)
         except Exception as e:
             error = net.reason(e)
         with db.connect() as con:
             con.execute("UPDATE sources SET last_checked = datetime('now'), last_error = ? "
                         "WHERE id = ?", (error, row["id"]))
     try:
-        if avatar:
-            _save_avatar(artist_id, avatar)
+        if found:
+            _save_avatar(artist_id, found["avatar"], found.get("avatar_headers"))
     except Exception as e:
         log.info("no profile picture for card %d: %s", artist_id, e)
 
@@ -261,7 +262,7 @@ def refresh_avatar(artist_id, force=False):
         try:
             info = sources.profile(row["url"])
             if info and info.get("avatar"):
-                _save_avatar(artist_id, info["avatar"])
+                _save_avatar(artist_id, info["avatar"], info.get("avatar_headers"))
                 return
         except Exception as e:
             log.info("no profile picture from %s: %s", row["url"], net.reason(e))
@@ -367,7 +368,8 @@ def _scan(src, site, known, cur):
 def _fetch(artist, src, site, media, cur):
     folder = target_folder(artist, site.LABEL)
     try:
-        part, sha, ext, server_name = net.download(media.url, folder, media.mime, _count_bytes)
+        part, sha, ext, server_name = net.download(media.url, folder, media.mime, _count_bytes,
+                                                   headers=media.headers)
     except Exception as e:
         event("warn", "Download failed: %s (%s)" % (media.post_url or media.url, net.reason(e)), artist)
         with _lock:
