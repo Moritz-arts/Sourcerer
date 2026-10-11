@@ -2,7 +2,7 @@
 
 [what changed](Sourcerer_files/docs/CHANGELOG.md) · [roadmap](Sourcerer_files/docs/ROADMAP.md) · [releases](https://github.com/Moritz-arts/Sourcerer/releases)
 
-A portable app for Windows, Linux and macOS that keeps per-artist media collections in sync across sites — XenForo Media Gallery, Mastodon, Patreon, Bluesky, X, Pixiv, DeviantArt and more — and drops every new file, de-duplicated across sources, straight into a [TrackImage](https://github.com/Moritz-arts/TrackImage) library.
+A portable app for Windows, Linux and macOS that keeps per-artist media collections in sync across sites — XenForo Media Gallery, Mastodon, Patreon, Bluesky, X, Pixiv, boorus and more — and drops every new file, de-duplicated across sources, straight into a [TrackImage](https://github.com/Moritz-arts/TrackImage) library.
 
 **Status:** early development. There is no release yet.
 
@@ -76,34 +76,51 @@ deletes it, `Ctrl` + mouse wheel sizes the cards, right-click opens a card's
 menu. The full list is in Settings › Keyboard & mouse.
 
 Sites downloaded today: **Bluesky**, **Mastodon** (and the fediverse),
-**Pixiv**, **Patreon**, **X** and **XenForo** forums (a member's media
-gallery, an album or a thread). Links to other sites stay on the card until
-their site is supported. The dot beside each link says how it fares: green
+**Pixiv**, **Patreon**, **X**, **XenForo** forums (a member's media
+gallery, an album or a thread) and **boorus** — Danbooru, e621, Gelbooru,
+Rule 34, Safebooru, yande.re, Konachan and others — where a source is the
+artist's tag search (`danbooru.donmai.us/posts?tags=artist_name`; an
+artist's page or one of their posts works too). Links to other sites stay
+on the card until their site is supported. The dot beside each link says how it fares: green
 works, yellow works with a catch (a login, a bot check, a site asking to slow
 down), red does not work, grey is not checked yet.
 
-**Accounts** (Settings › Accounts): X needs a login, Pixiv shows R-18 works
-and Patreon a patron's posts only to a logged-in account, and many forums
-show their media to members only. Log in once in Sourcerer's own window;
-Sourcerer keeps that site's cookies on this computer, never the password.
-When a login runs out, the bottom bar says so until you log in again.
+**Accounts** (Settings › Accounts) has a login for every site: X needs
+one, Pixiv shows R-18 works and Patreon a patron's posts only to a
+logged-in account, many forums and some Mastodon servers show their media
+to members only, and Gelbooru and Rule 34 answer only to an API key.
+
+- X, Patreon, Pixiv, forums and Mastodon servers: the site's own login page
+  opens in Sourcerer's window (Mastodon then asks you to let Sourcerer
+  read). Sourcerer keeps the site's cookies or its read-only token.
+- Bluesky: your handle and an **app password** (Bluesky › Settings ›
+  Privacy and security › App passwords) — never your account's password.
+- Boorus: your user name (Gelbooru, Rule 34: user ID) and the API key from
+  your account settings; for Gelbooru and Rule 34, paste the whole
+  `&api_key=…&user_id=…` line.
+
+Everything stays on this computer, and no password is kept. When you add a
+link whose site wants a login you do not have yet, the card dialog says so
+under the link, with a button to log in. Every start checks all logins;
+when one runs out, the bottom bar says so until you log in again.
 
 ## How Sourcerer talks to sites
 
 Sourcerer reads posts through the interfaces the sites' own pages use — the
-Mastodon API, Bluesky's AT Protocol, Pixiv's and Patreon's JSON — and says who
+Mastodon API, Bluesky's AT Protocol, Pixiv's and Patreon's JSON, the boorus'
+APIs — and says who
 it is in every request (`Mozilla/5.0 (compatible; Sourcerer/<version>; +<this
 repository>)`, the form search engines use). To stay far below what the
 sites allow:
 
 - at most 2 requests to one site at a time, with a pause between them
   (both adjustable in Settings › Sites & network), and stricter limits
-  where a site asks for them: Pixiv one request every 1.5 s, Patreon one a
-  second, X 1.5–3 s between pages;
+  where a site asks for them: Pixiv one request every 1.5 s, Patreon, e621,
+  Gelbooru and the other boorus one a second, X 1.5–3 s between pages;
 - a "too many requests" answer is waited out for as long as the site asks —
   on Pixiv the sync stops and the next one carries on;
-- a first sync of a big Pixiv or X account takes a few hundred files at a
-  time and continues with the next sync;
+- a first sync of a big Pixiv, X or booru account takes a few hundred files
+  at a time and continues with the next sync;
 - after the first sync, only the newest posts are looked at;
 - automatic syncs start at a slightly different minute every time.
 

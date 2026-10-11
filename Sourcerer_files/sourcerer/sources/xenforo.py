@@ -24,8 +24,11 @@ KIND = "xenforo"
 LABEL = "XenForo"
 # What a XenForo link points at, below the forum's base (which may be a folder).
 _PATH = re.compile(r"^(.*?)/(?:index\.php\?)?(media/users|members|media/albums|threads)/([^/?#]+)", re.I)
-OPTIONS = {"sleep-request": "1.0-2.0", "metadata": False}
+# tls12: off, so gallery-dl shakes hands with TLS 1.3 only, as net.py does --
+# VerticalScope's forums answered its usual handshake with 409 (see net._Tls13).
+OPTIONS = {"sleep-request": "1.0-2.0", "metadata": False, "tls12": False}
 FIELDS = {"url": "{_url!j}", "id": "{id!j}"}
+LOGIN = ("recommended", "Most forums show their media to members only.")
 
 
 def _parts(url):
@@ -49,16 +52,25 @@ def normalize(url):
     return "https://%s%s/%s/%s" % (p.netloc.lower(), m.group(1).rstrip("/"), kind, m.group(3))
 
 
+def account_key(url):
+    return "xenforo:" + _host(url)
+
+
+def still_logged_in(key):
+    base = (accounts.load(key) or {}).get("base") or "https://" + key.split(":", 1)[1]
+    text, _final = net.get_text(base + "/")
+    return 'data-logged-in="true"' in text
+
+
 def _host(url):
     return accounts.host_of(url)
 
 
 def _options(url):
     options = dict(OPTIONS, cookies=accounts.jar("xenforo:" + _host(url)))
-    ua = accounts.user_agent_for(url)
     # The forum's own pass (Cloudflare) holds only with the browser that earned it.
-    options.update({"user-agent": ua, "browser": ""} if ua else
-                   {"user-agent": config.USER_AGENT, "browser": ""})
+    options.update({"user-agent": accounts.headers_for(url).get("User-Agent") or config.USER_AGENT,
+                    "browser": ""})
     if "/threads/" in url:
         options["order-posts"] = "desc"          # newest first, for the early stop
     return options

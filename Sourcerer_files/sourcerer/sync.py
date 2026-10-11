@@ -189,10 +189,12 @@ def _work():
 
 def scheduler():
     """Automatic sync: every card, every few hours, while Sourcerer runs.
-    And a look at every saved login, a few minutes after the start and then
-    every ACCOUNT_HOURS, so a login that ran out is shown before a sync needs it."""
+    And a look at every saved login, right at the start and then every
+    ACCOUNT_HOURS, so a login that ran out is shown before a sync needs it."""
     def run():
-        next_check = time.monotonic() + 120
+        time.sleep(3)                     # the window first
+        check_accounts_at_start()
+        next_check = time.monotonic() + ACCOUNT_HOURS * 3600
         while True:
             time.sleep(60)
             _upgrade_gallery_dl()
@@ -232,16 +234,6 @@ def _login_ran_out(key, label):
 
 def _still_logged_in(key):
     """True / False, or None when there is no cheap way to tell."""
-    if key == "pixiv":
-        try:
-            return not net.get_json("https://www.pixiv.net/ajax/user/extra?lang=en").get("error")
-        except requests.HTTPError as e:
-            if e.response is not None and e.response.status_code in (401, 403):
-                return False
-            raise
-    if key == "patreon":
-        from .sources import patreon
-        return patreon.whoami() is not None
     if key == "x":
         with db.connect() as con:
             urls = [r[0] for r in con.execute("SELECT url FROM sources")]
@@ -253,11 +245,9 @@ def _still_logged_in(key):
             return True
         except sources.LoginRequired:
             return False
-    if key.startswith("xenforo:"):
-        base = (accounts.load(key) or {}).get("base") or "https://" + key.split(":", 1)[1]
-        text, _final = net.get_text(base + "/")
-        return 'data-logged-in="true"' in text
-    return None
+    site = next((s for s in sources.SITES if s.KIND == key.split(":", 1)[0]), None)
+    check = getattr(site, "still_logged_in", None)
+    return check(key) if check else None
 
 
 def _upgrade_gallery_dl():
@@ -275,19 +265,47 @@ def _upgrade_gallery_dl():
 
 
 def check_accounts(keys=None):
-    """Ask every saved login (or those in keys) whether the site still takes it."""
+    """Ask every saved login (or those in keys) whether the site still takes it.
+    Returns {label: True (works) / False (ran out) / None (not checked) / reason}."""
+    found = {}
     for a in accounts.accounts():
         if not a["logged_in"] or (keys and a["key"] not in keys):
             continue
+        name = a["label"] if a["group"] != "Mastodon" else "Mastodon (%s)" % a["label"]
         try:
             ok = _still_logged_in(a["key"])
         except Exception as e:             # no answer says nothing about the login
             log.info("%s: login not checked: %s", a["key"], net.reason(e))
+            found[name] = net.reason(e)
             continue
+        found[name] = ok
         if ok is True:
             accounts.mark(a["key"], True)
         elif ok is False:
             _login_ran_out(a["key"], a["label"])
+    return found
+
+
+def _and(names):
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+
+
+def check_accounts_at_start():
+    """Every saved login, once at every start, said in the activity log."""
+    try:
+        found = check_accounts()
+    except Exception:
+        log.exception("account check")
+        return
+    works = [n for n, ok in found.items() if ok is True]
+    out = [n for n, ok in found.items() if ok is False]
+    unsure = ["%s (%s)" % (n, ok) for n, ok in found.items() if isinstance(ok, str)]
+    if not works and not out and not unsure:
+        return
+    parts = (["%s work%s" % (_and(works), "s" if len(works) == 1 else "")] if works else []) + \
+            (["%s ran out" % _and(out)] if out else []) + \
+            (["no answer from %s" % _and(unsure)] if unsure else [])
+    event("error" if out else "warn" if unsure else "info", "Logins checked: " + "; ".join(parts))
 
 
 # ---- profile pictures and names ---------------------------------------------------
@@ -423,7 +441,8 @@ def _sync_artist(artist_id):
         if _cancel.is_set():
             break
         site = sources.site_for(src["url"])
-        login = accounts.account_for(src["url"])
+        login = sources.account_key(src["url"])
+        login = login if login and accounts.logged_in(login) else None
         error = level = None
         try:
             fresh, walked[src["id"]] = _scan(src, site, known, cur)
@@ -432,7 +451,7 @@ def _sync_artist(artist_id):
                 accounts.mark(login, True)
         except Exception as e:
             error, level = net.reason(e), net.level(e)
-            if login and error.startswith(net.LOGIN) and accounts.logged_in(login):
+            if login and error.startswith(net.LOGIN):
                 _login_ran_out(login, site.LABEL)
             else:
                 event("warn", "%s could not be reached: %s" % (site.LABEL, error), artist)

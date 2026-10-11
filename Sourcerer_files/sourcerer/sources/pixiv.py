@@ -35,6 +35,7 @@ MAX_NEW = 500
 AJAX = "https://www.pixiv.net/ajax/"
 REFERER = {"Referer": "https://www.pixiv.net/"}
 PAGE = 48            # what pixiv's own profile page asks for; the endpoint refuses 200
+LOGIN = ("recommended", "Logged out, pixiv leaves R-18 works out.")
 UGOIRA = 2           # illustType: 0 illustration, 1 manga, 2 ugoira (animation)
 _USER = re.compile(r"^https?://(?:www\.|touch\.)?pixiv\.net/(?:[a-z]{2}/)?"
                    r"(?:users/|u/|member(?:_illust)?\.php\?(?:[^#]*&)?id=)(\d+)", re.I)
@@ -45,6 +46,19 @@ _OTHER = re.compile(r"^https?://(?:(?:www\.)?pixiv\.net/(?:[a-z]{2}/)?artworks/(
 def match(url):
     url = url.strip()
     return bool(_USER.match(url) or _OTHER.match(url))
+
+
+def account_key(url):
+    return "pixiv"
+
+
+def still_logged_in(key):
+    try:
+        return not net.get_json(AJAX + "user/extra?lang=en").get("error")
+    except requests.HTTPError as e:
+        if e.response is not None and e.response.status_code in (401, 403):
+            return False
+        raise
 
 
 def _uid(url):

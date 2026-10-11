@@ -15,12 +15,13 @@ sources, into a TrackImage library.
 
 | Site | Status |
 |---|---|
-| XenForo Media Gallery | **works** on forums without a strict bot check — media gallery, albums, threads (gallery-dl); login per forum |
-| Mastodon (and the fediverse) | **works** — public posts, originals |
+| XenForo Media Gallery | **works** — media gallery, albums, threads (gallery-dl); login per forum; forums behind a Cloudflare challenge only with the login window's pass |
+| Mastodon (and the fediverse) | **works** — public posts, originals; login per server (OAuth) for members-only servers and followers-only posts |
 | Patreon | **works** — own code on Patreon's JSON; originals (`download_url`), uploader's names; patron posts with a login |
-| Bluesky | **works** — public posts, original blobs incl. video |
+| Bluesky | **works** — public posts, original blobs incl. video; login with an app password |
 | X | **works** with a login — listed by gallery-dl, originals (`name=orig`) |
 | Pixiv | **works** — own code on pixiv's AJAX JSON; R-18 with a login; ugoira as animated WebP |
+| Boorus | **works** — Danbooru (+ Safebooru, AIBooru), e621/e926, Gelbooru, Rule 34, Safebooru.org, Xbooru, TBIB, Hypnohub, yande.re, Konachan, Sakugabooru: an artist's tag search; API keys where a site wants one |
 | DeviantArt | not started |
 
 ## Decisions
@@ -122,8 +123,19 @@ add the one that replaced it.
   thumbnail files. Avatars are `Avatars/<artist>.jpg`. — The user wants no
   picture stored twice; SQLite hands out a deleted row's id again, so
   pictures keyed by id could show the wrong artist.
-- 2026-10-11 — Logins are checked after every sync that uses them and every
-  6 hours; one that ran out shows as a warning until it is renewed.
+- 2026-10-11 — Logins are checked after every sync that uses them, at every
+  start and every 6 hours; one that ran out shows as a warning until it is
+  renewed.
+- 2026-10-11 — Connections are TLS 1.3 only, on Python's own defaults, with
+  TLS 1.2 kept for hosts that lack 1.3. — baraag.net (Mastodon) and
+  VerticalScope's forums refused urllib3's handshake whatever the headers;
+  this one passes, and Sourcerer still says who it is.
+- 2026-10-11 — Every site has a login in Settings › Accounts, each the way
+  the site offers: its login page in the window (cookies; Mastodon: OAuth
+  with a read-only token), a Bluesky app password, a booru's API key. The
+  card dialog says under a link when its site wants a login that is missing.
+- 2026-10-11 — Boorus in Sourcerer's own code on their JSON APIs, not
+  gallery-dl: three engines, small and stable; a source is a tag search.
 
 ## Done
 
@@ -159,12 +171,18 @@ add the one that replaced it.
       deleted cards, original names in the folder)
 - [x] Card pictures made in memory from the downloads; avatars named after
       the artist; dots green / yellow / red; links on the card open the site
+- [x] TLS 1.3 handshake: Mastodon servers and forums with a bot check work
+- [x] Logins for every site (Bluesky, Mastodon, boorus added), checked at
+      every start; the card dialog warns about a missing login
+- [x] Boorus: Danbooru, e621, Gelbooru, Rule 34, yande.re, Konachan and more
 
 ## Next
 
-- [ ] Forums with a strict bot check (VerticalScope's `xf_is_suspected_bot`
-      409, Cloudflare challenges): fetch their pages through the login
-      window's browser engine, which passes where Python's requests do not.
+- [ ] Forums behind a Cloudflare challenge without a login: fetch their
+      pages through the login window's browser engine. (VerticalScope's
+      `xf_is_suspected_bot` 409 is solved by the TLS 1.3 handshake.)
+- [ ] Mastodon: an artist on a server the user has no account on, read
+      through the user's own server (only what it has seen).
 - [ ] A licence for Sourcerer. Until there is one, gallery-dl (GPL-2.0)
       stays a separate process.
 - [ ] DeviantArt (gallery-dl lists it without a login, but not always the original)

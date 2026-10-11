@@ -83,6 +83,9 @@ def _display_name(name):
 
 def name_from_url(url):
     """A name when no site says one: the account part of the link."""
+    tags = (urllib.parse.parse_qs(urllib.parse.urlparse(url).query).get("tags") or [""])[0].split()
+    if tags:                                              # a booru's tag search: the first tag
+        return re.sub(r"_\((?:artist|cosplayer)\)$", "", tags[0]).replace("_", " ")
     parts = [p for p in urllib.parse.urlparse(url).path.split("/") if p]
     parts = [p for p in parts if p.lower() not in ("profile", "users", "user", "members", "media",
                                                   "c", "u", "en", "gallery", "artworks")]
@@ -241,11 +244,34 @@ def detect():
     try:
         p = sources.profile(url) or {}
         info.update(status="ok", name=_display_name(p.get("name")) or info["name"],
-                    handle=p.get("handle", ""))
+                    handle=p.get("handle", ""), from_site=bool(p.get("name")))
     except Exception as e:
         why = net.reason(e)
         info.update(status="login" if why.startswith(net.LOGIN) else net.level(e), error=why)
+    info["account"] = note = _login_note(url, info["status"])
+    if note and note["need"] == "required" and info["status"] == "ok":
+        # The account is there, but nothing downloads without the login: yellow, not green.
+        info.update(status="login", error=note["why"])
     return jsonify(info)
+
+
+def _login_note(url, status):
+    """What the card dialog says under a link about its login, or None.
+    need: required -- nothing comes without one; recommended -- part of it
+    does not; a login that ran out is said either way."""
+    key = sources.account_key(url)
+    if not key:
+        return None
+    need, why = sources.login_need(url)
+    if status == "login":
+        need, why = "required", why or "This site shows it to logged-in accounts only."
+    data = accounts.load(key) or {}
+    logged_in = accounts.logged_in(key)
+    expired = logged_in and data.get("state") == "expired"
+    if (logged_in and not expired) or (not need and not expired):
+        return None
+    return {"key": key, "label": accounts.label(key), "need": need or "recommended", "why": why,
+            "expired": expired, "kind": accounts.kind(key)}
 
 
 @app.post("/api/artists")
@@ -474,8 +500,7 @@ def _login_changed(key):
     again: the sources it covers walk their whole history on the next sync."""
     with db.connect() as con:
         for row in con.execute("SELECT id, url FROM sources").fetchall():
-            if accounts.account_for(row["url"]) == key or \
-                    (key.startswith("xenforo:") and accounts.host_of(row["url"]) == key.split(":", 1)[1]):
+            if sources.account_key(row["url"]) == key:
                 con.execute("UPDATE sources SET complete = 0 WHERE id = ?", (row["id"],))
 
 
@@ -493,33 +518,96 @@ def _forums():
     return out
 
 
+def _used_keys():
+    """The logins the cards' sources would use."""
+    with db.connect() as con:
+        urls = [r[0] for r in con.execute("SELECT url FROM sources ORDER BY id")]
+    return [sources.account_key(u) for u in urls]
+
+
 def _account_key(body):
-    """(key, the forum's base URL or None) of the account a request names."""
+    """(key, the forum's base URL or None) of the account a request names:
+    by key, or a forum, Mastodon server or booru typed in by hand."""
     key, base = (body.get("key") or "").strip().lower(), None
-    if body.get("forum"):                      # a forum typed in by hand: its host is the key
+    if body.get("forum"):                      # a forum: its host is the key
         base = accounts.forum_base(body["forum"].strip())
         key = "xenforo:" + accounts.host_of(base)
+    elif body.get("server"):
+        from .sources import mastodon
+        key = "mastodon:" + mastodon.server_of(body["server"])
+    elif body.get("booru"):
+        from .sources import booru
+        try:
+            key = booru.account_key_for_host(body["booru"])
+        except ValueError:
+            abort(400)
     elif key.startswith("xenforo:"):
-        base = _forums().get(key.split(":", 1)[1])
-    try:
-        accounts.describe(key, base)
-    except KeyError:
+        # A forum below the root: its base from the card's links, or from the
+        # link the card dialog asks about before the card is saved.
+        base = _forums().get(key.split(":", 1)[1]) or \
+            (accounts.forum_base(body["url"]) if body.get("url") else None)
+    if not _shown(key):
         abort(400)
     return key, base
 
 
+def _shown(key):
+    """A key Settings may list: one a site of Sourcerer's would use."""
+    from .sources import booru
+    try:
+        how = accounts.kind(key)
+    except KeyError:
+        return False
+    host = key.split(":", 1)[-1]
+    return bool(host) and (how != "api_key" or booru.BOORUS.get(host, (0, 0, None))[2] is not None)
+
+
 @app.get("/api/accounts")
 def get_accounts():
-    return jsonify(accounts=accounts.accounts(_forums()), window=WINDOW is not None)
+    """Every login, and those of the keys asked for (a booru picked in Settings,
+    a link in the card dialog that is not saved yet)."""
+    from .sources import booru
+    keys = [k for k in _used_keys() + request.args.getlist("key") if k and _shown(k)]
+    rows = [a for a in accounts.accounts(keys) if _shown(a["key"])]
+    for a in rows:
+        if a["kind"] == "api_key":
+            a.update(booru.login_help(a["key"]))
+    return jsonify(accounts=rows, window=WINDOW is not None, boorus=booru.LOGIN_SITES)
 
 
 @app.post("/api/accounts/login")
 def account_login():
-    key, base = _account_key(request.get_json(force=True) or {})
+    """Log in: a window for cookie and Mastodon logins; the fields for the others."""
+    body = request.get_json(force=True) or {}
+    key, base = _account_key(body)
+    how = accounts.kind(key)
+    try:
+        if how == "password":
+            from .sources import bluesky
+            bluesky.login(body.get("handle") or "", body.get("password") or "")
+            return jsonify(ok=True, key=key)
+        if how == "api_key":
+            from .sources import booru
+            booru.login(key, body.get("user") or "", body.get("api_key") or "")
+            return jsonify(ok=True, key=key)
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
+    except Exception as e:
+        return jsonify(error="No answer from the site: %s" % net.reason(e)), 502
     if WINDOW is None:
-        return jsonify(error="Logging in needs Sourcerer's own window. In the browser, "
-                             "import a cookies.txt instead."), 501
-    accounts.login_in_window(key, base)
+        return jsonify(error="Logging in needs Sourcerer's own window." +
+                       (" In the browser, import a cookies.txt instead." if how == "window" else "")), 501
+    if how == "oauth":
+        from .sources import mastodon
+        server = key.split(":", 1)[1]
+        try:
+            url, finish = mastodon.start_login(server)
+        except Exception as e:
+            return jsonify(error="%s did not let Sourcerer register as an app (%s). "
+                                 "Is it a Mastodon server?" % (server, net.reason(e))), 502
+        accounts.login_in_window(key, url=url, finish=finish)
+    else:
+        accounts.login_in_window(key, base)
     return jsonify(ok=True, key=key)
 
 
@@ -532,7 +620,12 @@ def account_check():
 
 @app.post("/api/accounts/logout")
 def account_logout():
-    accounts.logout(_account_key(request.get_json(force=True) or {})[0])
+    """Forget a login -- after asking its site to end it, where the site has a way."""
+    key = _account_key(request.get_json(force=True) or {})[0]
+    site = next((s for s in sources.SITES if s.KIND == key.split(":", 1)[0]), None)
+    if getattr(site, "logout", None):
+        site.logout(key)
+    accounts.logout(key)
     return jsonify(ok=True)
 
 
@@ -540,6 +633,8 @@ def account_logout():
 def account_import():
     body = request.get_json(force=True) or {}
     key, _base = _account_key(body)
+    if accounts.kind(key) != "window":
+        return jsonify(error="This site logs in another way."), 400
     try:
         n = accounts.import_cookies_txt(key, body.get("text") or "")
     except ValueError as e:

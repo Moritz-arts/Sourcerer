@@ -1,17 +1,28 @@
-"""Logins: the session cookies of sites that show everything only to members.
+"""Logins, one file per account in Userdata/Accounts/, mode 600.
 
-A login happens in a window of Sourcerer's own (pywebview), at the site's own
-login page -- Sourcerer never sees a password. Once the site has set the cookie
-that proves a login, that site's cookies are saved to Userdata/Accounts/ and
-the window closes by itself. Without a window (browser mode) a cookies.txt,
-exported from the browser with an extension, can be imported instead.
+Four ways in, whichever the site offers:
 
-The files never leave the machine and are never logged; Log out deletes them.
-net.py attaches them to every request to the site's hosts.
+  window    the site's own login page in a window of Sourcerer's (pywebview);
+            once the site has set the cookie that proves a login, its cookies
+            are kept and the window closes by itself. X, Patreon, Pixiv and
+            XenForo forums ("xenforo:<host>"). Without a window (browser
+            mode) a cookies.txt, exported from the browser, does the same.
+  oauth     Mastodon ("mastodon:<server>"): the server's own "Authorize
+            Sourcerer" page in that window; it hands out a read-only token.
+  password  Bluesky: the handle and an app password, which Bluesky makes for
+            exactly this -- a password that can only be used by apps and can
+            be revoked on its own. Kept is the session it opens, not the password.
+  api_key   boorus ("booru:<host>"): the user name and the API key the
+            site shows in its account settings.
 
-A login can run out. Every sync that uses one, and a check every few hours
-(sync.check_accounts), marks it "ok" or "expired"; an expired one is shown
-as a warning until the user logs in again.
+Sourcerer never sees an account's real password. The files never leave the
+machine and are never logged; Log out deletes them. Cookies go with every
+request to the site's hosts (net.py); tokens and keys are added by the site's
+own module to its API requests only.
+
+A login can run out. Every sync that uses one, a check at every start and one
+every few hours (sync.check_accounts) mark it "ok" or "expired"; an expired
+one is shown as a warning until the user logs in again.
 
 Forums behind Cloudflare's bot check let only a browser through. The login
 window is one: the pass it earns (cf_clearance) is saved with its cookies,
@@ -43,6 +54,9 @@ SITES = {
     "pixiv": ("Pixiv", "https://accounts.pixiv.net/login", ("pixiv.net",),
               lambda c: bool(re.match(r"\d+_", c.get("PHPSESSID", "")))),
 }
+# Settings' order: the big sites by name, then one row per server, forum and booru.
+ORDER = ["bluesky", "mastodon", "pixiv", "x", "patreon", "xenforo", "booru"]
+GROUPS = {"mastodon": "Mastodon", "xenforo": "XenForo", "booru": "Booru"}
 # XenForo forums are one account each, keyed "xenforo:<host>". The cookie
 # prefix is the forum's choice (xf_ by default); <prefix>user is set by a
 # login with "Stay logged in", <prefix>session by every visit, guest or not.
@@ -54,12 +68,37 @@ _pending = {}                   # key -> "waiting" | "done" | "failed: why" | "c
 
 
 def host_of(url):
-    host = (urllib.parse.urlparse(url).hostname or "").lower()
+    host = (urllib.parse.urlparse(url if "://" in url else "https://" + url).hostname or "").lower()
     return host[4:] if host.startswith("www.") else host
 
 
+def kind(key):
+    """How an account logs in: window, oauth, password or api_key."""
+    if key in SITES or key.startswith("xenforo:"):
+        return "window"
+    if key.startswith("mastodon:"):
+        return "oauth"
+    if key == "bluesky":
+        return "password"
+    if key.startswith("booru:"):
+        return "api_key"
+    raise KeyError(key)
+
+
+def label(key):
+    if key in SITES:
+        return SITES[key][0]
+    if key == "bluesky":
+        return "Bluesky"
+    host = key.split(":", 1)[1]
+    if key.startswith("booru:"):
+        from .sources import booru               # here: sources import this module
+        return booru.BOORUS.get(host, (None, host))[1]
+    return host
+
+
 def describe(key, base=None):
-    """(label, login url, domains, logged-in test) of an account key.
+    """(label, login url, domains, logged-in test) of a window account.
 
     A forum may live below the root (example.com/community/): its base URL,
     taken from a card's link or typed in, comes before /login/ -- the root's
@@ -84,7 +123,7 @@ def forum_base(url):
 
 
 def key_for(url):
-    """The account a source URL would use, or None."""
+    """The cookie account a URL's host belongs to, or None."""
     host = host_of(url)
     for key, (_label, _login, domains, _ok) in SITES.items():
         if any(host == d or host.endswith("." + d) for d in domains):
@@ -117,6 +156,24 @@ def save(key, cookies, how, **extra):
     log.info("%s: login saved (%d cookies, %s)", key, len(keep), how)
     _changed(key)
     return data
+
+
+def save_token(key, how, **secrets):
+    """An oauth, password or api_key login: what the site handed out, and who it is (user)."""
+    data = dict(secrets, key=key, saved=_now(), how=how, state="ok", checked=_now(), why="")
+    _write(key, data)
+    log.info("%s: login saved (%s)", key, how)
+    _changed(key)
+    return data
+
+
+def update(key, **fields):
+    """Fields of a saved login that change while it is used (a renewed session)."""
+    with _lock:
+        data = load(key)
+        if data:
+            data.update(fields)
+            _write(key, data)
 
 
 def _changed(key):
@@ -153,11 +210,8 @@ def mark(key, ok, why=""):
 
 def problems():
     """The logins that ran out: [{key, label, why}], for the warning in the window."""
-    out = []
-    for a in accounts():
-        if a["state"] == "expired":
-            out.append({"key": a["key"], "label": a["label"], "why": a["why"]})
-    return out
+    return [{"key": a["key"], "label": a["label"], "why": a["why"]}
+            for a in accounts() if a["state"] == "expired"]
 
 
 def logout(key):
@@ -169,21 +223,30 @@ def logout(key):
 def jar(key):
     """The saved cookies of an account as {name: value}, empty when not logged in."""
     data = load(key)
-    return {c["name"]: c["value"] for c in data["cookies"]} if data else {}
+    return {c["name"]: c["value"] for c in data.get("cookies") or []} if data else {}
 
 
 def logged_in(key):
     data = load(key)
+    if not data:
+        return False
     try:
-        # A forum login without "Stay logged in" sets no <prefix>user cookie;
-        # the login window saw the page say so instead (page_login).
-        return bool(data) and (describe(key)[3](jar(key)) or bool(data.get("page_login")))
+        how = kind(key)
     except KeyError:
         return False
+    if how == "oauth":
+        return bool(data.get("token"))
+    if how == "password":
+        return bool(data.get("refresh"))
+    if how == "api_key":
+        return bool(data.get("user") and data.get("api_key"))
+    # A forum login without "Stay logged in" sets no <prefix>user cookie;
+    # the login window saw the page say so instead (page_login).
+    return describe(key)[3](jar(key)) or bool(data.get("page_login"))
 
 
 def account_for(url):
-    """The key of the saved login a request to url would use, or None."""
+    """The key of the saved cookie login a request to url would use, or None."""
     host = host_of(url)
     if not host:
         return None
@@ -193,59 +256,82 @@ def account_for(url):
     return "xenforo:" + host if _path("xenforo:" + host).exists() else None
 
 
-def cookies_for(url):
-    """{name: value} to send with a request to url: the cookies of the account
-    whose domains cover its host. The forums' accounts are looked up by host."""
+def headers_for(url):
+    """What a request to url carries for a cookie login: its cookies, and for
+    a forum whose Cloudflare pass is bound to the login window, that window's
+    User-Agent. The big sites' APIs get Sourcerer's own."""
     key = account_for(url)
-    return jar(key) if key else {}
-
-
-def user_agent_for(url):
-    """The login window's User-Agent, for a host whose Cloudflare pass is bound to it."""
-    key = account_for(url)
-    if not key or not key.startswith("xenforo:"):    # the big sites' APIs get Sourcerer's own
-        return None
-    data = load(key)
-    if data and data.get("ua") and any(c["name"] == "cf_clearance" for c in data["cookies"]):
-        return data["ua"]
-    return None
-
-
-def accounts(xenforo_hosts=()):
-    """Every account Settings shows: the fixed sites, then each forum a card uses."""
-    keys = list(SITES) + ["xenforo:" + h for h in sorted(set(xenforo_hosts))]
-    keys += sorted(p.stem.replace("_", ":", 1) for p in DIR.glob("xenforo_*.json")
-                   if p.stem.replace("_", ":", 1) not in keys) if DIR.is_dir() else []
-    out = []
-    for key in keys:
-        label, login, _domains, _ok = describe(key)
-        data = load(key)
-        data = data or {}
-        out.append({"key": key, "label": label, "forum": key.startswith("xenforo:"),
-                    "logged_in": logged_in(key), "saved": data.get("saved", ""),
-                    "how": data.get("how", ""), "pending": _pending.get(key, ""),
-                    "state": data.get("state", "") if logged_in(key) else "",
-                    "why": data.get("why", ""), "checked": data.get("checked", ""),
-                    "base": data.get("base", "")})
+    if not key:
+        return {}
+    data = load(key) or {}
+    cookies = {c["name"]: c["value"] for c in data.get("cookies") or []}
+    out = {"Cookie": "; ".join("%s=%s" % kv for kv in cookies.items())} if cookies else {}
+    if key.startswith("xenforo:") and data.get("ua") and "cf_clearance" in cookies:
+        out["User-Agent"] = data["ua"]
     return out
+
+
+def secrets(key):
+    """A token or key login's saved data while it is logged in, else None."""
+    return load(key) if logged_in(key) else None
+
+
+def accounts(keys=()):
+    """Every account Settings shows: the fixed sites, then each server, forum
+    and booru a card uses (keys) or that has a login saved."""
+    have = [k for k in keys if k]
+    if DIR.is_dir():
+        for p in DIR.glob("*.json"):
+            data = load(p.stem) or {}
+            if data.get("key"):
+                have.append(data["key"])
+    fixed = ["bluesky"] + list(SITES)
+    rest = sorted({k for k in have if k not in fixed and _known(k)})
+    out = []
+    for key in sorted(fixed + rest, key=lambda k: (ORDER.index(k.split(":", 1)[0]), k)):
+        data = load(key) or {}
+        is_in = logged_in(key)
+        group = key.split(":", 1)[0]
+        out.append({"key": key, "label": label(key), "kind": kind(key), "group": GROUPS.get(group, ""),
+                    "logged_in": is_in, "saved": data.get("saved", ""), "how": data.get("how", ""),
+                    "pending": _pending.get(key, ""), "state": data.get("state", "") if is_in else "",
+                    "why": data.get("why", ""), "checked": data.get("checked", ""),
+                    "base": data.get("base", ""), "user": data.get("user", "") if is_in else ""})
+    return out
+
+
+def _known(key):
+    try:
+        kind(key)
+        return True
+    except KeyError:
+        return False
 
 
 # ---- logging in in a window --------------------------------------------------------
 
-def login_in_window(key, base=None):
-    """Open the site's login page in a window of its own and wait, in the
-    background, for the cookie that proves a login. Returns at once."""
+def login_in_window(key, base=None, url=None, finish=None):
+    """Open a login page in a window of its own and wait, in the background,
+    for the login to show. Returns at once.
+
+    Cookie logins wait for the cookie that proves one. An oauth login passes
+    url (the server's authorize page) and finish(code): the window waits for
+    the page that shows the code, and finish turns it into the saved login.
+    """
     import webview
-    label, url, domains, ok = describe(key, base)
+    if finish:
+        title, ok = label(key), None
+    else:
+        title, url, _domains, ok = describe(key, base)
     with _lock:
         if _pending.get(key) == "waiting":
             return
         _pending[key] = "waiting"
-    window = webview.create_window("Log in to %s - Sourcerer" % label, url, width=520, height=760)
+    window = webview.create_window("Log in to %s - Sourcerer" % title, url, width=520, height=760)
     closed = threading.Event()
     window.events.closed += closed.set
     extra = {"base": url[:-len("/login/")]} if key.startswith("xenforo:") else {}
-    threading.Thread(target=_watch, args=(key, window, ok, closed, extra),
+    threading.Thread(target=_watch, args=(key, window, ok, closed, extra, finish),
                      daemon=True, name="login-" + key).start()
 
 
@@ -258,11 +344,37 @@ def _forum_says_logged_in(window):
         return False
 
 
-def _watch(key, window, ok, closed, extra):
+def _oauth_code(window):
+    """The code an authorize page hands out once the user said yes: Mastodon
+    and GoToSocial put it in the address (/oauth/authorize/native?code=...),
+    Pleroma and Akkoma on the page ("Token code is ...")."""
+    try:
+        parts = urllib.parse.urlparse(window.get_current_url() or "")
+    except Exception:
+        return None
+    if "oauth" not in parts.path:
+        return None
+    code = (urllib.parse.parse_qs(parts.query).get("code") or [None])[0]
+    if code:
+        return code
+    try:
+        text = window.evaluate_js("document.body ? document.body.innerText : ''") or ""
+    except Exception:
+        return None
+    m = re.search(r"Token code is\s*([\w-]{8,})", text)
+    return m.group(1) if m else None
+
+
+def _watch(key, window, ok, closed, extra, finish):
     deadline = time.monotonic() + LOGIN_MINUTES * 60
-    found = None
+    found = code = None
     while not closed.is_set() and time.monotonic() < deadline:
         time.sleep(1.5)
+        if finish:
+            code = _oauth_code(window)
+            if code:
+                break
+            continue
         try:
             cookies = _window_cookies(window)
         except Exception as e:           # the window was closed between two looks
@@ -274,24 +386,27 @@ def _watch(key, window, ok, closed, extra):
         if key.startswith("xenforo:") and _forum_says_logged_in(window):
             found, extra["page_login"] = cookies, True
             break
-    if found:
+    if code:
+        try:
+            finish(code)
+            _pending[key] = "done"
+        except Exception as e:
+            log.info("%s: login not finished: %s", key, e)
+            _pending[key] = "failed: %s" % e
+    elif found:
         try:
             extra["ua"] = window.evaluate_js("navigator.userAgent") or ""
         except Exception:
             pass
         save(key, found, "login window", **extra)
         _pending[key] = "done"
+    else:
+        _pending[key] = "cancelled" if closed.is_set() else "failed: no login within %d minutes" % LOGIN_MINUTES
+    if not closed.is_set():
         try:
             window.destroy()
         except Exception:
             pass
-    else:
-        _pending[key] = "cancelled" if closed.is_set() else "failed: no login within %d minutes" % LOGIN_MINUTES
-        if not closed.is_set():
-            try:
-                window.destroy()
-            except Exception:
-                pass
 
 
 def _window_cookies(window):
@@ -318,8 +433,8 @@ def import_cookies_txt(key, text):
             continue
         domain, _subdomains, path, _secure, expires, name, value = parts[:7]
         cookies.append({"name": name, "value": value, "domain": domain, "path": path, "expires": expires})
-    label, _url, domains, ok = describe(key)
+    name, _url, domains, ok = describe(key)
     mine = [c for c in cookies if any(c["domain"].lstrip(".").endswith(d) for d in domains)]
     if not ok({c["name"]: c["value"] for c in mine}):
-        raise ValueError("This file holds no login for %s." % label)
+        raise ValueError("This file holds no login for %s." % name)
     return len(save(key, mine, "cookies.txt")["cookies"])
