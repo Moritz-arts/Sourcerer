@@ -265,6 +265,10 @@ Do not create releases or tags yourself, and do not push to `main`.
 - **No CDN, ever.** The icons are inline SVG drawn after Tabler Icons (MIT,
   `static/icons-LICENSE.txt`); fonts are the system's.
 - **The server listens on 127.0.0.1 only.** Nothing here is for other machines.
+  And only Sourcerer's own page may change anything (`server._same_origin`):
+  any web page in the user's browser can POST a form to 127.0.0.1, so a
+  POST with a foreign Origin or Host is refused. Requests without an Origin
+  (launch.py's `/api/focus`) pass.
 - **Be gentle with sites; it is what keeps users unblocked.** Every request
   goes through `net.py`: an honest User-Agent, at most `per_host` requests per
   site at once, `pace_ms` between them, Retry-After honoured; `HOSTS` makes a
@@ -301,10 +305,13 @@ Do not create releases or tags yourself, and do not push to `main`.
   nothing to requests/urllib3 -- with any headers -- while curl passed:
   urllib3's handshake is the one every Python scraper makes. Python's own
   default context limited to TLS 1.3 passes (`net._Tls13`, and
-  gallery-dl's `tls12: false` for forums). A host without TLS 1.3
-  (gelbooru.com refuses it, old Amazon balancers hang up) is remembered in
-  `net._OLD_TLS` and gets the usual handshake. It changes nothing about who
-  Sourcerer says it is. A Cloudflare challenge (e926, some forums) is
+  gallery-dl's `tls12: false` for forums). A host without TLS 1.3 is
+  remembered in `net._OLD_TLS` (by host:port of the hop that failed, a
+  redirect's too) and gets the usual handshake: at once when it refuses 1.3
+  with an alert (gelbooru.com), only the second time when it hangs up (old
+  Amazon balancers) -- one dropped handshake must not hand a bot-checked
+  host the handshake it refuses for the rest of the run. It changes nothing
+  about who Sourcerer says it is. A Cloudflare challenge (e926, some forums) is
   another matter: only a browser passes it -- the login window's
   `cf_clearance` for a forum.
 - **Four ways to log in** (`accounts.kind`): `window` (cookies: X, Patreon,
@@ -327,7 +334,15 @@ Do not create releases or tags yourself, and do not push to `main`.
   with `rating:s`. Mirrors that share post ids and files (konachan.net,
   e926, safebooru.donmai.us) key their files as the main site
   (`SAME_POSTS`), so one post is one file. Moebooru gets no login: its
-  API shows guests everything. realbooru's API is switched off.
+  API shows guests everything. realbooru's API is switched off. An old post
+  can get the artist's tag years later, deep in the id order where the
+  early stop never looks: booru sources are walked all the way once a week
+  (`FULL_WALK_DAYS`, `sources.walked`).
+- **A login is judged by the one that was used.** A check or sync stamps
+  the login it read (`accounts.saved`) and `mark` ignores the result when a
+  new login was saved meanwhile. A scan that went well proves nothing about
+  a login: Mastodon and Bluesky read as a visitor when a token died, Patreon
+  answers an expired session as a guest.
 - **Bluesky allows only a few new sessions a day** (10 per identifier at
   the entryway). Never call createSession on your own: keep and rotate the
   refresh token; a dead one is an expired login, not a reason to log in

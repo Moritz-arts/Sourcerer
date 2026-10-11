@@ -162,18 +162,34 @@ def still_logged_in(key):
         session = _session()
         if not session:
             return False
-        pds, headers = session
-        net.get_json(pds + "/xrpc/com.atproto.server.getSession", headers=headers)
-        return True
+        for renew in (False, True):
+            pds, headers = session
+            try:
+                net.get_json(pds + "/xrpc/com.atproto.server.getSession", headers=headers)
+                return True
+            except requests.HTTPError as e:
+                if renew or _error(e) != "ExpiredToken":
+                    raise
+                session = _session(renew=True)
     except Exception as e:
         if e.__class__.__name__ == "LoginRequired" or _dead(e):
             return False
         raise
 
 
+def _visitor_or(renew=False):
+    """The login's session -- or None, read as a visitor, when it cannot be
+    renewed: public posts need no login, and the account check says it ran out."""
+    try:
+        return _session(renew)
+    except Exception as e:
+        log.info("Bluesky login not usable (%s); reading as a visitor", net.reason(e))
+        return None
+
+
 def _get(method, params):
     """An app.bsky call: through the user's own server when logged in, else the public API."""
-    session = _session()
+    session = _visitor_or()
     if not session:
         return net.get_json(API + method, params)
     for renew in (False, True):
@@ -185,7 +201,9 @@ def _get(method, params):
                 raise RuntimeError("this artist blocked your Bluesky account, or you blocked them") from e
             if renew or _error(e) != "ExpiredToken":
                 raise
-            session = _session(renew=True)          # the token ran out before its time said so
+            session = _visitor_or(renew=True)       # the token ran out before its time said so
+            if not session:
+                return net.get_json(API + method, params)
 
 
 def normalize(url):

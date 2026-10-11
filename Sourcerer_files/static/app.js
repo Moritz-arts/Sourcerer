@@ -26,7 +26,7 @@ function api(method, path, body) {
     body: body ? JSON.stringify(body) : undefined
   }).then(function (r) {
     return r.json().catch(function () { return {}; }).then(function (data) {
-      if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
+      if (!r.ok) { var e = new Error(data.error || ("HTTP " + r.status)); e.data = data; throw e; }
       return data;
     });
   });
@@ -784,7 +784,8 @@ var ACC_ADD = {
   XenForo: { field: "forum", label: "Another XenForo forum", placeholder: "forum.example.com" },
   Booru: { field: "booru", label: "Another booru" }
 };
-S.accKeys = []; S.accForm = ""; S.accFocus = "";
+S.accKeys = []; S.accForm = ""; S.accFocus = ""; S.accScroll = false; S.accHtml = "";
+S.accBusy = {}; S.accError = {};          // per login form: sending, and what the site said
 
 function accState(a) {
   var expired = a.logged_in && a.state === "expired";
@@ -807,16 +808,19 @@ function accForm(a) {
       '<span></span><p class="hint">Not your account\'s password: create an app password in Bluesky under ' +
       '<a href="#" data-acc="help" data-url="https://bsky.app/settings/app-passwords">Settings › Privacy and security › App passwords</a>. ' +
       'Sourcerer keeps the session it opens, not the password.</p>' +
-      '<span></span><div class="addrow tight"><button type="submit" class="primary">Log in</button>' +
-      '<button type="button" data-acc="cancel">Cancel</button></div><span></span><p class="error"></p></form>';
+      formFoot(a.key);
   }
   return '<form class="acc-form"' + key + '>' +
     '<label>' + esc(a.user_label || "User name") + '</label><input name="user" type="text" autocomplete="off" spellcheck="false">' +
     '<label>API key</label><input name="api_key" type="password" placeholder="' + esc(a.key_hint || "") + '" autocomplete="off">' +
     '<span></span><p class="hint">' + (a.help ? '<a href="#" data-acc="help" data-url="' + esc(a.help) + '">Where is my API key?</a> ' : "") +
     'The site shows it in your account\'s settings. It stays on this computer.</p>' +
-    '<span></span><div class="addrow tight"><button type="submit" class="primary">Log in</button>' +
-    '<button type="button" data-acc="cancel">Cancel</button></div><span></span><p class="error"></p></form>';
+    formFoot(a.key);
+}
+function formFoot(key) {
+  return '<span></span><div class="addrow tight"><button type="submit" class="primary"' + (S.accBusy[key] ? " disabled" : "") +
+    '>Log in</button><button type="button" data-acc="cancel">Cancel</button></div><span></span><p class="error">' +
+    esc(S.accError[key] || "") + "</p></form>";
 }
 
 function accRow(a, win) {
@@ -837,13 +841,15 @@ function accRow(a, win) {
     (S.accForm === a.key && (!a.logged_in || expired) ? accForm(a) : "");
 }
 
-function accAdd(group, boorus) {
+function accAdd(group, boorus, win) {
   var add = ACC_ADD[group];
   var field = add.field === "booru"
     ? '<select data-add="booru">' + boorus.map(function (b) { return '<option value="' + esc(b.host) + '">' + esc(b.name) + "</option>"; }).join("") + "</select>"
     : '<input data-add="' + add.field + '" type="text" placeholder="' + esc(add.placeholder) + '" autocomplete="off" spellcheck="false">';
   return '<div class="acc-add" data-key="add-' + add.field + '"><span class="label">' + esc(add.label) + '</span><div class="addrow tight">' + field +
-    '<button type="button" data-acc="add" data-field="' + add.field + '">Log in</button></div></div>';
+    '<button type="button" data-acc="add" data-field="' + add.field + '"' +
+    (add.field === "server" && !win ? ' disabled title="Needs Sourcerer\'s own window"' : "") +
+    ">" + (add.field === "forum" && !win ? "Add" : "Log in") + "</button></div></div>";
 }
 
 function loadAccounts() {
@@ -854,25 +860,15 @@ function loadAccounts() {
     // Each group with its line to add one by hand, also while nobody uses it yet.
     var group = function (g) {
       return '<div class="acc-group">' + g + "</div>" + rows(d.accounts.filter(function (a) { return a.group === g; })) +
-        accAdd(g, d.boorus);
+        accAdd(g, d.boorus, d.window);
     };
     var single = d.accounts.filter(function (a) { return !a.group; });
-    // Redrawn every 1.5 s while a login window is open: what is typed meanwhile stays.
-    var typed = {}, focused = document.activeElement, at = null;
-    var id = function (i) { var box = i.closest("[data-key]"); return (box ? box.dataset.key : "") + "/" + (i.name || i.dataset.add || ""); };
-    Array.prototype.forEach.call($("acc-list").querySelectorAll("input, select"), function (i) {
-      typed[id(i)] = i.value;
-      if (i === focused) at = id(i);
-    });
-    $("acc-list").innerHTML = rows(single.slice(0, 1)) + group("Mastodon") + rows(single.slice(1)) +
-      group("XenForo") + group("Booru");
-    Array.prototype.forEach.call($("acc-list").querySelectorAll("input, select"), function (i) {
-      if (typed[id(i)] !== undefined) i.value = typed[id(i)];
-      if (id(i) === at) i.focus();
-    });
-    var first = document.querySelector(".acc-form input");
-    if (first && S.accFormFresh) { first.focus(); S.accFormFresh = false; }
-    if (S.accFocus) {
+    var html = rows(single.slice(0, 1)) + group("Mastodon") + rows(single.slice(1)) + group("XenForo") + group("Booru");
+    // Asked every 1.5 s while a login window is open: redrawn only when
+    // something changed, and then what is typed meanwhile stays.
+    if (html !== S.accHtml) redrawAccounts(html);
+    if (S.accFocus && S.accScroll) {
+      S.accScroll = false;
       var row = document.querySelector('#acc-list .row[data-key="' + S.accFocus + '"]');
       if (row) row.scrollIntoView({ block: "nearest" });
     }
@@ -883,17 +879,40 @@ function loadAccounts() {
   }).catch(fail);
 }
 
+function redrawAccounts(html) {
+    S.accHtml = html;
+    var typed = {}, focused = document.activeElement, at = null;
+    var id = function (i) { var box = i.closest("[data-key]"); return (box ? box.dataset.key : "") + "/" + (i.name || i.dataset.add || ""); };
+    Array.prototype.forEach.call($("acc-list").querySelectorAll("input, select"), function (i) {
+      typed[id(i)] = i.value;
+      if (i === focused) at = id(i);
+    });
+    $("acc-list").innerHTML = html;
+    Array.prototype.forEach.call($("acc-list").querySelectorAll("input, select"), function (i) {
+      if (typed[id(i)] !== undefined) i.value = typed[id(i)];
+      if (id(i) === at) i.focus();
+    });
+    var first = document.querySelector(".acc-form input");
+    if (first && S.accFormFresh) { first.focus(); S.accFormFresh = false; }
+}
+
 function accLogin(body) {
-  return api("POST", "/api/accounts/login", body).then(function (d) {
-    S.accFocus = d.key;
-    if (S.accKeys.indexOf(d.key) < 0) S.accKeys.push(d.key);
+  var show = function (key) {
+    S.accFocus = key; S.accScroll = true;
+    if (S.accKeys.indexOf(key) < 0) S.accKeys.push(key);
     return loadAccounts();
-  });
+  };
+  return api("POST", "/api/accounts/login", body).then(function (d) { return show(d.key); })
+    .catch(function (e) {
+      // In the browser a forum's login comes from a cookies.txt: its row has Import….
+      if (e.data && e.data.key && /^xenforo:/.test(e.data.key)) { toast(e.message, true); return show(e.data.key); }
+      throw e;
+    });
 }
 
 // From the card dialog: the login a link needs, at once where a window does it.
 function loginFor(acc, url) {
-  S.accFocus = acc.key;
+  S.accFocus = acc.key; S.accScroll = true;
   if (S.accKeys.indexOf(acc.key) < 0) S.accKeys.push(acc.key);
   openSettings("accounts");
   if (acc.kind === "password" || acc.kind === "api_key") {
@@ -916,7 +935,7 @@ $("acc-list").addEventListener("click", function (e) {
     var input = b.parentNode.querySelector("[data-add]"), value = input.value.trim();
     if (!value) return input.focus();
     if (b.dataset.field === "booru") {
-      S.accForm = S.accFocus = "booru:" + value; S.accFormFresh = true;
+      S.accForm = S.accFocus = "booru:" + value; S.accFormFresh = S.accScroll = true;
       if (S.accKeys.indexOf(S.accForm) < 0) S.accKeys.push(S.accForm);
       return loadAccounts();
     }
@@ -935,18 +954,24 @@ $("acc-list").addEventListener("click", function (e) {
     .then(function () { return load(); }).catch(fail).then(function () { b.disabled = false; });
 });
 $("acc-list").addEventListener("submit", function (e) {
-  var f = e.target;
   e.preventDefault();
-  var body = { key: f.dataset.key }, btn = f.querySelector("button[type=submit]");
-  Array.prototype.forEach.call(f.querySelectorAll("input"), function (i) { body[i.name] = i.value; });
-  btn.disabled = true;
-  f.querySelector("p.error").textContent = "";
+  var key = e.target.dataset.key, body = { key: key };
+  if (S.accBusy[key]) return;
+  Array.prototype.forEach.call(e.target.querySelectorAll("input"), function (i) { body[i.name] = i.value; });
+  // The list may be redrawn meanwhile: the form is found again by its key.
+  var form = function () { return document.querySelector('.acc-form[data-key="' + key + '"]'); };
+  var show = function () {
+    var f = form();
+    if (!f) return;
+    f.querySelector("button[type=submit]").disabled = !!S.accBusy[key];
+    f.querySelector("p.error").textContent = S.accError[key] || "";
+  };
+  S.accBusy[key] = true; S.accError[key] = ""; show();
   api("POST", "/api/accounts/login", body).then(function () {
-    S.accForm = ""; toast("Logged in");
+    delete S.accBusy[key]; S.accForm = ""; toast("Logged in");
     return loadAccounts().then(load);
   }).catch(function (err) {
-    f.querySelector("p.error").textContent = err.message;
-    btn.disabled = false;
+    delete S.accBusy[key]; S.accError[key] = err.message; show();
   });
 });
 $("acc-list").addEventListener("keydown", function (e) {
@@ -1055,6 +1080,7 @@ $$("[data-repair]").forEach(function (b) {
 // ---- the rest --------------------------------------------------------------
 
 $("dlg-settings").addEventListener("close", function () {
+  S.accFocus = S.accForm = ""; S.accHtml = "";
   // Back from a login: the links that wanted one say what they get now.
   if ($("dlg-card").open) F.rows.forEach(function (r) { if (r.status === "login" || r.account) check(r, true); });
 });

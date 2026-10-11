@@ -64,8 +64,17 @@ def _auth(server):
 
 
 def _api(server, path, params=None):
+    url, auth = "https://%s/api/v1/%s" % (server, path), _auth(server)
     try:
-        return net.get_json("https://%s/api/v1/%s" % (server, path), params, headers=_auth(server))
+        try:
+            return net.get_json(url, params, headers=auth)
+        except requests.HTTPError as e:
+            # A token the server took back makes even public reads a 401: read
+            # as a visitor then. The account check says the login ran out.
+            if not (auth and path != "accounts/verify_credentials" and
+                    e.response is not None and e.response.status_code == 401):
+                raise
+            return net.get_json(url, params)
     except requests.HTTPError as e:
         # 401: a server whose API is for its users only (or a token it no
         # longer takes); 403 with a JSON answer: Pleroma's and Akkoma's way to
