@@ -172,19 +172,32 @@ def _launch_helper(swap):
 # The helper runs on its own, from the temp folder, with nothing of Sourcerer
 # loaded. Standard library only. It must not sit in the folder it replaces: a
 # script whose folder is deleted under it simply stops (TrackImage's lesson).
-HELPER = r'''
-import datetime, os, shutil, subprocess, sys, time
+#
+# It swaps the program's own files and folders one by one and never touches
+# Userdata/ or venv/. v0.5 renamed Sourcerer_files as a whole, and on Windows
+# a rename fails while anything holds a folder inside -- an Explorer window on
+# the library (Userdata/Library), a virus scanner: the update never happened,
+# and as its log was written only at the very end, nothing said why.
+# Every step is written to update.log the moment it happens.
+HELPER = r"""
+import datetime, os, shutil, subprocess, sys, time, traceback
 
 a = dict(zip(sys.argv[1::2], sys.argv[2::2]))
 install, stage_rel = a["--install"], a["--stage"]
 pids = [int(p) for p in a["--pids"].split(",") if p]
 files = os.path.join(install, "Sourcerer_files")
-bak = files + ".bak"
-lines = []
+KEEP = {"Userdata", "venv"}                     # the machine's, never the program's
+logdir = os.path.join(files, "Userdata", "Logs")
 
 
 def say(m):
-    lines.append("%s  %s" % (datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), m))
+    line = "%s  %s" % (datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), m)
+    try:
+        os.makedirs(logdir, exist_ok=True)
+        with open(os.path.join(logdir, "update.log"), "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except OSError:
+        pass
 
 
 def alive(pid):
@@ -205,32 +218,47 @@ def alive(pid):
         return False
 
 
+def move(src, dst, patience=60):
+    # Windows refuses a rename while anything holds the file or folder; a
+    # virus scanner lets go after a moment, so try for a while.
+    deadline = time.time() + patience
+    while True:
+        try:
+            os.replace(src, dst) if os.path.isfile(src) else os.rename(src, dst)
+            return
+        except OSError:
+            if time.time() > deadline:
+                raise
+            time.sleep(0.5)
+
+
 def start_again():
     env = dict(os.environ, SOURCERER_AFTER_UPDATE="1")
     if os.name == "nt":
-        os.environ.update(env)
-        os.startfile(os.path.join(install, "start-windows.bat"))
+        bat = os.path.join(install, "start-windows.bat")
+        try:   # a console of its own: cmd /c closes it when the launcher is done
+            subprocess.Popen(["cmd.exe", "/c", bat], cwd=install, env=env,
+                             creationflags=0x00000010, close_fds=True)   # CREATE_NEW_CONSOLE
+        except OSError:
+            os.environ.update(env)
+            os.startfile(bat)
     elif sys.platform == "darwin":
         subprocess.Popen(["open", os.path.join(install, "start-macos.command")], env=env)
     else:
-        logf = open(os.path.join(files, "Userdata", "Logs", "console.log"), "a")
+        logf = open(os.path.join(logdir, "console.log"), "a")
         subprocess.Popen(["sh", os.path.join(install, "start-linux.sh"), "--no-open"
                           if os.environ.get("SOURCERER_TEST") else "--browser"], env=env,
                          stdin=subprocess.DEVNULL, stdout=logf, stderr=logf,
                          start_new_session=True, cwd=install)
+    say("Sourcerer started again")
 
 
 def finish(ok):
-    try:
-        os.makedirs(os.path.join(files, "Userdata", "Logs"), exist_ok=True)
-        with open(os.path.join(files, "Userdata", "Logs", "update.log"), "a", encoding="utf-8") as f:
-            f.write("\n".join(lines) + "\n")
-    except OSError:
-        pass
+    say("done" if ok else "update failed, old version kept")    # before the start reads the log
     try:
         start_again()
-    except Exception:
-        pass
+    except Exception as e:
+        say("could not start Sourcerer again: %s -- start it by hand" % e)
     try:
         os.remove(__file__)
     except OSError:
@@ -238,55 +266,65 @@ def finish(ok):
     sys.exit(0 if ok else 1)
 
 
-say("waiting for Sourcerer to close")
-deadline = time.time() + 90
-while any(alive(p) for p in pids) and time.time() < deadline:
-    time.sleep(0.3)
-time.sleep(1.5)        # the launcher's console finishes its last lines meanwhile
-if stage_rel == "-":
-    say("restarting")
-    finish(True)
+def swap():
+    stage = os.path.join(files, stage_rel, "Sourcerer_files")
+    stage_root = os.path.join(files, stage_rel)
+    backup = os.path.join(files, "Userdata", "_update", "old")
+    shutil.rmtree(backup, ignore_errors=True)
+    os.makedirs(os.path.join(backup, "_root"))
+    new = [n for n in os.listdir(stage) if n not in KEEP]
+    old = [n for n in os.listdir(files) if n not in KEEP]
+    moved, placed, roots = [], [], []
+    try:
+        for n in old:                                 # the old program aside...
+            move(os.path.join(files, n), os.path.join(backup, n))
+            moved.append(n)
+        say("old version moved aside (%d items)" % len(moved))
+        for n in new:                                 # ...the new one in its place
+            move(os.path.join(stage, n), os.path.join(files, n))
+            placed.append(n)
+        for n in os.listdir(stage_root):              # the launchers and README beside it
+            src = os.path.join(stage_root, n)
+            if os.path.isfile(src):
+                dst = os.path.join(install, n)
+                if os.path.exists(dst):
+                    move(dst, os.path.join(backup, "_root", n))
+                move(src, dst)
+                roots.append(n)
+        say("new version in place")
+    except Exception as e:
+        say("update failed, putting the old version back: %s" % e)
+        try:
+            for n in placed:
+                shutil.rmtree(os.path.join(files, n), ignore_errors=True) \
+                    if os.path.isdir(os.path.join(files, n)) else os.remove(os.path.join(files, n))
+            for n in moved:
+                move(os.path.join(backup, n), os.path.join(files, n))
+            for n in roots:
+                saved = os.path.join(backup, "_root", n)
+                if os.path.exists(saved):
+                    move(saved, os.path.join(install, n))
+            say("old version restored")
+        except Exception as e2:
+            say("RESTORE FAILED: %s -- the old version is in %s" % (e2, backup))
+        return False
+    shutil.rmtree(os.path.join(files, "Userdata", "_update"), ignore_errors=True)
+    return True
 
-# The rename is the test that counts: on Windows it fails for as long as
-# anything still holds the folder or a file in it.
-deadline = time.time() + 90
-while True:
-    try:
-        os.rename(files, bak)
-        break
-    except OSError as e:
-        if time.time() > deadline:
-            say("could not move the old version aside: %s" % e)
-            finish(False)
-        time.sleep(0.5)
-say("old version moved aside")
+
 try:
-    os.rename(os.path.join(bak, stage_rel, "Sourcerer_files"), files)
-    for keep in ("Userdata", "venv"):
-        if os.path.exists(os.path.join(bak, keep)):
-            os.rename(os.path.join(bak, keep), os.path.join(files, keep))
-    stage = os.path.join(files, stage_rel)          # travelled with Userdata
-    for name in os.listdir(stage):
-        src = os.path.join(stage, name)
-        if os.path.isfile(src):
-            os.replace(src, os.path.join(install, name))
-    say("new version in place")
-except Exception as e:
-    say("update failed, putting the old version back: %s" % e)
-    try:
-        if os.path.exists(files):
-            for keep in ("Userdata", "venv"):
-                inner = os.path.join(files, keep)
-                if os.path.exists(inner) and not os.path.exists(os.path.join(bak, keep)):
-                    os.rename(inner, os.path.join(bak, keep))
-            shutil.rmtree(files, ignore_errors=True)
-        os.rename(bak, files)
-        say("old version restored")
-    except Exception as e2:
-        say("RESTORE FAILED: %s -- the old version is in %s" % (e2, bak))
+    say("waiting for Sourcerer to close")
+    deadline = time.time() + 120
+    while any(alive(p) for p in pids) and time.time() < deadline:
+        time.sleep(0.3)
+    time.sleep(1.5)        # the window's last processes go meanwhile
+    if stage_rel == "-":
+        say("restarting")
+        finish(True)
+    finish(swap())
+except SystemExit:
+    raise
+except BaseException:
+    say("the update helper broke: " + traceback.format_exc().replace("\n", " | "))
     finish(False)
-shutil.rmtree(bak, ignore_errors=True)
-shutil.rmtree(os.path.join(files, "Userdata", "_update"), ignore_errors=True)
-say("done")
-finish(True)
-'''
+"""

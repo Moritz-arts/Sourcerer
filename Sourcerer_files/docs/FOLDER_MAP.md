@@ -57,7 +57,8 @@ Sourcerer/                        <- what Sourcerer.zip unpacks to; move it free
         ├─ Avatars/               profile pictures, <artist>.jpg
         ├─ gallery-dl/            gallery-dl's cache (its login state) and the
         │                           config of a running listing (mode 600, deleted after)
-        ├─ _update/               an update being unpacked; gone after the swap
+        ├─ _update/               an update: new/ unpacked, old/ the version it
+        │                           replaces (put back if the swap fails); gone after
         ├─ rebuild-venv           left by Settings › Repair; launch.py rebuilds
         │                           the environment and removes it
         └─ Library/               downloads, one folder per artist (and one per

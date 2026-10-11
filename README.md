@@ -33,6 +33,13 @@ is written outside the folder.
 Needs Python 3.10 or newer — on Windows from [python.org](https://www.python.org/downloads/),
 on macOS from python.org or Homebrew (`brew install python`).
 
+**If an update does not go through** (Sourcerer closes and comes back as
+the old version): close every Explorer/Finder window showing a folder inside
+`Sourcerer_files`, then try again — Settings › Updates shows what went wrong.
+From v0.5 by hand: unpack the new Sourcerer.zip, and move the folders
+`Userdata` (your cards, logins and library) and `venv` from the old
+`Sourcerer_files` into the new one.
+
 **macOS, first start:** a script downloaded from the internet is blocked once.
 Control-click `start-macos.command` › **Open** › **Open**. On macOS 15 and
 later: double-click it once, then **System Settings › Privacy & Security ›

@@ -38,4 +38,5 @@ DEFAULTS = {
     "pace_ms": "250",           # pause between two requests to one site
     "channel": "stable",        # updates: 'stable' (releases) or 'beta' (newest build)
     "gdl_updated": "",          # when gallery-dl was last brought up to date (weekly)
+    "update_seen": "",          # the update helper's last run that was already reported
 }

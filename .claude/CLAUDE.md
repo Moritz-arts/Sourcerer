@@ -314,19 +314,31 @@ Do not create releases or tags yourself, and do not push to `main`.
 
 ### Updater
 
-- **On Windows two processes hold `Sourcerer_files/`:** the app and the venv's
+- **Never rename `Sourcerer_files/` as a whole.** v0.5's helper did, and on
+  Windows a rename fails while anything holds a folder inside -- an Explorer
+  window on the library (which lives in `Userdata/Library`), a virus
+  scanner. The update silently never happened. The helper now moves the
+  program's own items one by one (old ones to `Userdata/_update/old`, new
+  ones in), never `Userdata/` or `venv/`, retries each move for 60 s and
+  puts everything back when one fails.
+- **On Windows two processes hold the program:** the app and the venv's
   `pythonw.exe`, a stub that runs the real interpreter as its child and waits
-  for it. The helper waits for both (`getpid`, `getppid`) and then retries
-  the rename for 90 s -- a rename is the only test that counts there.
-  `launch.py` has left once Sourcerer answered.
+  for it. The helper waits for both (`getpid`, `getppid`). `launch.py` has
+  left once Sourcerer answered.
+- **A fix to the helper reaches users one version late:** the helper that
+  runs is the installed version's. Somebody whose v0.5 helper failed has to
+  put the new version in by hand once (README).
 - **The helper runs on the system's Python, never the venv's**, and from the
   temp folder: both the venv and the program are in the folder it replaces.
 - **The archive is checked before anything moves:** no absolute or `..`
   paths, the files in `REQUIRED` present, `VERSION` the one announced.
   GitHub's own archives (with their `Sourcerer-<ref>/` folder) are accepted
   for repair only.
-- **Every exit path restarts Sourcerer and writes `Userdata/Logs/update.log`**;
-  the next start reads its last line into the activity log. Simulated on
+- **Every step goes to `Userdata/Logs/update.log` the moment it happens**
+  (v0.5 wrote it only at the end, so a helper that died left nothing), and
+  every exit path restarts Sourcerer -- on Windows in a console of its own
+  (`cmd /c` with CREATE_NEW_CONSOLE). The next start, also one by hand, puts
+  the last run's outcome into the activity log once (`update_seen`). Simulated on
   Linux (swap, rollback, restart); the first real run on Windows and macOS is
   still to be watched.
 
