@@ -8,6 +8,15 @@ exported from the browser with an extension, can be imported instead.
 
 The files never leave the machine and are never logged; Log out deletes them.
 net.py attaches them to every request to the site's hosts.
+
+A login can run out. Every sync that uses one, and a check every few hours
+(sync.check_accounts), marks it "ok" or "expired"; an expired one is shown
+as a warning until the user logs in again.
+
+Forums behind Cloudflare's bot check let only a browser through. The login
+window is one: the pass it earns (cf_clearance) is saved with its cookies,
+and with it the window's User-Agent, which the pass is bound to -- requests
+to that forum then carry both.
 """
 import datetime
 import json
@@ -40,6 +49,7 @@ SITES = {
 _XF_USER = re.compile(r"^[a-z0-9]*_?user$", re.I)
 
 _lock = threading.Lock()
+CHANGED = []                    # callbacks(key), after a login was saved or removed
 _pending = {}                   # key -> "waiting" | "done" | "failed: why" | "cancelled"
 
 
@@ -48,15 +58,29 @@ def host_of(url):
     return host[4:] if host.startswith("www.") else host
 
 
-def describe(key):
-    """(label, login url, domains, logged-in test) of an account key."""
+def describe(key, base=None):
+    """(label, login url, domains, logged-in test) of an account key.
+
+    A forum may live below the root (example.com/community/): its base URL,
+    taken from a card's link or typed in, comes before /login/ -- the root's
+    /login/ is somebody else's page, often a 403 or a 404.
+    """
     if key in SITES:
         return SITES[key]
     if key.startswith("xenforo:"):
         host = key.split(":", 1)[1]
-        return (host, "https://%s/login/" % host, (host,),
+        base = (base or (load(key) or {}).get("base") or "https://" + host).rstrip("/")
+        return (host, base + "/login/", (host,),
                 lambda c: any(_XF_USER.match(n) and v for n, v in c.items()))
     raise KeyError(key)
+
+
+def forum_base(url):
+    """https://host[/path] of the forum a XenForo link belongs to."""
+    parts = urllib.parse.urlparse(url if "://" in url else "https://" + url)
+    path = re.split(r"/(?:media|members|threads|forums|login|index\.php|account|search|attachments)(?:[/?.]|$)",
+                    parts.path, 1)[0]
+    return "https://%s%s" % (parts.netloc.lower(), path.rstrip("/"))
 
 
 def key_for(url):
@@ -79,27 +103,67 @@ def load(key):
         return None
 
 
-def save(key, cookies, how):
-    """cookies: [{name, value, domain, path, expires}] -- only those of the site's domains."""
-    domains = describe(key)[2]
+def _now():
+    return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+
+
+def save(key, cookies, how, **extra):
+    """cookies: [{name, value, domain, path, expires}] -- only those of the site's domains.
+    extra: ua (the login window's User-Agent), base (a forum's base URL)."""
+    domains = describe(key, extra.get("base"))[2]
     keep = [c for c in cookies if any(c["domain"].lstrip(".").endswith(d) for d in domains)]
+    data = dict(extra, key=key, saved=_now(), how=how, cookies=keep, state="ok", checked=_now(), why="")
+    _write(key, data)
+    log.info("%s: login saved (%d cookies, %s)", key, len(keep), how)
+    _changed(key)
+    return data
+
+
+def _changed(key):
+    for fn in CHANGED:
+        try:
+            fn(key)
+        except Exception:
+            log.exception("after the login of %s changed", key)
+
+
+def _write(key, data):
     DIR.mkdir(parents=True, exist_ok=True)
     path = _path(key)
-    data = {"key": key, "saved": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
-            "how": how, "cookies": keep}
     tmp = path.with_suffix(".tmp")
     # Readable by this user only, from the first byte on.
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(data, f)
     os.replace(tmp, path)
-    log.info("%s: login saved (%d cookies, %s)", key, len(keep), how)
-    return data
+
+
+def mark(key, ok, why=""):
+    """What the last use or check of a login found: still valid, or run out."""
+    with _lock:
+        data = load(key)
+        if not data:
+            return
+        was = data.get("state")
+        data.update(state="ok" if ok else "expired", why="" if ok else why, checked=_now())
+        _write(key, data)
+    if was != data["state"]:
+        log.info("%s: login %s%s", key, data["state"], (" (%s)" % why) if why else "")
+
+
+def problems():
+    """The logins that ran out: [{key, label, why}], for the warning in the window."""
+    out = []
+    for a in accounts():
+        if a["state"] == "expired":
+            out.append({"key": a["key"], "label": a["label"], "why": a["why"]})
+    return out
 
 
 def logout(key):
     _path(key).unlink(missing_ok=True)
     log.info("%s: logged out", key)
+    _changed(key)
 
 
 def jar(key):
@@ -109,24 +173,42 @@ def jar(key):
 
 
 def logged_in(key):
+    data = load(key)
     try:
-        return bool(describe(key)[3](jar(key)))
+        # A forum login without "Stay logged in" sets no <prefix>user cookie;
+        # the login window saw the page say so instead (page_login).
+        return bool(data) and (describe(key)[3](jar(key)) or bool(data.get("page_login")))
     except KeyError:
         return False
+
+
+def account_for(url):
+    """The key of the saved login a request to url would use, or None."""
+    host = host_of(url)
+    if not host:
+        return None
+    key = key_for(url)
+    if key:
+        return key
+    return "xenforo:" + host if _path("xenforo:" + host).exists() else None
 
 
 def cookies_for(url):
     """{name: value} to send with a request to url: the cookies of the account
     whose domains cover its host. The forums' accounts are looked up by host."""
-    host = host_of(url)
-    if not host:
-        return {}
-    key = key_for(url)
-    if key:
-        return jar(key)
-    if _path("xenforo:" + host).exists():
-        return jar("xenforo:" + host)
-    return {}
+    key = account_for(url)
+    return jar(key) if key else {}
+
+
+def user_agent_for(url):
+    """The login window's User-Agent, for a host whose Cloudflare pass is bound to it."""
+    key = account_for(url)
+    if not key or not key.startswith("xenforo:"):    # the big sites' APIs get Sourcerer's own
+        return None
+    data = load(key)
+    if data and data.get("ua") and any(c["name"] == "cf_clearance" for c in data["cookies"]):
+        return data["ua"]
+    return None
 
 
 def accounts(xenforo_hosts=()):
@@ -138,19 +220,23 @@ def accounts(xenforo_hosts=()):
     for key in keys:
         label, login, _domains, _ok = describe(key)
         data = load(key)
+        data = data or {}
         out.append({"key": key, "label": label, "forum": key.startswith("xenforo:"),
-                    "logged_in": logged_in(key), "saved": (data or {}).get("saved", ""),
-                    "how": (data or {}).get("how", ""), "pending": _pending.get(key, "")})
+                    "logged_in": logged_in(key), "saved": data.get("saved", ""),
+                    "how": data.get("how", ""), "pending": _pending.get(key, ""),
+                    "state": data.get("state", "") if logged_in(key) else "",
+                    "why": data.get("why", ""), "checked": data.get("checked", ""),
+                    "base": data.get("base", "")})
     return out
 
 
 # ---- logging in in a window --------------------------------------------------------
 
-def login_in_window(key):
+def login_in_window(key, base=None):
     """Open the site's login page in a window of its own and wait, in the
     background, for the cookie that proves a login. Returns at once."""
     import webview
-    label, url, domains, ok = describe(key)
+    label, url, domains, ok = describe(key, base)
     with _lock:
         if _pending.get(key) == "waiting":
             return
@@ -158,11 +244,21 @@ def login_in_window(key):
     window = webview.create_window("Log in to %s - Sourcerer" % label, url, width=520, height=760)
     closed = threading.Event()
     window.events.closed += closed.set
-    threading.Thread(target=_watch, args=(key, window, domains, ok, closed),
+    extra = {"base": url[:-len("/login/")]} if key.startswith("xenforo:") else {}
+    threading.Thread(target=_watch, args=(key, window, ok, closed, extra),
                      daemon=True, name="login-" + key).start()
 
 
-def _watch(key, window, domains, ok, closed):
+def _forum_says_logged_in(window):
+    # XenForo 2 marks every page: <html data-logged-in="true">. Without "Stay
+    # logged in" no <prefix>user cookie is set, so the page is the better witness.
+    try:
+        return window.evaluate_js("document.documentElement.getAttribute('data-logged-in')") == "true"
+    except Exception:
+        return False
+
+
+def _watch(key, window, ok, closed, extra):
     deadline = time.monotonic() + LOGIN_MINUTES * 60
     found = None
     while not closed.is_set() and time.monotonic() < deadline:
@@ -175,8 +271,15 @@ def _watch(key, window, domains, ok, closed):
         if ok({c["name"]: c["value"] for c in cookies}):
             found = cookies
             break
+        if key.startswith("xenforo:") and _forum_says_logged_in(window):
+            found, extra["page_login"] = cookies, True
+            break
     if found:
-        save(key, found, "login window")
+        try:
+            extra["ua"] = window.evaluate_js("navigator.userAgent") or ""
+        except Exception:
+            pass
+        save(key, found, "login window", **extra)
         _pending[key] = "done"
         try:
             window.destroy()

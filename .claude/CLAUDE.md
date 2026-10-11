@@ -10,8 +10,9 @@ what people download and unpack is these folders, unchanged.
 `launch.py` behind them; the program — a window with artist cards, a card
 dialog (sources with a live dot each, own folder, master source, folder
 layout, what to do with the same picture from two sources), a queued
-background sync that downloads from Mastodon and Bluesky, settings like
-TrackImage's, and an updater with Stable/Beta and repair; and the workshop —
+background sync that downloads from Bluesky, Mastodon, Pixiv, Patreon, X and
+XenForo forums, logins in its own window, settings like TrackImage's, and an
+updater with Stable/Beta and repair; and the workshop —
 these notes, the docs and the automation that versions every push. `Sourcerer_files/sourcerer/__init__.py`
 lists the program's layers.
 
@@ -256,16 +257,52 @@ Do not create releases or tags yourself, and do not push to `main`.
   Artists wait in a queue; cancelling stops after the current file. A source is
   marked complete only after a sync went all the way without a failure.
 - **CSS class names are global.** `.empty` is the empty-state block (10vh
-  margins): a status dot with that class grew 188 px tall. Name modifiers
-  for what they mean where they are (`.dot.blank`).
+  margins): a status dot with that class grew 188 px tall; `.error:empty`
+  (hide an empty form message) hid every `.dot.error`, which is always
+  empty. Name modifiers for what they mean where they are (`.dot.blank`) and
+  give page-wide rules an element (`p.error`).
 - **No CDN, ever.** The icons are inline SVG drawn after Tabler Icons (MIT,
   `static/icons-LICENSE.txt`); fonts are the system's.
 - **The server listens on 127.0.0.1 only.** Nothing here is for other machines.
 - **Be gentle with sites; it is what keeps users unblocked.** Every request
   goes through `net.py`: an honest User-Agent, at most `per_host` requests per
-  site at once, `pace_ms` between them, Retry-After honoured. Never pretend to
-  be a browser on a public API, never bypass `_Polite`, and give a login site
-  gentler defaults than a public API -- there an account can be locked.
+  site at once, `pace_ms` between them, Retry-After honoured; `HOSTS` makes a
+  site stricter than Settings, `STOP_HOSTS` stops a source at the first 429
+  instead of retrying (pixiv's terms). Never pretend to be a browser on a
+  public API, never bypass `_Polite`, and give a login site gentler defaults
+  than a public API -- there an account can be locked. The exceptions are
+  deliberate: gallery-dl keeps its own browser emulation for X (a logged-in
+  web session), and a forum's Cloudflare pass is sent with the login
+  window's own User-Agent, which it is bound to.
+- **The User-Agent is the crawler form** `Mozilla/5.0 (compatible;
+  Sourcerer/<v>; +repo)`. pixiv's Cloudflare challenged any UA not starting
+  with Mozilla/5.0 on logged-in requests.
+- **Login cookies go as a Cookie header of their own**, never `cookies=`:
+  requests sends those in addition to what the session caught, and pixiv
+  read the guest PHPSESSID first -- a logged-in sync silently ran as a guest.
+- **An expired login often fails silently.** Patreon's /api/posts answers an
+  expired session_id as a guest; pixiv answers 401. Check the login itself
+  (`patreon.whoami`, `sync._still_logged_in`) and mark it (`accounts.mark`);
+  a login that ran out shows as a warning until renewed.
+- **Originals, again:** Patreon's `image_urls.original` is a re-encode -- use
+  the media's `download_url`. pixiv's original names often carry a hash
+  that cannot be guessed (`<id>-<hash>_p0.jpg`): resolve them at download
+  time (`Media.fetch`), never from thumbnails.
+- **gallery-dl runs as a separate process** (`sources/_gdl.py`): it is
+  GPL-2.0 and Sourcerer has no licence yet. It only lists (`-N prepare:`);
+  cookies reach it through a mode-600 config file per run, never the command
+  line; its cache (login state) lives in `Userdata/gallery-dl/`. An expired X
+  session shows up as a login-page redirect and a bare "403 Forbidden".
+- **Many forums take Python for a bot** where curl passes, whatever the
+  headers (VerticalScope: 409 and `xf_is_suspected_bot`; Cloudflare: 403
+  challenge). `net.reason` says so. Such forums need the login window's
+  browser engine; that is not built yet.
+- **A file already there is never downloaded again** (`sync._adopt`): the
+  `archive` table keeps what deleted cards had, and a file under its own name
+  in the card's folder (`_local_names`, `Media.local`) is taken over.
+- **Never key a cached picture by row id alone.** SQLite hands out a deleted
+  row's id again. Card pictures are made in memory from the downloads
+  (`imaging.preview`, `?v=<sha>`); avatars are `Avatars/<artist>.jpg`.
 - **A pasted link is normalised before it is stored.** `sources.normalize`
   turns any page of a profile (`/media`, a post) into the profile; dedupe
   happens after that. `remote_key` is untouched by it.

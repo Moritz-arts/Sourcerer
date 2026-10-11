@@ -5,6 +5,7 @@ one bit per pair of neighbours. Recompressing or rescaling a picture -- what
 every site does to an upload -- changes a few bits at most; a different
 picture changes about half of them.
 """
+import io
 import logging
 
 from PIL import Image, ImageOps
@@ -38,14 +39,18 @@ def distance(a, b):
     return bin(int(a, 16) ^ int(b, 16)).count("1")
 
 
-def thumbnail(src, dst, size=200):
+def preview(src, size=480):
+    """A downloaded picture made small, in memory, for a card: the card shows the
+    downloads themselves, and no second copy of any picture is written anywhere."""
     with Image.open(src) as img:
+        img.draft("RGB", (size, size))           # JPEG: decode at a fraction of the size
         img = ImageOps.exif_transpose(img)
         img.thumbnail((size, size))
         if img.mode not in ("RGB", "L"):
             img = img.convert("RGB")
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        img.save(dst, "JPEG", quality=82)
+        out = io.BytesIO()
+        img.save(out, "JPEG", quality=85)
+        return out.getvalue()
 
 
 def avatar(src, dst, size=128):

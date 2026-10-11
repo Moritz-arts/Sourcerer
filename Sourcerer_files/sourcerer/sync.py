@@ -19,6 +19,8 @@ two versions the artist meant to post.
 """
 import collections
 import datetime
+import glob
+import hashlib
 import io
 import logging
 import os
@@ -29,7 +31,9 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from . import config, db, imaging, net, sources
+import requests
+
+from . import accounts, config, db, imaging, net, sources
 
 log = logging.getLogger(__name__)
 
@@ -37,6 +41,7 @@ log = logging.getLogger(__name__)
 # so an account with years of posts cannot keep a sync running for a day.
 MAX_PAGES = int(os.environ.get("SOURCERER_MAX_PAGES", "500"))
 AVATAR_DAYS = 7              # how often a profile picture is looked for again
+ACCOUNT_HOURS = 6            # how often the saved logins are checked
 
 _lock = threading.Lock()
 _save = threading.Lock()     # deciding and saving happen one file at a time
@@ -116,7 +121,8 @@ def _final_path(folder, media, ext, server_name, posted):
     name = safe_name(server_name or media.filename or media.name)
     stem, own = os.path.splitext(name)
     # Keep an extension the name already has; add the one the content says.
-    if not own or len(own) > 6 or not re.fullmatch(r"\.[A-Za-z0-9]+", own):
+    # Up to 12 characters: artists attach .swatches, .procreate, .brushset files.
+    if not own or len(own) > 12 or not re.fullmatch(r"\.[A-Za-z0-9]+", own):
         stem, own = name, ext
     if db.get_setting("filenames") == "dated" and posted:
         stem = "%s_%s" % (posted[:10], stem)
@@ -182,10 +188,20 @@ def _work():
 
 
 def scheduler():
-    """Automatic sync: every card, every few hours, while Sourcerer runs."""
+    """Automatic sync: every card, every few hours, while Sourcerer runs.
+    And a look at every saved login, a few minutes after the start and then
+    every ACCOUNT_HOURS, so a login that ran out is shown before a sync needs it."""
     def run():
+        next_check = time.monotonic() + 120
         while True:
             time.sleep(60)
+            _upgrade_gallery_dl()
+            if time.monotonic() >= next_check:
+                next_check = time.monotonic() + ACCOUNT_HOURS * 3600
+                try:
+                    check_accounts()
+                except Exception:
+                    log.exception("account check")
             try:
                 if db.get_setting("auto_sync") != "1":
                     continue
@@ -205,6 +221,75 @@ def scheduler():
     threading.Thread(target=run, daemon=True, name="scheduler").start()
 
 
+# ---- logins ---------------------------------------------------------------------------
+
+def _login_ran_out(key, label):
+    was = (accounts.load(key) or {}).get("state")
+    accounts.mark(key, False, "the site no longer accepts the login")
+    if was != "expired":                   # once, not on every sync and check
+        event("error", "%s: the login has run out -- log in again under Settings > Accounts" % label)
+
+
+def _still_logged_in(key):
+    """True / False, or None when there is no cheap way to tell."""
+    if key == "pixiv":
+        try:
+            return not net.get_json("https://www.pixiv.net/ajax/user/extra?lang=en").get("error")
+        except requests.HTTPError as e:
+            if e.response is not None and e.response.status_code in (401, 403):
+                return False
+            raise
+    if key == "patreon":
+        from .sources import patreon
+        return patreon.whoami() is not None
+    if key == "x":
+        with db.connect() as con:
+            urls = [r[0] for r in con.execute("SELECT url FROM sources")]
+        url = next((u for u in urls if sources.kind_of(u) == "x"), None)
+        if not url:
+            return None                    # nothing to read: no reason to bother X
+        try:
+            next(iter(sources.site_for(url).pages(url)), None)
+            return True
+        except sources.LoginRequired:
+            return False
+    if key.startswith("xenforo:"):
+        base = (accounts.load(key) or {}).get("base") or "https://" + key.split(":", 1)[1]
+        text, _final = net.get_text(base + "/")
+        return 'data-logged-in="true"' in text
+    return None
+
+
+def _upgrade_gallery_dl():
+    """Once a week: X changes its insides about as often, and gallery-dl follows."""
+    from .sources import _gdl
+    last = db.get_setting("gdl_updated") or ""
+    now = datetime.datetime.now(datetime.timezone.utc)
+    if not _gdl.available() or (last and (now - datetime.datetime.fromisoformat(last)).days < 7):
+        return
+    db.set_setting("gdl_updated", now.isoformat())
+    try:
+        _gdl.upgrade()
+    except Exception as e:
+        log.info("gallery-dl not updated: %s", e)
+
+
+def check_accounts(keys=None):
+    """Ask every saved login (or those in keys) whether the site still takes it."""
+    for a in accounts.accounts():
+        if not a["logged_in"] or (keys and a["key"] not in keys):
+            continue
+        try:
+            ok = _still_logged_in(a["key"])
+        except Exception as e:             # no answer says nothing about the login
+            log.info("%s: login not checked: %s", a["key"], net.reason(e))
+            continue
+        if ok is True:
+            accounts.mark(a["key"], True)
+        elif ok is False:
+            _login_ran_out(a["key"], a["label"])
+
+
 # ---- profile pictures and names ---------------------------------------------------
 
 def _ordered_sources(con, artist):
@@ -213,12 +298,50 @@ def _ordered_sources(con, artist):
                        (artist["id"], artist["master_source_id"] or 0)).fetchall()
 
 
+def _avatar_name(con, artist_id, name):
+    """<artist>.jpg -- named after the artist, so a picture always says whose it is.
+    A second card with the same name gets its id added."""
+    file = safe_name(name) + ".jpg"
+    taken = con.execute("SELECT 1 FROM artists WHERE id != ? AND avatar = ?", (artist_id, file)).fetchone()
+    return "%s (%d).jpg" % (safe_name(name), artist_id) if taken else file
+
+
 def _save_avatar(artist_id, url, headers=None):
-    name = "%d.jpg" % artist_id
-    imaging.avatar(io.BytesIO(net.fetch_bytes(url, headers=headers)), config.AVATARS / name)
+    data = net.fetch_bytes(url, headers=headers)
     with db.connect() as con:
+        row = con.execute("SELECT name, avatar FROM artists WHERE id = ?", (artist_id,)).fetchone()
+        if not row:
+            return
+        name = _avatar_name(con, artist_id, row["name"])
+        imaging.avatar(io.BytesIO(data), config.AVATARS / name)
+        if row["avatar"] and row["avatar"] != name:
+            (config.AVATARS / row["avatar"]).unlink(missing_ok=True)
         con.execute("UPDATE artists SET avatar = ?, avatar_checked = ? WHERE id = ?",
                     (name, _now(), artist_id))
+
+
+def name_avatar(artist_id):
+    """After a rename the picture's file follows the artist's name."""
+    with db.connect() as con:
+        row = con.execute("SELECT name, avatar FROM artists WHERE id = ?", (artist_id,)).fetchone()
+        if not row or not row["avatar"]:
+            return
+        name = _avatar_name(con, artist_id, row["name"])
+        if name == row["avatar"]:
+            return
+        try:
+            os.replace(config.AVATARS / row["avatar"], config.AVATARS / name)
+        except OSError:
+            name = None                    # gone: the next check fetches it again
+        con.execute("UPDATE artists SET avatar = ? WHERE id = ?", (name, artist_id))
+
+
+def name_avatars():
+    """Pictures saved as <id>.jpg before they were named after the artist (v0.5)."""
+    with db.connect() as con:
+        ids = [r[0] for r in con.execute("SELECT id FROM artists WHERE avatar IS NOT NULL")]
+    for artist_id in ids:
+        name_avatar(artist_id)
 
 
 def check_card(artist_id):
@@ -230,15 +353,15 @@ def check_card(artist_id):
     for row in rows:
         if not sources.site_for(row["url"]):
             continue
-        error = None
+        error = level = None
         try:
             info = sources.profile(row["url"]) or {}
             found = found or (info if info.get("avatar") else None)
         except Exception as e:
-            error = net.reason(e)
+            error, level = net.reason(e), net.level(e)
         with db.connect() as con:
-            con.execute("UPDATE sources SET last_checked = datetime('now'), last_error = ? "
-                        "WHERE id = ?", (error, row["id"]))
+            con.execute("UPDATE sources SET last_checked = datetime('now'), last_error = ?, "
+                        "last_level = ? WHERE id = ?", (error, level, row["id"]))
     try:
         if found:
             _save_avatar(artist_id, found["avatar"], found.get("avatar_headers"))
@@ -288,7 +411,7 @@ def _sync_artist(artist_id):
     srcs = sorted((s for s in rows if sources.site_for(s["url"])), key=lambda s: s["id"] != master)
     cur = {"artist_id": artist_id, "name": artist["name"], "phase": "scan", "done": 0, "total": 0,
            "first": any(not s["complete"] for s in srcs), "new": 0, "duplicates": 0,
-           "failed": 0, "file": "", "size": 0, "found": 0}
+           "failed": 0, "existing": 0, "file": "", "size": 0, "found": 0}
     with _lock:
         _current = cur
         _speed.clear()
@@ -300,16 +423,22 @@ def _sync_artist(artist_id):
         if _cancel.is_set():
             break
         site = sources.site_for(src["url"])
-        error = None
+        login = accounts.account_for(src["url"])
+        error = level = None
         try:
             fresh, walked[src["id"]] = _scan(src, site, known, cur)
             todo += [(src, site, m) for m in fresh]
+            if login:
+                accounts.mark(login, True)
         except Exception as e:
-            error = net.reason(e)
-            event("warn", "%s could not be reached: %s" % (site.LABEL, error), artist)
+            error, level = net.reason(e), net.level(e)
+            if login and error.startswith(net.LOGIN) and accounts.logged_in(login):
+                _login_ran_out(login, site.LABEL)
+            else:
+                event("warn", "%s could not be reached: %s" % (site.LABEL, error), artist)
         with db.connect() as con:
-            con.execute("UPDATE sources SET last_checked = datetime('now'), last_error = ? "
-                        "WHERE id = ?", (error, src["id"]))
+            con.execute("UPDATE sources SET last_checked = datetime('now'), last_error = ?, "
+                        "last_level = ? WHERE id = ?", (error, level, src["id"]))
 
     with _lock:
         cur.update(phase="download", total=len(todo))
@@ -340,7 +469,7 @@ def _sync_artist(artist_id):
                     (_now(), cur["new"], cur["failed"], cur["new"] > 0, _now(), artist_id))
     event("cancelled" if cancelled else ("done" if not cur["failed"] else "warn"),
            "Cancelled" if cancelled else "Finished", artist,
-           new=cur["new"], duplicates=cur["duplicates"], failed=cur["failed"])
+           new=cur["new"], duplicates=cur["duplicates"], failed=cur["failed"], existing=cur["existing"])
 
 
 def _scan(src, site, known, cur):
@@ -352,6 +481,13 @@ def _scan(src, site, known, cur):
         fresh += new
         with _lock:
             cur["found"] += len(new)
+        # A site that limits how much one sync may take (pixiv's terms): the
+        # rest comes with the next sync, which walks on from where this stopped.
+        cap = getattr(site, "MAX_NEW", 0)
+        if cap and len(fresh) >= cap:
+            event("info", "%s: %d new files this time; the next sync fetches more." % (
+                site.LABEL, len(fresh)))
+            return fresh, False
         # Newest first: once a page holds something already seen, everything
         # older was seen too -- but only after one sync has gone all the way.
         if src["complete"] and len(new) < len(page):
@@ -367,9 +503,14 @@ def _scan(src, site, known, cur):
 
 def _fetch(artist, src, site, media, cur):
     folder = target_folder(artist, site.LABEL)
+    if _adopt(artist, src, media, folder, cur):
+        return True
     try:
-        part, sha, ext, server_name = net.download(media.url, folder, media.mime, _count_bytes,
-                                                   headers=media.headers)
+        if media.fetch:
+            part, sha, ext, server_name = media.fetch(folder, _count_bytes)
+        else:
+            part, sha, ext, server_name = net.download(media.url, folder, media.mime, _count_bytes,
+                                                       headers=media.headers)
     except Exception as e:
         event("warn", "Download failed: %s (%s)" % (media.post_url or media.url, net.reason(e)), artist)
         with _lock:
@@ -400,6 +541,64 @@ def _fetch(artist, src, site, media, cur):
                         (artist["id"], src["id"], media.remote_key, sha, str(path) if keep else None,
                          media.post_url, media.posted, phash, width, height, size))
     return True
+
+
+def _local_names(media):
+    """Glob patterns a copy of this file already in the folder would match: its
+    own name, also with the date in front (Settings > File names)."""
+    if media.local:
+        stems = media.local
+    elif media.filename:
+        stem = os.path.splitext(safe_name(media.filename))[0]
+        # A name every other upload has ("image.png" on Patreon) says nothing
+        # about which picture it is: such a file is downloaded, not guessed at.
+        if len(stem) < 8 or re.match(r"(?i)(image|untitled|file|photo|picture|unknown|download)\b", stem):
+            return []
+        stems = [glob.escape(stem) + ".*"]
+    else:
+        return []
+    return stems + ["????-??-??_" + s for s in stems]
+
+
+def _adopt(artist, src, media, folder, cur):
+    """A file that is already there is taken over, not downloaded again: from
+    the archive of a deleted card, or under its own name in the card's folder
+    (a card made again, a collection that was there before Sourcerer)."""
+    with _save, db.connect() as con:
+        known = con.execute("SELECT * FROM archive WHERE remote_key = ?", (media.remote_key,)).fetchone()
+        if known and known["path"] and os.path.isfile(known["path"]):
+            path, sha, phash = known["path"], known["sha256"], known["phash"]
+            width, height, size = known["width"], known["height"], known["size"]
+        else:
+            path = None
+            for pattern in _local_names(media) if folder.is_dir() else []:
+                for candidate in folder.glob(pattern):
+                    taken = con.execute("SELECT 1 FROM files WHERE path = ?", (str(candidate),)).fetchone()
+                    if candidate.is_file() and not taken:
+                        path = str(candidate)
+                        break
+                if path:
+                    break
+            if not path:
+                return False
+            sha, size = _sha256(path), os.path.getsize(path)
+            phash, width, height = imaging.info(path)
+        con.execute("INSERT OR IGNORE INTO files (artist_id, source_id, remote_key, sha256, path, "
+                    "post_url, posted, phash, width, height, size) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (artist["id"], src["id"], media.remote_key, sha, path, media.post_url, media.posted,
+                     phash, width, height, size))
+        con.execute("DELETE FROM archive WHERE remote_key = ?", (media.remote_key,))
+    with _lock:
+        cur["existing"] += 1
+    return True
+
+
+def _sha256(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _decide(artist, src, sha, phash, width, height, size):

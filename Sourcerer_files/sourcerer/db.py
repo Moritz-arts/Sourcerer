@@ -42,6 +42,20 @@ CREATE TABLE IF NOT EXISTS files (
     UNIQUE (artist_id, remote_key)
 );
 CREATE INDEX IF NOT EXISTS files_sha ON files (artist_id, sha256);
+-- The files of deleted cards. A card made again for the same artist finds
+-- them here (by remote_key) and takes over those still on disk instead of
+-- downloading them a second time.
+CREATE TABLE IF NOT EXISTS archive (
+    remote_key  TEXT PRIMARY KEY,
+    sha256      TEXT,
+    path        TEXT,
+    post_url    TEXT,
+    posted      TEXT,
+    phash       TEXT,
+    width       INTEGER,
+    height      INTEGER,
+    size        INTEGER
+);
 CREATE TABLE IF NOT EXISTS settings (
     key    TEXT PRIMARY KEY,
     value  TEXT NOT NULL
@@ -64,6 +78,10 @@ COLUMNS = {
         "folder": "TEXT",                 # chosen on the card; NULL: <library>/<name>
         "avatar": "TEXT",                 # file name in Userdata/Avatars
         "avatar_checked": "TEXT",         # when the profile picture was last looked for
+    },
+    "sources": {
+        # 'ok', 'warn' (works with a catch: login, bot check, slow down) or 'error'
+        "last_level": "TEXT",
     },
     "files": {
         "phash": "TEXT",                  # imaging fingerprint; NULL for video

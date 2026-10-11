@@ -106,10 +106,12 @@ function avatarHtml(a, cls, id) {
     esc(initials(name)) + "</div>";
 }
 
-var STATUS_TEXT = { ok: "reachable", error: "", unsupported: "not supported yet",
+var STATUS_TEXT = { ok: "reachable", error: "", warn: "", unsupported: "not supported yet",
                     unknown: "not checked yet", checking: "checking…",
                     login: "log in first: Settings › Accounts" };
-function statusText(s) { return s.status === "error" ? (s.error || s.last_error || "error") : STATUS_TEXT[s.status] || ""; }
+function statusText(s) {
+  return s.status === "error" || s.status === "warn" ? (s.error || s.last_error || s.status) : STATUS_TEXT[s.status] || "";
+}
 
 // ---- settings that change the look ----------------------------------------
 
@@ -122,7 +124,7 @@ function applySettings() {
 
 var sizeTimer = null;
 function setSize(px, save) {
-  px = Math.max(160, Math.min(420, Math.round(px / 10) * 10));
+  px = Math.max(160, Math.min(800, Math.round(px / 10) * 10));
   document.documentElement.style.setProperty("--card", px + "px");
   $("size").value = px; $("set-size").value = px;
   if (save && String(px) !== String(S.settings.card_size)) {
@@ -164,10 +166,12 @@ function render() {
   renderActivity();
 }
 
+// One link per source, its dot saying how it fares; a click opens it in the browser.
 function dotsHtml(a) {
   return '<div class="srcdots">' + a.sources.map(function (s) {
-    return '<span title="' + esc(shortUrl(s.url) + " — " + statusText(s)) + '"><i class="dot ' + s.status + '"></i>' +
-      esc(s.label) + "</span>";
+    return '<a href="' + esc(s.url) + '" data-act="link" data-url="' + esc(s.url) + '" title="' +
+      esc(shortUrl(s.url) + " — " + statusText(s)) + '"><i class="dot ' + s.status + '"></i>' +
+      esc(s.label) + "</a>";
   }).join("") + "</div>";
 }
 
@@ -178,7 +182,7 @@ function cardHtml(a) {
   var thumbs = "";
   for (var i = 0; i < 4; i++) {
     thumbs += a.thumbs[i]
-      ? '<img loading="lazy" src="/api/thumb/' + a.thumbs[i] + '" alt="">'
+      ? '<img loading="lazy" src="/api/thumb/' + a.thumbs[i].id + "?v=" + a.thumbs[i].v + '" alt="">'
       : '<div style="background:' + (i % 2 ? c[3] : c[2]) + ';opacity:.45"></div>';
   }
   var html = '<div class="card' + (cur ? " busy" : "") + (S.selected === a.id ? " selected" : "") +
@@ -249,6 +253,11 @@ function renderActivity() {
     html = '<div class="state">' + icon("check", "ok") + "<b>Ready</b>" +
       (s.finished ? "<span>· last sync " + esc(ago(s.finished)) + "</span>" : "") + "</div>";
   }
+  // A login that ran out stays in sight until it is renewed.
+  (S.logins || []).forEach(function (l) {
+    html += '<button class="pill warn" data-act="accounts" title="' + esc(l.why || "") + '">' + icon("alert") +
+      esc(l.label) + ": log in again</button>";
+  });
   if (S.settings.auto_sync === "1") {
     html += '<span class="pill" title="Settings › Sync">' + icon("clock") + "Auto-sync every " +
       esc(hoursText(S.settings.auto_hours)) + "</span>";
@@ -268,6 +277,7 @@ function renderLog() {
   $("log").innerHTML = list.length ? list.map(function (e) {
     var chips = (e.new ? '<span class="badge accent">+' + e.new + " new</span>" : "") +
       (e.duplicates ? '<span class="badge plain">' + plural(e.duplicates, "duplicate") + "</span>" : "") +
+      (e.existing ? '<span class="badge plain">' + e.existing + " already there</span>" : "") +
       (e.failed ? '<span class="badge warning">' + e.failed + " failed</span>" : "");
     return '<li class="k-' + e.kind + '"><span class="time">' + clock(e.time) + "</span>" +
       icon(KIND_ICON[e.kind] || "info") +
@@ -286,12 +296,13 @@ function toggleLog() {
 function load() {
   return api("GET", "/api/state").then(function (d) {
     S.artists = d.artists; S.sync = d.sync; S.library = d.library; S.window = d.window;
-    S.sep = d.sep; S.sites = d.sites; S.fields = d.fields; S.settings = d.settings;
+    S.sep = d.sep; S.sites = d.sites; S.fields = d.fields; S.settings = d.settings; S.logins = d.logins || [];
     $("version").textContent = "v" + d.version;
     if (S.selected && !artistById(S.selected)) S.selected = null;
     $("btn-quit").classList.toggle("hidden", S.window);
     applySettings();
     render();
+    showUpdate();
   });
 }
 
@@ -359,6 +370,11 @@ document.addEventListener("click", function (e) {
       if (S.sync.current) api("POST", "/api/sync/cancel", { artist_id: S.sync.current.artist_id });
       break;
     case "log": toggleLog(); break;
+    case "link":
+      e.preventDefault();
+      api("POST", "/api/open-url", { url: btn.dataset.url }).catch(fail);
+      break;
+    case "accounts": openSettings("accounts"); break;
     case "more":
       var r = btn.getBoundingClientRect();
       openMenu(a, r.right - 190, r.bottom + 4);
@@ -546,7 +562,7 @@ function renderSources() {
       : r.status === "checking" ? '<span class="state">checking…</span>'
       : r.status === "unsupported" ? '<span class="badge warning">not supported yet</span>'
       : r.status === "login" ? '<button type="button" class="badge warning" data-src="login" title="' + esc(r.error) + '">log in first</button>'
-      : '<span class="state' + (r.status === "error" ? " error" : "") + '" title="' + esc(statusText(r)) + '">' +
+      : '<span class="state' + (r.status === "error" || r.status === "warn" ? " " + r.status : "") + '" title="' + esc(statusText(r)) + '">' +
         esc(r.status === "ok" && r.handle ? r.handle : statusText(r)) + "</span>";
     return '<div class="srcrow' + (r.field ? "" : " extra") + '">' + mark +
       '<span class="site"><i class="dot ' + (filled ? r.status : "blank") + '" title="' + esc(filled ? statusText(r) : "") + '"></i>' +
@@ -747,16 +763,22 @@ function loadAccounts() {
   clearTimeout(accTimer);
   return api("GET", "/api/accounts").then(function (d) {
     $("acc-list").innerHTML = d.accounts.map(function (a) {
+      var expired = a.logged_in && a.state === "expired";
       var state = a.pending === "waiting" ? "Waiting for you to log in in the other window…"
-        : a.logged_in ? "Logged in" + (a.how ? " (" + a.how + ")" : "") + (a.saved ? " · " + ago(a.saved) : "")
+        : expired ? "The login has run out" + (a.checked ? " (noticed " + ago(a.checked) + ")" : "") + " – log in again."
+        : a.logged_in ? "Logged in" + (a.how ? " (" + a.how + ")" : "") + (a.checked ? " · checked " + ago(a.checked) : "")
         : a.pending.indexOf("failed: ") === 0 ? a.pending.slice(8)
         : a.pending === "cancelled" ? "Login window closed before the login was finished."
         : "Not logged in";
       var key = ' data-key="' + esc(a.key) + '"';
-      return '<div class="row"><div><div class="row-title"><i class="dot ' + (a.logged_in ? "ok" : "blank") + '"></i> ' +
-        esc(a.label) + (a.forum ? ' <span class="muted small">XenForo</span>' : "") + '</div><p class="hint">' + esc(state) + "</p></div>" +
-        (a.logged_in ? '<button type="button" data-acc="logout"' + key + ">Log out</button>"
-          : '<button type="button" class="primary" data-acc="login"' + key + (d.window ? "" : ' disabled title="Needs Sourcerer\'s own window"') + ">Log in</button>") +
+      var login = '<button type="button" class="primary" data-acc="login"' + key +
+        (d.window ? "" : ' disabled title="Needs Sourcerer\'s own window"') + ">Log in</button>";
+      return '<div class="row"><div><div class="row-title"><i class="dot ' + (expired ? "error" : a.logged_in ? "ok" : "blank") + '"></i> ' +
+        esc(a.label) + (a.forum ? ' <span class="muted small">XenForo' + (a.base ? " · " + esc(shortUrl(a.base)) : "") + "</span>" : "") +
+        '</div><p class="hint' + (expired ? " bad" : "") + '">' + esc(state) + "</p></div>" +
+        (expired ? login : "") +
+        (a.logged_in ? '<button type="button" data-acc="check"' + key + ' title="Ask the site whether the login still works">Check</button>' +
+                       '<button type="button" data-acc="logout"' + key + ">Log out</button>" : login) +
         '<button type="button" data-acc="import"' + key + ">Import&hellip;</button></div>";
     }).join("");
     $("btn-acc-forum").disabled = !d.window;
@@ -773,7 +795,9 @@ $("acc-list").addEventListener("click", function (e) {
   var key = b.dataset.key;
   if (b.dataset.acc === "import") { S.importKey = key; $("acc-file").value = ""; return $("acc-file").click(); }
   if (b.dataset.acc === "logout" && !confirm("Log out? Sourcerer forgets the cookies it kept for this site.")) return;
-  api("POST", "/api/accounts/" + b.dataset.acc, { key: key }).then(loadAccounts).catch(fail);
+  b.disabled = true;
+  api("POST", "/api/accounts/" + b.dataset.acc, { key: key }).then(function () { return loadAccounts(); })
+    .then(function () { return load(); }).catch(fail).then(function () { b.disabled = false; });
 });
 $("btn-acc-forum").addEventListener("click", function () {
   var forum = $("acc-forum").value.trim();
@@ -798,6 +822,7 @@ function loadInfo() {
       ["Window", d.window ? "app window" : "browser"]].map(function (r) {
       return "<tr><td>" + esc(r[0]) + '</td><td class="mono">' + esc(r[1]) + "</td></tr>";
     }).join("");
+    $("gdl-version").textContent = d.gallery_dl ? "v" + d.gallery_dl : "(not installed)";
     $("upd-log-box").classList.toggle("hidden", !d.update_log.length);
     $("upd-log").textContent = d.update_log.join("\n");
   }).catch(fail);
@@ -807,7 +832,8 @@ function loadInfo() {
 
 function showUpdate() {
   var u = S.update, has = !!(u && u.available);
-  $("update-dot").classList.toggle("hidden", !has);
+  $("update-dot").classList.toggle("hidden", !has && !(S.logins || []).length);
+  $("update-dot").classList.toggle("warn", !!(S.logins || []).length);
   $("update-dot-2").classList.toggle("hidden", !has);
   $("btn-install").classList.toggle("hidden", !has);
   if (!u) return;
@@ -830,6 +856,13 @@ function checkUpdate(loud) {
   });
 }
 $("btn-check").addEventListener("click", function () { checkUpdate(true); });
+$("btn-gdl").addEventListener("click", function () {
+  var b = this;
+  b.disabled = true; b.textContent = "Updating…";
+  api("POST", "/api/update/gallery-dl").then(function (d) {
+    toast("gallery-dl is now v" + d.version); loadInfo();
+  }).catch(fail).then(function () { b.disabled = false; b.textContent = "Update now"; });
+});
 
 function restarting(title, text) {
   $("overlay-title").textContent = title;
