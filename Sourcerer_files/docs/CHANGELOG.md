@@ -5,6 +5,10 @@ automatically -- one line per change, newest first. A release is drafted by hand
 from the tag of whichever version is judged ready, and this is the text to paste
 into it.
 
+## v0.8 — 2026-10-12
+
+- A gallery per card shows all its sources at once, and logged-in accounts are protected from looking like a bot
+
 ## v0.7 — 2026-10-11
 
 - Updates leave Userdata and venv where they are, log every step at once, and report a failed update on the next start
