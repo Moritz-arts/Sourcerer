@@ -56,6 +56,15 @@ CREATE TABLE IF NOT EXISTS archive (
     height      INTEGER,
     size        INTEGER
 );
+-- Files that failed to download, per sync. After sync.GIVE_UP failures a file
+-- no longer keeps its source from completing (which would walk its whole
+-- history again on every sync).
+CREATE TABLE IF NOT EXISTS failures (
+    artist_id   INTEGER NOT NULL REFERENCES artists(id) ON DELETE CASCADE,
+    remote_key  TEXT NOT NULL,
+    count       INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (artist_id, remote_key)
+);
 CREATE TABLE IF NOT EXISTS settings (
     key    TEXT PRIMARY KEY,
     value  TEXT NOT NULL

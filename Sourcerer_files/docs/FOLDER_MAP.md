@@ -17,8 +17,10 @@ Sourcerer/                        <- what Sourcerer.zip unpacks to; move it free
     ├─ requirements.txt           the packages, one list for all three systems
     ├─ sourcerer/                 the Python package; layers listed in __init__.py
     │   ├─ config.py              paths, version, user agent, setting defaults
-    │   ├─ db.py                  SQLite: artists, sources, files, settings
-    │   ├─ net.py                 HTTP (requests, TLS 1.3 first): JSON, downloads, per-site limits
+    │   ├─ db.py                  SQLite: artists, sources, files, failed files, settings
+    │   │                           (also a site's pause, the day's requests, the next auto sync)
+    │   ├─ net.py                 HTTP (requests, TLS 1.3 first): JSON, downloads, per-site
+    │   │                           limits, a login's slow lane, site pauses, daily budgets
     │   ├─ imaging.py             fingerprints, sizes, thumbnails, avatars (Pillow)
     │   ├─ sources/               one module per site
     │   │   ├─ __init__.py        Media, site_for, normalize, describe, profile
@@ -32,6 +34,8 @@ Sourcerer/                        <- what Sourcerer.zip unpacks to; move it free
     │   │   └─ _gdl.py            gallery-dl as a separate process: lists, never downloads
     │   ├─ sync.py                sync queue, scan then download, dedupe, folders,
     │   │                           automatic sync, link checks, profile pictures
+    │   ├─ gallery.py             the gallery: all sources of a card in one stream,
+    │   │                           straight from the sites, pictures in memory only
     │   ├─ accounts.py            logins: login window, cookies.txt, saved cookies
     │   ├─ updater.py             updates and repair: Sourcerer.zip, the helper
     │   ├─ server.py              Flask: /api/* and the page

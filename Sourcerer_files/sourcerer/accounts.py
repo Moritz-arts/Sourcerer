@@ -63,7 +63,7 @@ GROUPS = {"mastodon": "Mastodon", "xenforo": "XenForo", "booru": "Booru"}
 _XF_USER = re.compile(r"^[a-z0-9]*_?user$", re.I)
 
 _lock = threading.Lock()
-CHANGED = []                    # callbacks(key), after a login was saved or removed
+CHANGED = []                    # callbacks(key, how): "new", "renewed" or "logout"
 _pending = {}                   # key -> "waiting" | "done" | "failed: why" | "cancelled"
 _bases = {}                     # forum key -> base URL a login window was opened with
 
@@ -165,20 +165,22 @@ def save(key, cookies, how, **extra):
     domains = describe(key, extra.get("base"))[2]
     keep = _theirs(cookies, domains)
     data = dict(extra, key=key, saved=_now(), how=how, cookies=keep, state="ok", checked=_now(), why="")
+    first = not _path(key).exists()
     with _lock:
         _write(key, data)
     log.info("%s: login saved (%d cookies, %s)", key, len(keep), how)
-    _changed(key)
+    _changed(key, "new" if first else "renewed")
     return data
 
 
 def save_token(key, how, **secrets):
     """An oauth, password or api_key login: what the site handed out, and who it is (user)."""
     data = dict(secrets, key=key, saved=_now(), how=how, state="ok", checked=_now(), why="")
+    first = not _path(key).exists()
     with _lock:
         _write(key, data)
     log.info("%s: login saved (%s)", key, how)
-    _changed(key)
+    _changed(key, "new" if first else "renewed")
     return data
 
 
@@ -191,10 +193,10 @@ def update(key, **fields):
             _write(key, data)
 
 
-def _changed(key):
+def _changed(key, how):
     for fn in CHANGED:
         try:
-            fn(key)
+            fn(key, how)
         except Exception:
             log.exception("after the login of %s changed", key)
 
@@ -239,7 +241,7 @@ def problems():
 def logout(key):
     _path(key).unlink(missing_ok=True)
     log.info("%s: logged out", key)
-    _changed(key)
+    _changed(key, "logout")
 
 
 def jar(key):
@@ -286,11 +288,27 @@ def headers_for(url):
     if not key:
         return {}
     data = load(key) or {}
-    cookies = {c["name"]: c["value"] for c in data.get("cookies") or []}
+    cookies = {c["name"]: c["value"] for c in data.get("cookies") or [] if _fresh(c)}
     out = {"Cookie": "; ".join("%s=%s" % kv for kv in cookies.items())} if cookies else {}
     if key.startswith("xenforo:") and data.get("ua") and "cf_clearance" in cookies:
         out["User-Agent"] = data["ua"]
     return out
+
+
+# Cookies a bot check sets for minutes (Cloudflare's __cf_bm lives 30): sent
+# back days later, they tell the site the session is not a browser's.
+_SHORT_LIVED = {"__cf_bm", "_cfuvid", "cf_chl_rc_m", "__cfruid"}
+
+
+def _fresh(cookie):
+    """Whether a saved cookie may still go out: not a bot check's, not expired."""
+    if cookie["name"] in _SHORT_LIVED:
+        return False
+    try:
+        expires = float(cookie.get("expires") or 0)
+    except ValueError:
+        return True                     # a date in another form: the site decides
+    return not expires or expires > time.time()
 
 
 def secrets(key):

@@ -216,7 +216,9 @@ function cardHtml(a) {
       ? '<button class="mini" data-act="cancel">Cancel</button>'
       : '<button class="mini" data-act="sync" aria-label="Sync now" title="Sync now (U)"' +
         (supported ? "" : " disabled") + ">" + icon("refresh") + "</button>" +
-        '<button class="mini" data-act="folder" aria-label="Open gallery" title="Open the downloaded gallery (O)">' + icon("folder") + "</button>" +
+        '<button class="mini" data-act="gallery" aria-label="Gallery" title="Gallery: every source, straight from the sites (G)"' +
+        (supported ? "" : " disabled") + ">" + icon("photo") + "</button>" +
+        '<button class="mini" data-act="folder" aria-label="Open folder" title="Open the downloaded files (O)">' + icon("folder") + "</button>" +
         '<button class="mini" data-act="more" aria-label="More" title="More">' + icon("dots") + "</button>") +
     "</div></div>";
 }
@@ -258,6 +260,13 @@ function renderActivity() {
     html += '<button class="pill warn" data-act="accounts" title="' + esc(l.why || "") + '">' + icon("alert") +
       esc(l.label) + ": log in again</button>";
   });
+  // A site that said stop rests; Sourcerer asks it nothing until then.
+  (S.pauses || []).forEach(function (p) {
+    var until = new Date(p.until * 1000);
+    html += '<span class="pill rest" title="' + esc(p.why) + '">' + icon("clock") + esc(p.name) + " rests until " +
+      esc(until.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })) +
+      (until.toDateString() !== new Date().toDateString() ? " tomorrow" : "") + "</span>";
+  });
   if (S.settings.auto_sync === "1") {
     html += '<span class="pill" title="Settings › Sync">' + icon("clock") + "Auto-sync every " +
       esc(hoursText(S.settings.auto_hours)) + "</span>";
@@ -296,7 +305,7 @@ function toggleLog() {
 function load() {
   return api("GET", "/api/state").then(function (d) {
     S.artists = d.artists; S.sync = d.sync; S.library = d.library; S.window = d.window;
-    S.sep = d.sep; S.sites = d.sites; S.fields = d.fields; S.settings = d.settings; S.logins = d.logins || [];
+    S.sep = d.sep; S.sites = d.sites; S.fields = d.fields; S.settings = d.settings; S.logins = d.logins || []; S.pauses = d.pauses || [];
     $("version").textContent = "v" + d.version;
     if (S.selected && !artistById(S.selected)) S.selected = null;
     $("btn-quit").classList.toggle("hidden", S.window);
@@ -365,6 +374,7 @@ document.addEventListener("click", function (e) {
     case "add": openCard(null); break;
     case "sync": sync(a.id); break;
     case "folder": openFolder(a); break;
+    case "gallery": openGallery(a); break;
     case "cancel": api("POST", "/api/sync/cancel", { artist_id: a.id }).then(function () { lastKey = ""; }); break;
     case "cancel-current":
       if (S.sync.current) api("POST", "/api/sync/cancel", { artist_id: S.sync.current.artist_id });
@@ -398,6 +408,7 @@ $("menu").addEventListener("click", function (e) {
   closeMenu();
   if (!a) return;
   if (btn.dataset.menu === "edit") openCard(a);
+  else if (btn.dataset.menu === "gallery") openGallery(a);
   else if (btn.dataset.menu === "sync") sync(a.id);
   else if (btn.dataset.menu === "delete") removeArtist(a);
 });
@@ -452,7 +463,233 @@ document.addEventListener("keydown", function (e) {
   if (k === "Enter") { e.preventDefault(); openCard(a); }
   else if (low === "u") sync(a.id);
   else if (low === "o") openFolder(a);
+  else if (low === "g") openGallery(a);
   else if (k === "Delete") removeArtist(a);
+});
+
+// ---- the gallery ------------------------------------------------------------
+
+// One card's every source in one stream, newest first, straight from the
+// sites: nothing is saved unless asked for. The server lists a page per
+// source only when the grid has scrolled near its end, and fetches through
+// Sourcerer what a site wants a Referer or a login for; the rest the page
+// loads itself, with no referrer.
+var G = null;
+var galSeen = new IntersectionObserver(function (entries) {
+  if (entries.some(function (e) { return e.isIntersecting; })) moreGallery();
+}, { root: $("gal-body"), rootMargin: "800px" });
+galSeen.observe($("gal-end"));
+
+// Pictures Sourcerer fetches wait in the site's polite lane, and the browser
+// opens six connections to Sourcerer at most: fifty of them asked for at once
+// held back the large view, the next page and the state poll. So two at a
+// time, those near the screen only.
+var galQueue = [], galLoading = 0;
+var galNear = new IntersectionObserver(function (entries) {
+  entries.forEach(function (e) {
+    if (e.isIntersecting) { galNear.unobserve(e.target); galQueue.push(e.target); }
+  });
+  galPump();
+}, { root: $("gal-body"), rootMargin: "400px" });
+
+function galPump() {
+  while (galLoading < 2 && galQueue.length) {
+    var img = galQueue.shift();
+    if (!img.isConnected) continue;
+    galLoading++;
+    img.addEventListener("load", galDone); img.addEventListener("error", galDone);
+    img.src = img.dataset.lazy;
+  }
+}
+
+function galDone(e) {
+  e.target.removeEventListener("load", galDone); e.target.removeEventListener("error", galDone);
+  galLoading = Math.max(0, galLoading - 1);
+  galPump();
+}
+
+function openGallery(a) {
+  closeMenu();
+  if (!a) return;
+  G = { artist: a, id: null, items: [], busy: false, done: false, hidden: {}, view: -1 };
+  galQueue = []; galLoading = 0; galNear.disconnect();
+  $("gal-title").textContent = a.name;
+  $("gal-grid").innerHTML = ""; $("gal-sources").innerHTML = "";
+  $("gal-end").textContent = "Asking the sites…";
+  $("gal-view").classList.add("hidden");
+  $("dlg-gallery").showModal();
+  var g = G;
+  api("POST", "/api/gallery/open", { artist_id: a.id }).then(function (d) {
+    if (g !== G) return api("POST", "/api/gallery/close", { gallery: d.gallery });
+    g.id = d.gallery;
+    galSources(d.sources);
+    moreGallery();
+  }).catch(function (e) { $("gal-end").textContent = e.message; });
+}
+
+function moreGallery() {
+  var g = G;
+  if (!g || !g.id || g.busy || g.done) return;
+  g.busy = true;
+  $("gal-end").textContent = "Asking the sites…";
+  api("POST", "/api/gallery/more", { gallery: g.id, n: 60 }).then(function (d) {
+    if (g !== G) return;
+    g.busy = false; g.done = d.done;
+    var start = g.items.length;
+    g.items = g.items.concat(d.items);
+    $("gal-grid").insertAdjacentHTML("beforeend", d.items.map(function (it, k) { return tileHtml(it, start + k); }).join(""));
+    $("gal-grid").querySelectorAll("img[data-lazy]:not([src])").forEach(function (img) { galNear.observe(img); });
+    galSources(d.sources);
+    $("gal-end").textContent = !g.done ? "" : g.items.length ? plural(g.items.length, "picture") + " – that is all" : "Nothing found.";
+    // The observer fires on a change only: while the end is still in sight, ask on.
+    if (!g.done && d.items.length) {
+      var end = $("gal-end").getBoundingClientRect(), box = $("gal-body").getBoundingClientRect();
+      if (end.top < box.bottom + 800) setTimeout(moreGallery, 50);
+    }
+  }).catch(function (e) { g.busy = false; $("gal-end").textContent = e.message; });
+}
+
+// Sourcerer's own fetch of an item, for one the page could not load itself;
+// "" for one that already comes through Sourcerer.
+function proxyOf(it, size) {
+  var url = size === "thumb" ? it.thumb : it.large;
+  if (!G || !G.id || /^\/api\/gallery\/[0-9a-f]{32}\//.test(url || "")) return "";
+  return "/api/gallery/" + G.id + "/" + it.id + "/" + size;
+}
+
+function tileHtml(it, i) {
+  var proxied = /^\/api\/gallery\//.test(it.thumb || "");
+  var picture = it.thumb
+    ? '<img loading="lazy" decoding="async" referrerpolicy="no-referrer" ' + (proxied ? "data-lazy" : "src") + '="' + esc(it.thumb) + '" alt="">'
+    : '<span class="gal-noimg">' + icon(it.video ? "play" : "photo") + "</span>";
+  return '<button type="button" class="gal-tile' + (G.hidden[it.src] ? " hidden" : "") + '" data-i="' + i +
+    '" data-src="' + it.src + '" title="' + esc(it.source + (it.posted ? " · " + it.posted.slice(0, 10) : "")) + '">' +
+    picture + (it.video && it.thumb ? '<span class="gal-play">' + icon("play") + "</span>" : "") +
+    '<span class="gal-tag">' + esc(it.source) + "</span>" +
+    (it.saved ? '<span class="gal-saved" title="Downloaded">' + icon("check") + "</span>" : "") + "</button>";
+}
+
+function galSources(list) {
+  $("gal-sources").innerHTML = list.map(function (s) {
+    return '<button type="button" class="chip' + (G.hidden[s.id] ? " off" : "") + '" data-galsrc="' + s.id +
+      '" title="' + esc(s.error ? s.label + ": " + s.error : "Show or hide " + s.label + " – " + s.url) + '"><i class="dot ' +
+      (s.error ? "warn" : s.state === "done" ? "ok" : "blank") + '"></i>' + esc(s.label) + "</button>";
+  }).join("");
+}
+
+function viewItem(i) {
+  if (!G || !G.items[i]) return;
+  var it = G.items[i];
+  G.view = i;
+  // The grid's picture stands in while the large one comes (a proxied one can
+  // wait a few seconds for its site's turn) -- only when it is already loaded,
+  // so the stand-in costs no request of its own.
+  var small = $("gal-grid").querySelector('.gal-tile[data-i="' + i + '"] img');
+  small = small && small.complete && small.naturalWidth && small.currentSrc !== it.large ? small.currentSrc : "";
+  $("gal-stage").innerHTML = it.video
+    ? '<video controls autoplay loop src="' + esc(it.large) + '"' + (it.thumb ? ' poster="' + esc(it.thumb) + '"' : "") + "></video>"
+    : (small ? '<img class="gal-ph" referrerpolicy="no-referrer" src="' + esc(small) + '" alt="">' : "") +
+      '<img referrerpolicy="no-referrer"' + (small ? ' class="gal-big"' : "") + ' src="' + esc(it.large || it.thumb) + '" alt="">';
+  var img = $("gal-stage").querySelector("img:last-child");
+  if (img) {
+    // What to try next when one will not load: Sourcerer's own fetch, then the small one.
+    var next = [proxyOf(it, "large"), small ? "" : it.thumb].filter(function (u) { return u && u !== img.getAttribute("src"); });
+    img.onload = function () { var ph = $("gal-stage").querySelector(".gal-ph"); if (ph) ph.remove(); img.classList.remove("gal-big"); };
+    img.onerror = function () {
+      if (next.length) img.src = next.shift();
+      else { img.onerror = null; if (small) img.remove(); }
+    };
+  }
+  $("gal-info").textContent = [it.source, it.posted ? new Date(it.posted).toLocaleString() : "",
+    it.w ? it.w + " × " + it.h : "", (i + 1) + " / " + G.items.length + (G.done ? "" : "+")].filter(Boolean).join(" · ");
+  $("gal-download").disabled = it.saved;
+  $("gal-download").querySelector("span").textContent = it.saved ? "Downloaded" : "Download";
+  $("gal-view").classList.remove("hidden");
+  // Near the end of what is listed: the next page, before it is needed.
+  if (i > G.items.length - 8) moreGallery();
+}
+
+function step(by) {
+  if (!G) return;
+  var i = G.view;
+  do { i += by; } while (G.items[i] && G.hidden[G.items[i].src]);
+  if (G.items[i]) viewItem(i);
+}
+
+function closeView() {
+  $("gal-view").classList.add("hidden");
+  $("gal-stage").innerHTML = "";                  // stops a video
+  if (G) G.view = -1;
+}
+
+$("gal-grid").addEventListener("click", function (e) {
+  var tile = e.target.closest(".gal-tile");
+  if (tile) viewItem(+tile.dataset.i);
+});
+// A picture the browser was not handed (a CDN's bot check, a hotlink rule):
+// once more through Sourcerer, then a placeholder instead of a broken image.
+$("gal-grid").addEventListener("error", function (e) {
+  if (e.target.tagName !== "IMG") return;
+  var tile = e.target.closest(".gal-tile"), it = G && G.items[+tile.dataset.i];
+  var via = it && proxyOf(it, "thumb");
+  if (via && !e.target.dataset.lazy) {
+    e.target.removeAttribute("src"); e.target.dataset.lazy = via;
+    galQueue.push(e.target);
+    setTimeout(galPump);                 // after this event: listeners added now would hear it
+    return;
+  }
+  e.target.outerHTML = '<span class="gal-noimg">' + icon(it && it.video ? "play" : "photo") + "</span>";
+}, true);
+$("gal-sources").addEventListener("click", function (e) {
+  var chip = e.target.closest("[data-galsrc]");
+  if (!chip || !G) return;
+  var id = +chip.dataset.galsrc;
+  G.hidden[id] = !G.hidden[id];
+  chip.classList.toggle("off", !!G.hidden[id]);
+  $$('#gal-grid .gal-tile[data-src="' + id + '"]').forEach(function (t) { t.classList.toggle("hidden", !!G.hidden[id]); });
+  moreGallery();
+});
+$("gal-view").addEventListener("click", function (e) {
+  var b = e.target.closest("[data-gal]");
+  if (!b || !G) return;
+  var it = G.items[G.view];
+  if (b.dataset.gal === "prev") step(-1);
+  else if (b.dataset.gal === "next") step(1);
+  else if (b.dataset.gal === "back") closeView();
+  else if (b.dataset.gal === "post" && it && it.post) api("POST", "/api/open-url", { url: it.post }).catch(fail);
+  else if (b.dataset.gal === "download" && it && !it.saved) {
+    var g = G, i = G.view;
+    b.disabled = true;
+    b.querySelector("span").textContent = "Downloading…";
+    api("POST", "/api/gallery/download", { gallery: g.id, item: it.id }).then(function (d) {
+      if (g !== G) return;
+      g.items[i] = d.item;
+      var tile = document.querySelector('#gal-grid .gal-tile[data-i="' + i + '"]');
+      if (tile) tile.outerHTML = tileHtml(d.item, i);
+      if (g.view === i) viewItem(i);
+      toast("Saved in " + g.artist.name + "'s folder");
+      load();
+    }).catch(function (err) {
+      fail(err);
+      if (g === G && g.view === i) viewItem(i);
+    });
+  }
+});
+$("gal-size").addEventListener("input", function () { $("gal-grid").style.setProperty("--gal", this.value + "px"); });
+$("dlg-gallery").addEventListener("keydown", function (e) {
+  if ($("gal-view").classList.contains("hidden")) return;
+  if (e.key === "ArrowLeft") { e.preventDefault(); step(-1); }
+  else if (e.key === "ArrowRight") { e.preventDefault(); step(1); }
+});
+// Esc closes the large view first, the gallery after.
+$("dlg-gallery").addEventListener("cancel", function (e) {
+  if (!$("gal-view").classList.contains("hidden")) { e.preventDefault(); closeView(); }
+});
+$("dlg-gallery").addEventListener("close", function () {
+  closeView();
+  if (G && G.id) api("POST", "/api/gallery/close", { gallery: G.id }).catch(function () {});
+  G = null;
+  $("gal-grid").innerHTML = "";
 });
 
 // ---- the card dialog -------------------------------------------------------

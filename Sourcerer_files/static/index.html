@@ -26,6 +26,9 @@
   <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M4 20h4l10.5 -10.5a2.828 2.828 0 1 0 -4 -4l-10.5 10.5v4"/><path d="M13.5 6.5l4 4"/></symbol>
   <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7l16 0"/><path d="M10 11l0 6"/><path d="M14 11l0 6"/><path d="M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2 -2l1 -12"/><path d="M9 7v-3a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v3"/></symbol>
   <symbol id="i-search" viewBox="0 0 24 24"><path d="M3 10a7 7 0 1 0 14 0a7 7 0 1 0 -14 0"/><path d="M21 21l-6 -6"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4v16l13 -8z"/></symbol>
+  <symbol id="i-chevron-left" viewBox="0 0 24 24"><path d="M15 6l-6 6l6 6"/></symbol>
+  <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="M9 6l6 6l-6 6"/></symbol>
   <symbol id="i-check" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0"/><path d="M9 12l2 2l4 -4"/></symbol>
   <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 9v4"/><path d="M10.363 3.591l-8.106 13.534a1.914 1.914 0 0 0 1.636 2.871h16.214a1.914 1.914 0 0 0 1.636 -2.87l-8.106 -13.536a1.914 1.914 0 0 0 -3.274 0z"/><path d="M12 16h.01"/></symbol>
   <symbol id="i-info" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0"/><path d="M12 9h.01"/><path d="M11 12h1v4h1"/></symbol>
@@ -105,6 +108,7 @@
 
 <div id="menu" class="menu hidden" role="menu">
   <button data-menu="edit"><svg class="ic"><use href="#i-pencil"/></svg> Edit<span class="kbd">Enter</span></button>
+  <button data-menu="gallery"><svg class="ic"><use href="#i-photo"/></svg> Gallery<span class="kbd">G</span></button>
   <button data-menu="sync"><svg class="ic"><use href="#i-refresh"/></svg> Sync now<span class="kbd">U</span></button>
   <button data-menu="delete" class="danger"><svg class="ic"><use href="#i-trash"/></svg> Delete<span class="kbd">Del</span></button>
 </div>
@@ -175,6 +179,32 @@
       <button type="submit" id="btn-card-sync" value="sync" class="primary"><svg class="ic"><use href="#i-download"/></svg> <span>Create &amp; sync</span></button>
     </div>
   </form>
+</dialog>
+
+<!-- The gallery: every source of a card, newest first, straight from the sites. -->
+<dialog id="dlg-gallery" class="dlg gallery">
+  <div class="dlg-head">
+    <span id="gal-title">Gallery</span>
+    <span id="gal-sources" class="gal-sources"></span>
+    <span class="grow"></span>
+    <input type="range" id="gal-size" min="120" max="420" step="20" value="200" title="Picture size" aria-label="Picture size">
+    <button type="button" class="icon flat" data-close aria-label="Close"><svg class="ic"><use href="#i-x"/></svg></button>
+  </div>
+  <div class="gal-body" id="gal-body">
+    <div id="gal-grid" class="gal-grid"></div>
+    <div id="gal-end" class="gal-end"></div>
+  </div>
+  <div id="gal-view" class="gal-view hidden">
+    <button type="button" class="gal-nav prev" data-gal="prev" aria-label="Previous"><svg class="ic"><use href="#i-chevron-left"/></svg></button>
+    <div class="gal-stage" id="gal-stage"></div>
+    <button type="button" class="gal-nav next" data-gal="next" aria-label="Next"><svg class="ic"><use href="#i-chevron-right"/></svg></button>
+    <div class="gal-bar">
+      <span id="gal-info"></span><span class="grow"></span>
+      <button type="button" data-gal="post"><svg class="ic"><use href="#i-external"/></svg> Open post</button>
+      <button type="button" class="primary" data-gal="download" id="gal-download"><svg class="ic"><use href="#i-download"/></svg> <span>Download</span></button>
+      <button type="button" class="icon" data-gal="back" aria-label="Back to the gallery"><svg class="ic"><use href="#i-x"/></svg></button>
+    </div>
+  </div>
 </dialog>
 
 <dialog id="dlg-settings" class="dlg wide">
@@ -308,6 +338,8 @@
           <tr><td><span class="kbd">Enter</span> &nbsp;or double-click</td><td>Edit the card</td></tr>
           <tr><td><span class="kbd">U</span></td><td>Sync the card</td></tr>
           <tr><td><span class="kbd">O</span> &nbsp;or click its folder</td><td>Open the card's folder</td></tr>
+          <tr><td><span class="kbd">G</span></td><td>The card's gallery: every source, straight from the sites</td></tr>
+          <tr><td><span class="kbd">&larr;</span> <span class="kbd">&rarr;</span> &nbsp;in the gallery</td><td>Previous and next picture</td></tr>
           <tr><td><span class="kbd">Del</span></td><td>Delete the card</td></tr>
           <tr><td>Right-click</td><td>The card's menu</td></tr>
           <tr><td><span class="kbd">Ctrl</span> + wheel, <span class="kbd">Ctrl</span> <span class="kbd">+</span> <span class="kbd">&minus;</span> <span class="kbd">0</span></td><td>Card size, and back to normal</td></tr>

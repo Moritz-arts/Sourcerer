@@ -194,4 +194,8 @@ def _media(server, status, media, src):
                  name=str(media["id"]),
                  # The name the server stored the upload under -- the uploader's
                  # own name is not published by Mastodon.
-                 filename=urllib.parse.unquote(urllib.parse.urlparse(url).path.rsplit("/", 1)[-1]))
+                 filename=urllib.parse.unquote(urllib.parse.urlparse(url).path.rsplit("/", 1)[-1]),
+                 thumb=media.get("preview_url") or "", large=url,
+                 video=media.get("type") in ("video", "gifv"),
+                 width=((media.get("meta") or {}).get("original") or {}).get("width") or 0,
+                 height=((media.get("meta") or {}).get("original") or {}).get("height") or 0)

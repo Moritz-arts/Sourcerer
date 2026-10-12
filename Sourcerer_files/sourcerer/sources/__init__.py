@@ -16,6 +16,7 @@ supported yet", so an artist card can list every place the artist posts.
 """
 import logging
 import re
+import time
 import urllib.parse
 from dataclasses import dataclass
 
@@ -42,6 +43,15 @@ class Media:
     # Glob patterns a copy already in the card's folder would match, where the
     # name is not known before the download (pixiv's hashed names).
     local: list = None
+    # What the gallery shows, from the listing itself -- no request of its own.
+    thumb: str = ""      # a small picture for the grid
+    large: str = ""      # a screen-sized one for the viewer (or the file itself)
+    video: bool = False  # large is a video
+    width: int = 0
+    height: int = 0
+    # Headers the picture hosts want (pixiv, Gelbooru: a Referer): the gallery
+    # then fetches thumb and large through Sourcerer instead of the page.
+    preview_headers: dict = None
 
 
 class LoginRequired(Exception):
@@ -150,7 +160,22 @@ def describe(url):
     return {"kind": "unsupported", "label": name or _host(url) or url, "supported": False}
 
 
+_profiles = {}            # url -> (when, answer): the card dialog, Save and the avatar ask alike
+PROFILE_SECONDS = 1800
+
+
 def profile(url):
-    """{"name", "handle", "avatar"} of the account, or None for an unsupported site."""
+    """{"name", "handle", "avatar"} of the account, or None for an unsupported site.
+    Asked once per half hour: opening a card, saving it and looking for its
+    picture all want it, and on X each asking is a logged-in request."""
     site = site_for(url)
-    return site.profile(url) if site else None
+    if not site:
+        return None
+    hit = _profiles.get(url)
+    if hit and time.monotonic() - hit[0] < PROFILE_SECONDS:
+        return dict(hit[1])
+    answer = site.profile(url)
+    if len(_profiles) > 500:
+        _profiles.clear()
+    _profiles[url] = (time.monotonic(), answer)
+    return dict(answer)

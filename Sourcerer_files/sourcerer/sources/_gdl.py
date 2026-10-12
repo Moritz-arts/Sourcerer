@@ -29,6 +29,17 @@ DIR = config.USERDATA / "gallery-dl"
 CACHE = DIR / "cache.sqlite3"
 PAGE = 20                     # files per page handed to sync's scan, for its early stop
 _count = [0]
+# One gallery-dl per site at a time: its pacing (sleep-request) lives inside
+# one process, so two of them -- a sync and a link check -- would each ask at
+# full speed. A link check waits a little, then gives up.
+_busy = {}
+_busy_lock = threading.Lock()
+WAIT_INFO = 30
+
+
+def _site_lock(section):
+    with _busy_lock:
+        return _busy.setdefault(section, threading.Lock())
 
 
 class Failed(RuntimeError):
@@ -122,6 +133,15 @@ def items(url, section, options, fields):
     Stopping early -- closing this generator -- ends the gallery-dl process.
     """
     fmt = "prepare:{{" + ",".join('"%s":%s' % (k, v) for k, v in fields.items()) + "}}"
+    lock = _site_lock(section)
+    lock.acquire()
+    try:
+        yield from _items(url, section, options, fmt)
+    finally:
+        lock.release()
+
+
+def _items(url, section, options, fmt):
     conf = _config(section, options)
     proc = _start(_command(conf, ["-N", fmt], url))
     errors, lines = [], []
@@ -164,6 +184,16 @@ def items(url, section, options, fields):
 
 def info(url, section, options):
     """The JSON gallery-dl gives for a small listing (a profile's info): its messages."""
+    lock = _site_lock(section)
+    if not lock.acquire(timeout=WAIT_INFO):
+        raise RuntimeError("busy with a sync of this site; try again in a moment")
+    try:
+        return _info(url, section, options)
+    finally:
+        lock.release()
+
+
+def _info(url, section, options):
     conf = _config(section, options)
     try:
         proc = _start(_command(conf, ["-j"], url))

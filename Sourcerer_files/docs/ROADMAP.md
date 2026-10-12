@@ -136,6 +136,21 @@ add the one that replaced it.
   card dialog says under a link when its site wants a login that is missing.
 - 2026-10-11 — Boorus in Sourcerer's own code on their JSON APIs, not
   gallery-dl: three engines, small and stable; a source is a tag search.
+- 2026-10-12 — Protecting logged-in accounts comes before speed: a login's
+  requests go one at a time, at least 2 s apart from the end of the last,
+  with random gaps and reading breaks; a daily budget per site; a site that
+  objects (429, bot check, refused login, X's limits) rests for hours, saved
+  across restarts; automatic syncs at random times, oldest card first, hours
+  apart per login site. — The user's priority: no account banned for looking
+  like a bot. Regular timing and bursts are what bot detection looks for.
+- 2026-10-12 — A gallery per card: the sources' listings merged newest
+  first, straight from the sites, nothing written to disk. The page loads
+  plain CDNs itself (no referrer); what needs a Referer or a login comes
+  through Sourcerer, only for items a listing handed out, cached in memory
+  (160 MB) and dropped on close. Download saves through the sync's own
+  path. — The user wants to browse an artist without downloading
+  everything. Pikura (GPL-3.0, ideas only, no code) does the same with
+  pixiv's small previews and a Referer; Sourcerer keeps no disk cache.
 
 ## Done
 
@@ -175,6 +190,10 @@ add the one that replaced it.
 - [x] Logins for every site (Bluesky, Mastodon, boorus added), checked at
       every start; the card dialog warns about a missing login
 - [x] Boorus: Danbooru, e621, Gelbooru, Rule 34, yande.re, Konachan and more
+- [x] Account safety: a login's slow lane with random gaps and breaks,
+      daily budgets, site pauses, randomised automatic syncs and login
+      checks, X's limits and locks respected, one gallery-dl per site
+- [x] Gallery: all sources of a card in one stream, large view, download
 
 ## Next
 
@@ -189,3 +208,7 @@ add the one that replaced it.
 - [ ] Updater, first real run on Windows and macOS (simulated on Linux:
       swap, rollback, restart)
 - [ ] Where Sourcerer hands files to TrackImage, and how duplicates are matched
+- [ ] X: resume a long first sync where it stopped instead of listing the
+      newest pages again (gallery-dl's cursor).
+- [ ] Quiet hours: no automatic sync of a logged-in site at night.
+- [ ] Gallery: a filter by date.

@@ -61,7 +61,16 @@ Open Anyway**.
    the file's own name. Cards wait in a queue; a running one can be cancelled.
    The bar at the bottom shows progress, speed and the queue; **Activity**
    opens the log.
-3. **Settings** (the gear) — library folder, file names, automatic sync,
+3. **Gallery** (the picture button on a card, `G`, or the card's menu) —
+   everything the card's sources show, merged into one stream, newest
+   first, straight from the sites: nothing is saved unless you ask. Scroll
+   and it asks the sites for more; click a picture to see it large (arrow
+   keys step through), **Download** puts that one file into the card's
+   folder the way a sync would, **Open post** opens it on the site. The
+   chips at the top show or hide a source. Most pictures come from the
+   sites' own image servers; those that need a login or a Referer (Pixiv,
+   Gelbooru, forums) are fetched by Sourcerer and kept in memory only.
+4. **Settings** (the gear) — library folder, file names, automatic sync,
    parallel downloads, how gently sites are treated, theme, card size,
    updates (**Stable** or **Beta**) and repair.
 
@@ -71,8 +80,8 @@ point a card at a folder you collected by hand, and Sourcerer takes over what
 it finds under the files' own names.
 
 Shortcuts: `Ctrl+N` new card, `Ctrl+F` search, `F5` sync all, `Ctrl+,`
-settings, arrow keys select a card, `Enter` edits it, `U` syncs it, `Del`
-deletes it, `Ctrl` + mouse wheel sizes the cards, right-click opens a card's
+settings, arrow keys select a card, `Enter` edits it, `U` syncs it, `G` opens its
+gallery, `Del` deletes it, `Ctrl` + mouse wheel sizes the cards, right-click opens a card's
 menu. The full list is in Settings › Keyboard & mouse.
 
 Sites downloaded today: **Bluesky**, **Mastodon** (and the fediverse),
@@ -116,18 +125,34 @@ sites allow:
 - at most 2 requests to one site at a time, with a pause between them
   (both adjustable in Settings › Sites & network), and stricter limits
   where a site asks for them: Pixiv one request every 1.5 s, Patreon, e621,
-  Gelbooru and the other boorus one a second, X 1.5–3 s between pages;
-- a "too many requests" answer is waited out for as long as the site asks —
-  on Pixiv the sync stops and the next one carries on;
+  Gelbooru and the other boorus one a second, X 2–4 s between pages;
+- a request that carries a login waits its turn alone: at least 2 s after
+  the previous one *ended*, every gap stretched by a random 0–60 %, and a
+  break of 15–60 s every 20–40 requests — the rhythm of somebody reading,
+  not of a script;
+- each logged-in site has a daily budget (Pixiv, Patreon and X 1,500
+  requests); what is left waits for the next day;
+- when a site objects — "too many requests", a bot check, a refused login
+  three times running, X saying the account is limited or locked — that
+  site rests for hours (X a day or two after a lock), saved across restarts
+  and shown in the bottom bar; the rest of Sourcerer carries on;
 - a first sync of a big Pixiv, X or booru account takes a few hundred files
   at a time and continues with the next sync;
 - after the first sync, only the newest posts are looked at;
-- automatic syncs start at a slightly different minute every time.
+- automatic syncs come at a random time within the interval, take the cards
+  that waited longest first, leave a logged-in site alone for hours between
+  them (X 12, Pixiv and Patreon 6) and let 20–90 s pass between two cards on
+  the same site; logins are checked spread out, not all at once.
+
+None of this makes scraping something X's or Pixiv's terms allow; it keeps
+Sourcerer's traffic small, slow and irregular, which is what keeps accounts
+out of trouble in practice. The gallery goes through the same limits.
 
 X is read with [gallery-dl](https://codeberg.org/mikf/gallery-dl), which keeps
 up with X's ever-changing insides; Sourcerer updates it once a week (or in
 Settings › Updates). A logged-in account is still an account that X can
-lock: Sourcerer keeps its X traffic low and stops at once when X objects.
+lock: Sourcerer keeps its X traffic low (one gallery-dl at a time, a 2–4 s
+pause between pages) and stops at once when X objects.
 
 ## Layout
 
