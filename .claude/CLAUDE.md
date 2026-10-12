@@ -11,7 +11,8 @@ what people download and unpack is these folders, unchanged.
 dialog (sources with a live dot each, own folder, master source, folder
 layout, what to do with the same picture from two sources), a queued
 background sync that downloads from Bluesky, Mastodon, Pixiv, Patreon, X,
-XenForo forums and boorus, a login for every site (checked at each start),
+XenForo forums and boorus, a gallery per card (all its sources, straight from
+the sites), a login for every site (checked at each start),
 settings like TrackImage's, and an
 updater with Stable/Beta and repair; and the workshop —
 these notes, the docs and the automation that versions every push. `Sourcerer_files/sourcerer/__init__.py`
@@ -279,6 +280,33 @@ Do not create releases or tags yourself, and do not push to `main`.
   deliberate: gallery-dl keeps its own browser emulation for X (a logged-in
   web session), and a forum's Cloudflare pass is sent with the login
   window's own User-Agent, which it is bound to.
+- **A logged-in account is what gets banned, so a login has its own lane**
+  (`net._Polite`, `login=True`): one request at a time, `LOGIN_PACE` after
+  the previous one *ended* (a slow download must not let the next request
+  follow at once), every gap times a random `JITTER`, a `READ_BREAK` every
+  `READ_EVERY` requests, a daily `BUDGETS` count per site. Regular timing
+  is what bot detection looks for -- never make a gap fixed again.
+- **A site that objects rests, all of it** (`net.pause`, saved in the
+  setting `paused`): a 429 on a login, a bot check, three refused logins,
+  X's ratelimit or lock (gallery-dl `ratelimit: abort`, `_run`). A site is
+  every host one company runs (`_SITES`): a stop from pixiv's API stops
+  i.pximg.net too. Never retry into a 429 on a login -- that is how
+  accounts get flagged; pause and let the next sync carry on.
+- **One gallery-dl per site** (`_gdl._busy`): a gallery and a sync listing
+  X at once looked like two clients on one session.
+- **The gallery fetches only what a listing handed out.** The proxy
+  (`/api/gallery/<gallery>/<n>/thumb|large`) takes an item number, never a
+  URL: any page could otherwise make Sourcerer fetch with the user's
+  logins. Its GETs check Host and `Sec-Fetch-Site` (`server._own_page`);
+  pictures stay in memory (`gallery.MEMORY`), `no-store` to the web view.
+  CDNs the page loads itself get `referrerpolicy="no-referrer"`.
+- **The browser opens six connections to Sourcerer, no more.** Proxied
+  pictures wait in a site's polite lane; fifty asked for at once held back
+  the large view, the next page and the state poll for a minute. `app.js`
+  loads them two at a time (`galQueue`), near the screen only; the large
+  view shows the grid's picture until its own arrives.
+- **Pikura is GPL-3.0.** Its gallery was studied for ideas (pixiv's small
+  previews with a Referer); none of its code may be copied here.
 - **The User-Agent is the crawler form** `Mozilla/5.0 (compatible;
   Sourcerer/<v>; +repo)`. pixiv's Cloudflare challenged any UA not starting
   with Mozilla/5.0 on logged-in requests.

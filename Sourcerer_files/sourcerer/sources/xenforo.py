@@ -26,7 +26,7 @@ LABEL = "XenForo"
 _PATH = re.compile(r"^(.*?)/(?:index\.php\?)?(media/users|members|media/albums|threads)/([^/?#]+)", re.I)
 # tls12: off, so gallery-dl shakes hands with TLS 1.3 only, as net.py does --
 # VerticalScope's forums answered its usual handshake with 409 (see net._Tls13).
-OPTIONS = {"sleep-request": "1.0-2.0", "metadata": False, "tls12": False}
+OPTIONS = {"sleep-request": "2.0-5.0", "metadata": False, "tls12": False}
 FIELDS = {"url": "{_url!j}", "id": "{id!j}"}
 LOGIN = ("recommended", "Most forums show their media to members only.")
 
@@ -101,6 +101,7 @@ def pages(url):
     if not _gdl.available():
         raise RuntimeError("Forums need gallery-dl, which did not install: Settings > Repair")
     host = _host(url)
+    net._stopped(url)
     listing = _gdl.items("xenforo:" + url, urllib.parse.urlparse(url).hostname, _options(url), FIELDS)
     while True:
         try:
@@ -109,6 +110,7 @@ def pages(url):
             return
         except _gdl.Failed as e:
             if e.slow or "409" in str(e):
+                net.pause(url, 6 * 3600, "it let only a browser through")
                 raise net.SlowDown("%s let only a browser through: log in to it under Settings > "
                                    "Accounts, so Sourcerer can use your login window's pass" % host) from e
             if e.auth or "403" in str(e):
@@ -116,5 +118,8 @@ def pages(url):
             raise
         yield [Media(remote_key="xenforo:%s:%s" % (host, f["id"]), url=f["url"],
                      post_url=f["url"].rsplit("/full", 1)[0] + "/" if "/full" in f["url"] else f["url"],
-                     posted="", name=str(f["id"]))
+                     posted="", name=str(f["id"]),
+                     # The forum shows its files to members only: the gallery fetches
+                     # them through Sourcerer, with the login, and makes its own small copy.
+                     large=f["url"], preview_headers={})
                for f in batch if f.get("id") and f.get("url")]

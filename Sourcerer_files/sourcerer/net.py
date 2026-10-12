@@ -13,11 +13,25 @@ Connections are TLS 1.3 only, on Python's own defaults (_Tls13): bot checks
 (baraag.net's, the big forum networks') refuse the handshake urllib3 makes --
 the one every Python scraper makes -- whatever the headers say. A server
 without TLS 1.3 is remembered and gets the usual handshake (_OLD_TLS).
+
+What keeps a logged-in account safe (an account can be locked, not just a
+page refused):
+  - a request that carries a login goes alone, at least LOGIN_PACE apart,
+    whatever Settings say, and every gap is drawn at random (JITTER) with a
+    longer reading break now and then -- a metronome is the easiest robot to spot;
+  - a site that says stop -- a 429, a bot check, a lock -- is paused as a whole
+    (pause(): every host of the company, all cards, the gallery, the checks),
+    for as long as it asks or for hours, and the pause outlives a restart;
+  - a day's budget per site (BUDGETS): what is left waits for tomorrow.
 """
+import datetime
+import email.utils
 import hashlib
+import json
 import logging
 import mimetypes
 import os
+import random
 import re
 import ssl
 import threading
@@ -35,12 +49,15 @@ RETRIES = 4
 
 _local = threading.local()
 _lock = threading.Lock()
-_hosts = {}                 # host -> [semaphore, limit, last request time]
+_hosts = {}                 # (host, carries a login) -> its limiter's state
 _limits = {"per_host": 2, "pace": 0.25}
+CAP = 300                   # the longest Retry-After waited out; a longer one pauses the site
 
 # Sites stricter than Settings: (requests at once, seconds apart). With
 # Settings, the gentler of the two wins.
-HOSTS = {"www.pixiv.net": (1, 1.5), "i.pximg.net": (2, 0.4), "www.patreon.com": (1, 1.0),
+HOSTS = {"www.pixiv.net": (1, 1.5), "i.pximg.net": (1, 0.5), "www.patreon.com": (1, 1.5),
+         # A leading dot: every host below that domain (Patreon's and X's file servers).
+         ".patreonusercontent.com": (2, 0.6), ".twimg.com": (2, 0.4),
          # The boorus' APIs: e621 asks for at most one request a second, the others
          # are run by volunteers on donated servers.
          "danbooru.donmai.us": (1, 1.0), "safebooru.donmai.us": (1, 1.0), "e621.net": (1, 1.0),
@@ -52,9 +69,143 @@ HOSTS = {"www.pixiv.net": (1, 1.5), "i.pximg.net": (2, 0.4), "www.patreon.com": 
 # actions within a short period"; tools that kept retrying there had accounts restricted.
 STOP_HOSTS = {"www.pixiv.net"}
 
+LOGIN_PACE = 2.0            # seconds at least between two requests carrying a login
+JITTER = (1.0, 1.6)         # every gap times this, drawn anew: longer, never shorter
+READ_EVERY = (20, 40)       # a logged-in site gets a break after this many requests ...
+READ_BREAK = (15, 60)       # ... of this many seconds
+# Requests a day carrying a login, per site. pixiv's terms name no number;
+# Pikura's users saw 24-72 h suspensions after long batch runs.
+BUDGETS = {"pixiv": 1500, "patreon": 1500, "x": 1500}
+BUDGET = 3000
+
+# A site is every host one company runs: a stop from pixiv's API stops its
+# image host too, and a day's budget counts them together.
+_SITES = {"pixiv.net": "pixiv", "pximg.net": "pixiv", "patreon.com": "patreon",
+          "patreonusercontent.com": "patreon", "x.com": "x", "twitter.com": "x", "twimg.com": "x",
+          "bsky.app": "bluesky", "bsky.network": "bluesky", "bsky.social": "bluesky"}
+NAMES = {"pixiv": "Pixiv", "patreon": "Patreon", "x": "X", "bluesky": "Bluesky"}
+PAUSED = []                 # callbacks(site, until, why), for the activity log
+
 
 class SlowDown(Exception):
-    """A site asked Sourcerer to stop for now: a 429 on a STOP_HOSTS host, or a bot check."""
+    """A site asked Sourcerer to stop for now -- a 429, a bot check, a lock,
+    the day's budget -- and is paused (pause())."""
+
+
+def site_of(url):
+    host = (urllib.parse.urlparse(url if "://" in url else "https://" + url).hostname or "").lower()
+    host = host[4:] if host.startswith("www.") else host
+    for suffix, name in _SITES.items():
+        if host == suffix or host.endswith("." + suffix):
+            return name
+    return host
+
+
+def name_of(site):
+    return NAMES.get(site, site)
+
+
+# ---- pauses and budgets: kept in the database, so a restart does not undo them -------
+
+_state = {}
+
+
+def _stored(key):
+    if key not in _state:
+        from . import db
+        try:
+            _state[key] = json.loads(db.get_setting(key) or "{}")
+        except (ValueError, TypeError):
+            _state[key] = {}
+    return _state[key]
+
+
+def _store(key):
+    from . import db
+    db.set_setting(key, json.dumps(_state[key]))
+
+
+def pause(url, seconds, why):
+    """Leave a site alone for seconds: no sync, check or gallery asks it meanwhile."""
+    site, until = site_of(url), time.time() + seconds
+    with _lock:
+        pauses = _stored("paused")
+        if pauses.get(site, [0])[0] >= until:
+            return
+        pauses[site] = [until, why]
+        _store("paused")
+    log.info("%s paused for %d min: %s", site, seconds // 60, why)
+    for fn in PAUSED:
+        try:
+            fn(site, until, why)
+        except Exception:
+            log.exception("after pausing %s", site)
+
+
+def paused(url):
+    """(until, why) while a site is paused, else None."""
+    entry = _stored("paused").get(site_of(url))
+    return entry if entry and entry[0] > time.time() else None
+
+
+def pauses():
+    """The pauses now running, for the window: [{site, name, until (Unix time), why}]."""
+    now = time.time()
+    return [{"site": s, "name": name_of(s), "until": e[0], "why": e[1]}
+            for s, e in sorted(_stored("paused").items()) if e[0] > now]
+
+
+def _stopped(url):
+    entry = paused(url)
+    if entry:
+        raise SlowDown("%s rests until %s: %s" % (name_of(site_of(url)),
+                                                  time.strftime("%H:%M", time.localtime(entry[0])), entry[1]))
+
+
+def _hours(low, high):
+    return random.uniform(low, high) * 3600
+
+
+def spend(url, n=1):
+    """Count requests that carried a login; past the day's budget the site rests until tomorrow."""
+    site, day = site_of(url), time.strftime("%Y-%m-%d")
+    with _lock:
+        spent = _stored("spent")
+        entry = spent.get(site)
+        if not entry or entry[0] != day:
+            entry = spent[site] = [day, 0]
+        entry[1] += n
+        over = entry[1] >= BUDGETS.get(site, BUDGET)
+        if over or entry[1] % 10 < n:
+            _store("spent")
+    if over:
+        tomorrow = time.mktime(time.strptime(day, "%Y-%m-%d")) + 86400
+        pause(url, tomorrow - time.time() + _hours(0.5, 3),
+              "today's %d requests are done; the rest follows tomorrow" % BUDGETS.get(site, BUDGET))
+
+
+_refused = {}               # site -> [refusals in a row, since]
+
+
+def _refusal(url, ok):
+    """A login refused again and again (401/403) is not asked further for a while."""
+    site = site_of(url)
+    with _lock:
+        if ok:
+            _refused.pop(site, None)
+            return
+        count, since = _refused.get(site, [0, time.time()])
+        if time.time() - since > 900:
+            count, since = 0, time.time()
+        _refused[site] = [count + 1, since]
+        tripped = count + 1 >= 3
+    if tripped:
+        pause(url, _hours(2, 4), "it refused the login three times in a row")
+
+
+def _carries_login(url, headers=None, params=None):
+    return bool(accounts.headers_for(url)) or any(k.lower() == "authorization" for k in (headers or {})) \
+        or bool(params and any(k in params for k in ("api_key", "login")))
 
 # Extensions for the content types sites actually send, so a file whose URL
 # has none (Mastodon's ".../original", Bluesky's getBlob) still opens properly.
@@ -133,32 +284,102 @@ def _lacks_tls13(e, session):
 
 
 class _Polite:
-    """At most per_host requests to one host at a time, pace seconds apart."""
+    """At most per_host requests to one host at a time, pace seconds apart --
+    one at a time and LOGIN_PACE apart for requests carrying a login, timed
+    from the end of the last one, with a reading break now and then."""
 
-    def __init__(self, url):
+    def __init__(self, url, login=False, first=False):
+        self.url, self.login, self.first = url, login, first
         self.host = urllib.parse.urlparse(url).hostname or ""
 
     def __enter__(self):
-        own = HOSTS.get(self.host, (99, 0))
+        _stopped(self.url)
+        own = _own(self.host)
         with _lock:
             limit, pace = min(_limits["per_host"], own[0]), max(_limits["pace"], own[1])
-            entry = _hosts.get(self.host)
-            if entry is None or entry[1] != limit:
-                entry = _hosts[self.host] = [threading.BoundedSemaphore(limit), limit, 0.0]
-            self.sem = entry[0]
-        self.sem.acquire()
-        with _lock:
-            wait = entry[2] + pace - time.monotonic()
-            entry[2] = max(entry[2] + pace, time.monotonic())
-        if wait > 0:
-            time.sleep(wait)
+            if self.login:                       # Settings can make this gentler, never faster
+                limit, pace = 1, max(pace, LOGIN_PACE)
+            entry = _hosts.get((self.host, self.login))
+            if entry is None or entry["limit"] != limit:
+                entry = _hosts[(self.host, self.login)] = {
+                    "sem": threading.BoundedSemaphore(limit), "limit": limit, "start": 0.0, "end": 0.0,
+                    "count": 0, "break": random.randint(*READ_EVERY), "first": 0}
+            self.entry = entry
+            if self.first:
+                entry["first"] += 1
+        # A request somebody is looking at (the gallery's large view) goes before
+        # those that can wait (the grid's pictures) -- the same slots, not more.
+        while not self.first and entry["first"]:
+            time.sleep(0.05)
+        try:
+            entry["sem"].acquire()
+        finally:
+            if self.first:
+                with _lock:
+                    entry["first"] -= 1
+        try:
+            with _lock:
+                # One at a time: the gap runs from the end of the last request,
+                # so a slow answer does not eat it.
+                at = (entry["end"] if self.login else entry["start"]) + pace * random.uniform(*JITTER)
+                if self.login:
+                    entry["count"] += 1
+                    if entry["count"] >= entry["break"]:
+                        entry["count"], entry["break"] = 0, random.randint(*READ_EVERY)
+                        at += random.uniform(*READ_BREAK)
+                now = time.monotonic()
+                entry["start"] = max(at, now)
+            if at > now:
+                time.sleep(at - now)
+            _stopped(self.url)                   # a pause may have begun meanwhile
+        except BaseException:
+            entry["sem"].release()
+            raise
         return self
 
     def __exit__(self, *exc):
-        self.sem.release()
+        self.entry["end"] = time.monotonic()
+        self.entry["sem"].release()
 
 
-def _get(url, params=None, stream=False, headers=None, method="GET", data=None, json=None):
+def _own(host):
+    """A host's own limits: its HOSTS entry, or its domain's (".twimg.com")."""
+    if host in HOSTS:
+        return HOSTS[host]
+    parts = host.split(".")
+    for i in range(1, len(parts) - 1):
+        if "." + ".".join(parts[i:]) in HOSTS:
+            return HOSTS["." + ".".join(parts[i:])]
+    return (99, 0)
+
+
+def _retry_after(resp):
+    """Seconds a site asks to wait: Retry-After (seconds or a date), Patreon's
+    body, or Mastodon's X-RateLimit-Reset (a time). None when it says nothing."""
+    value = (resp.headers.get("Retry-After") or "").strip()
+    if value.isdigit():
+        return int(value)
+    if value:
+        try:
+            return max(0.0, email.utils.parsedate_to_datetime(value).timestamp() - time.time())
+        except (TypeError, ValueError):
+            pass
+    try:
+        return int(resp.json()["errors"][0]["retry_after_seconds"])
+    except Exception:
+        pass
+    reset = (resp.headers.get("X-RateLimit-Reset") or "").strip()
+    if reset:
+        try:
+            when = float(reset) if reset.replace(".", "").isdigit() else \
+                datetime.datetime.fromisoformat(reset.replace("Z", "+00:00")).timestamp()
+            return max(0.0, when - time.time())
+        except ValueError:
+            pass
+    return None
+
+
+def _get(url, params=None, stream=False, headers=None, method="GET", data=None, json=None, tries=None):
     """A response, retrying what passes with time. The caller holds _Polite(url).
 
     A site the user logged in to gets what proves the login (accounts.py) --
@@ -167,34 +388,49 @@ def _get(url, params=None, stream=False, headers=None, method="GET", data=None, 
     addition to what the session caught from earlier answers, and pixiv read
     its guest PHPSESSID from there first, so a logged-in sync silently ran as
     a guest. A POST (a login's token) is sent once, never repeated.
+
+    A stop is never argued with: a bot check, a 409, a 429 on pixiv or on a
+    login, a wait longer than CAP -- the site is paused and SlowDown raised.
     """
+    login = _carries_login(url, headers, params)
     headers = dict(accounts.headers_for(url), **(headers or {}))
     host = urllib.parse.urlparse(url).hostname or ""
-    tries = RETRIES if method == "GET" else 1
+    tries = tries or (RETRIES if method == "GET" else 1)
     attempt = handshakes = 0
     while attempt < tries:
         session = _session()
+        if login:
+            spend(url)
         try:
             resp = session.request(method, url, params=params, stream=stream, timeout=TIMEOUT,
                                    headers=headers, data=data, json=json)
+            code = resp.status_code
             if resp.headers.get("cf-mitigated") == "challenge":
                 resp.close()
-                raise SlowDown("%s showed a bot check; the next sync tries again" % host)
-            if resp.status_code == 429 and host in STOP_HOSTS:
+                pause(url, _hours(6, 12), "it showed a bot check")
+                raise SlowDown("%s showed a bot check; Sourcerer leaves it alone for some hours" % host)
+            if code == 409 or "is_suspected_bot" in resp.headers.get("Set-Cookie", ""):
+                pause(url, _hours(6, 12), "it took Sourcerer for a bot")
+                resp.raise_for_status()
+            if code == 429 or (code == 503 and attempt == tries - 1):
+                wait = _retry_after(resp)
+                if host in STOP_HOSTS or login or attempt == tries - 1 or (wait or 0) > CAP:
+                    resp.close()
+                    pause(url, (wait or (_hours(6, 12) if host in STOP_HOSTS else _hours(1, 3))) *
+                          random.uniform(1.05, 1.3), "it asked Sourcerer to slow down")
+                    raise SlowDown("%s asked Sourcerer to slow down; it rests for a while" % host)
+            if (code == 429 or code >= 500) and attempt < tries - 1:
+                wait = _retry_after(resp)
                 resp.close()
-                raise SlowDown("%s asks Sourcerer to slow down; the next sync carries on" % host)
-            if (resp.status_code == 429 or resp.status_code >= 500) and attempt < tries - 1:
-                wait = resp.headers.get("Retry-After", "")
-                try:          # Patreon says it in the body: errors[0].retry_after_seconds
-                    wait = wait or str(int(resp.json()["errors"][0]["retry_after_seconds"]))
-                except Exception:
-                    pass
-                resp.close()
-                delay = min(int(wait), 300) if wait.isdigit() else 5 * 2 ** attempt
-                log.info("%s answered %s; waiting %ss", host, resp.status_code, delay)
+                delay = (wait if wait is not None else 5 * 2 ** attempt) * random.uniform(1.0, 1.25)
+                log.info("%s answered %s; waiting %ds", host, code, delay)
                 time.sleep(delay)
                 attempt += 1
                 continue
+            if login and code in (401, 403):
+                _refusal(url, False)
+            elif login and code < 400:
+                _refusal(url, True)
             resp.raise_for_status()
             return resp
         except (requests.ConnectionError, requests.Timeout) as e:
@@ -209,7 +445,7 @@ def _get(url, params=None, stream=False, headers=None, method="GET", data=None, 
                     continue
             if attempt >= tries - 1:
                 raise
-            time.sleep(3 * (attempt + 1))
+            time.sleep(3 * (attempt + 1) * random.uniform(1.0, 1.25))
             attempt += 1
     raise RuntimeError("no answer from %s" % url)
 
@@ -251,20 +487,20 @@ def reason(e):
 
 def get_json(url, params=None, headers=None):
     params = {k: v for k, v in (params or {}).items() if v is not None}
-    with _Polite(url):
+    with _Polite(url, _carries_login(url, headers, params)):
         return _get(url, params, headers=headers).json()
 
 
 def post_json(url, data=None, json=None, headers=None):
     """A login's request (a token, a session): sent once, the answer as JSON."""
-    with _Polite(url):
+    with _Polite(url, True):
         resp = _get(url, headers=headers, method="POST", data=data, json=json)
         return resp.json() if resp.content.strip() else {}     # Bluesky's deleteSession: nothing
 
 
 def get_text(url, params=None, headers=None):
     """A page as text, for the sites that have no API (forums)."""
-    with _Polite(url):
+    with _Polite(url, _carries_login(url, headers, params)):
         resp = _get(url, params, headers=headers)
         return resp.text, resp.url
 
@@ -300,7 +536,7 @@ def download(url, folder, mime_hint="", progress=None, headers=None):
     part = folder / (".%s.part" % os.urandom(6).hex())
     digest = hashlib.sha256()
     # The whole transfer counts against the site's limit, not just its start.
-    with _Polite(url):
+    with _Polite(url, _carries_login(url, headers)):
         return _stream(url, part, digest, mime_hint, progress, headers)
 
 
@@ -328,9 +564,27 @@ def _stream(url, part, digest, mime_hint, progress, headers):
     return part, digest.hexdigest(), ext, name
 
 
+def fetch_picture(url, headers=None, limit=40 << 20, first=False):
+    """A picture or video for the gallery, as (content type, bytes): asked for
+    once, no retries -- a preview is not worth asking a site twice -- and only
+    a picture or a video is accepted."""
+    with _Polite(url, _carries_login(url, headers), first):
+        resp = _get(url, stream=True, headers=headers, tries=1)
+        try:
+            ctype = (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+            if not ctype.startswith(("image/", "video/")):
+                raise RuntimeError("%s sent no picture" % urllib.parse.urlparse(url).hostname)
+            data = resp.raw.read(limit + 1, decode_content=True)
+        finally:
+            resp.close()
+    if len(data) > limit:
+        raise ValueError("file too large")
+    return ctype, data
+
+
 def fetch_bytes(url, limit=10 << 20, headers=None):
     """A small file (a profile picture) as bytes."""
-    with _Polite(url):
+    with _Polite(url, _carries_login(url, headers)):
         resp = _get(url, stream=True, headers=headers)
         try:
             data = resp.raw.read(limit + 1, decode_content=True)

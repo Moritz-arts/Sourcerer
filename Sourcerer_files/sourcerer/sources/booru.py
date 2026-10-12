@@ -30,7 +30,7 @@ import urllib.parse
 
 import requests
 
-from .. import accounts, net
+from .. import accounts, config, net
 
 KIND = "booru"
 LABEL = "Booru"
@@ -220,10 +220,16 @@ def _secrets(host):
 
 def _auth_headers(host, data=None):
     data = data or _secrets(host)
-    if not data or BOORUS[host][0] == "gelbooru":
-        return None
-    token = base64.b64encode(("%s:%s" % (data["user"], data["api_key"])).encode()).decode()
-    return {"Authorization": "Basic " + token}
+    engine = BOORUS.get(host, ("",))[0]
+    # e621's rules: a descriptive User-Agent naming the project and the user,
+    # nothing that looks like a browser (Sourcerer's own starts with Mozilla/5.0).
+    out = {"User-Agent": "Sourcerer/%s (+https://github.com/%s%s)" % (
+        config.VERSION, config.REPO, "; by %s on e621" % data["user"] if data else "")} \
+        if engine == "e621" else {}
+    if data and engine != "gelbooru":
+        token = base64.b64encode(("%s:%s" % (data["user"], data["api_key"])).encode()).decode()
+        out["Authorization"] = "Basic " + token
+    return out or None
 
 
 def _auth_params(host, data=None):
@@ -324,7 +330,7 @@ def _posts(host, engine, tags, before, limit):
         params = {"tags": tags + (" rating:s" if host == "e926.net" else ""), "limit": limit,
                   "page": "b%d" % before if before else None}
         if engine == "danbooru":       # only what a file needs: a fifth of the answer
-            params["only"] = "id,created_at,md5,file_ext,file_url,large_file_url"
+            params["only"] = "id,created_at,md5,file_ext,file_url,large_file_url,image_width,image_height,media_asset"
         try:
             data = net.get_json("https://%s/posts.json" % api, params, headers=_auth_headers(host))
         except requests.HTTPError as e:
@@ -396,12 +402,34 @@ def _media(host, engine, p):
     same = SAME_POSTS.get(host, host)
     if engine == "moebooru":                              # "yande.re 1198217 every tag of the post.jpg"
         name = "%s %s%s" % (same, p["id"], name[name.rfind("."):] if "." in name else "")
+    referer = {"Referer": "https://%s/" % host} if engine == "gelbooru" else None
     return Media(remote_key="booru:%s:%s" % (same, p["id"]), url=src, post_url=post,
                  # Not "change": the self-hosted Gelbooru 0.2 sites have no upload
                  # date, and the last edit is not one.
                  posted=_date(p.get("created_at")), name=str(p["id"]), filename=name,
                  # Gelbooru's file hosts want to know the page a file is linked from.
-                 headers={"Referer": "https://%s/" % host} if engine == "gelbooru" else None)
+                 headers=referer, preview_headers=referer, **_previews(host, engine, p, src))
+
+
+_VIDEO = (".mp4", ".webm", ".m4v", ".mov")
+
+
+def _previews(host, engine, p, src):
+    """The engine's own preview (grid) and sample (viewer) sizes; a video plays from its file."""
+    full = lambda u: urllib.parse.urljoin("https://%s/" % host, u) if u else ""
+    video = src.lower().split("?")[0].endswith(_VIDEO)
+    if engine == "danbooru":
+        sizes = {v.get("type"): v.get("url") for v in (p.get("media_asset") or {}).get("variants") or []}
+        thumb, large = sizes.get("360x360") or sizes.get("180x180"), sizes.get("sample") or sizes.get("720x720")
+        w, h = p.get("image_width"), p.get("image_height")
+    elif engine == "e621":
+        thumb, large = (p.get("preview") or {}).get("url"), (p.get("sample") or {}).get("url")
+        w, h = (p.get("file") or {}).get("width"), (p.get("file") or {}).get("height")
+    else:
+        thumb, large = p.get("preview_url"), p.get("sample_url")
+        w, h = p.get("width"), p.get("height")
+    return {"thumb": full(thumb), "large": src if video else full(large) or src, "video": video,
+            "width": int(w or 0), "height": int(h or 0)}
 
 
 def _date(value):

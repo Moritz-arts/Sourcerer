@@ -36,6 +36,7 @@ _TEASERS = {"clip_start_screen", "video_preview", "vertical_video_preview"}
 _CAMPAIGN_FIELDS = "name,url,vanity,avatar_photo_url,avatar_photo_image_urls"
 _campaigns = {}      # url -> (when, campaign): the profile and the pages of one sync ask once
 CAMPAIGN_SECONDS = 600
+MAX_NEW = 500            # a patron's years of posts come over several syncs
 LOGIN = ("recommended", "Logged out, only public posts come; a patron's posts need the login.")
 
 
@@ -118,13 +119,14 @@ def pages(url):
     from . import LoginRequired, Media
     # A session_id that ran out does not make /api/posts fail: it quietly
     # answers as to a guest. So a saved login is asked about first.
-    if accounts.logged_in("patreon") and whoami() is None:
+    if accounts.logged_in("patreon") and _whoami_cached() is None:
         raise LoginRequired("Patreon: log in again")
     cid = _campaign(url)["id"]
     params = {"filter[campaign_id]": cid, "filter[contains_exclusive_posts]": "true",
               "filter[is_draft]": "false", "sort": "-published_at", "include": "media",
               "fields[post]": "current_user_can_view,published_at,url",
-              "fields[media]": "download_url,file_name,mimetype,owner_relationship,size_bytes",
+              "fields[media]": "download_url,file_name,mimetype,owner_relationship,size_bytes,"
+                               "image_urls,metadata",
               "page[count]": PAGE, "json-api-use-default-includes": "false", "json-api-version": "1.0"}
     cursor = None
     while True:
@@ -151,11 +153,18 @@ def pages(url):
                 if m.get("size_bytes") is None:
                     continue
                 name = m.get("file_name") or ""
+                urls, size = m.get("image_urls") or {}, (m.get("metadata") or {}).get("dimensions") or {}
                 page.append(Media(
                     remote_key="patreon:%s" % ref["id"],
                     url=src, post_url=a.get("url") or "", posted=a.get("published_at") or "",
                     name=ref["id"], mime=m.get("mimetype") or "",
-                    filename="" if "://" in name else name))
+                    filename="" if "://" in name else name,
+                    # Signed links that run out in about two weeks: good for one gallery.
+                    thumb=urls.get("thumbnail_large") or urls.get("default_small") or urls.get("thumbnail") or "",
+                    large=urls.get("default_large") or urls.get("default") or (
+                        src if (m.get("mimetype") or "").startswith("video/") else ""),
+                    video=(m.get("mimetype") or "").startswith("video/"),
+                    width=size.get("w") or 0, height=size.get("h") or 0))
         yield page
         cursor = (((doc.get("meta") or {}).get("pagination") or {}).get("cursors") or {}).get("next")
         if not cursor or not doc.get("data"):
@@ -164,6 +173,20 @@ def pages(url):
 
 def still_logged_in(key):
     return whoami() is not None
+
+
+_who = {}                # saved login's stamp -> (when, name): one question per half hour
+
+
+def _whoami_cached():
+    stamp = accounts.saved("patreon")
+    hit = _who.get(stamp)
+    if hit and time.monotonic() - hit[0] < 1800:
+        return hit[1]
+    name = whoami()
+    _who.clear()
+    _who[stamp] = (time.monotonic(), name)
+    return name
 
 
 def whoami():

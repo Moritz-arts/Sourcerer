@@ -7,6 +7,7 @@ import datetime
 import logging
 import os
 import platform
+import random
 import re
 import subprocess
 import sys
@@ -16,7 +17,7 @@ import urllib.parse
 
 from flask import Flask, abort, jsonify, request, send_file, send_from_directory
 
-from . import accounts, config, db, imaging, net, sources, sync, updater
+from . import accounts, config, db, gallery, imaging, net, sources, sync, updater
 
 log = logging.getLogger(__name__)
 app = Flask(__name__, static_folder=None)
@@ -245,7 +246,7 @@ def state():
     return jsonify(version=config.VERSION, library=sync.library(), sep=os.sep,
                    sites=[s.LABEL for s in sources.SITES], settings=db.settings(),
                    fields=[{"label": label, "example": example} for label, example in sources.FIELDS],
-                   logins=accounts.problems(),
+                   logins=accounts.problems(), pauses=net.pauses(),
                    artists=_artists(), sync=sync.status(), window=WINDOW is not None)
 
 
@@ -414,6 +415,78 @@ def thumb(file_id):
     return resp
 
 
+# ---- the gallery -----------------------------------------------------------------------
+
+def _own_page():
+    """GETs skip _same_origin. These answer with what the user's logins fetched,
+    so a page from elsewhere (Sec-Fetch-Site) or a renamed host gets nothing."""
+    host = urllib.parse.urlsplit("//" + (request.host or ""))
+    if host.hostname not in _LOCAL or request.headers.get("Sec-Fetch-Site") == "cross-site":
+        abort(403)
+
+
+@app.post("/api/gallery/open")
+def gallery_open():
+    try:
+        return jsonify(gallery.open_gallery(int((request.get_json(force=True) or {}).get("artist_id") or 0)))
+    except KeyError:
+        abort(404)
+
+
+@app.post("/api/gallery/more")
+def gallery_more():
+    body = request.get_json(force=True) or {}
+    try:
+        return jsonify(gallery.more(body.get("gallery") or "", body.get("n") or gallery.PAGE))
+    except KeyError:
+        return jsonify(error="This gallery was closed; open it again."), 410
+
+
+@app.get("/api/gallery/<gallery_id>/<int:number>/<size>")
+def gallery_picture(gallery_id, number, size):
+    _own_page()
+    if size not in ("thumb", "large"):
+        abort(404)
+    try:
+        ctype, data = gallery.picture(gallery_id, number, size)
+    except KeyError:
+        abort(404)
+    except Exception as e:
+        log.info("gallery picture: %s", net.reason(e))
+        abort(502)
+    resp = app.response_class(data, mimetype=ctype)
+    resp.headers["Cache-Control"] = "no-store"     # in Sourcerer's memory only, not the web view's cache
+    return resp
+
+
+@app.get("/api/gallery/file/<int:file_id>")
+def gallery_file(file_id):
+    """A downloaded file, whole, for the gallery's large view."""
+    _own_page()
+    with db.connect() as con:
+        row = con.execute("SELECT path FROM files WHERE id = ?", (file_id,)).fetchone()
+    if not row or not row["path"] or not os.path.isfile(row["path"]):
+        abort(404)
+    return send_file(row["path"], conditional=True, max_age=0)
+
+
+@app.post("/api/gallery/download")
+def gallery_download():
+    body = request.get_json(force=True) or {}
+    try:
+        return jsonify(item=gallery.download(body.get("gallery") or "", int(body.get("item") or 0)))
+    except KeyError:
+        return jsonify(error="This gallery was closed; open it again."), 410
+    except Exception as e:
+        return jsonify(error=net.reason(e)), 502
+
+
+@app.post("/api/gallery/close")
+def gallery_close():
+    gallery.close((request.get_json(force=True) or {}).get("gallery") or "")
+    return jsonify(ok=True)
+
+
 @app.post("/api/open-url")
 def open_url():
     """A source's page in the system's browser -- not inside Sourcerer's window."""
@@ -515,9 +588,18 @@ def info():
 
 # ---- accounts -----------------------------------------------------------------------
 
-def _login_changed(key):
-    """A login opens (or closes) older posts the early stop would never reach
-    again: the sources it covers walk their whole history on the next sync."""
+# Sites where a login shows posts a visitor never sees: R-18 works, a patron's
+# posts, a forum's members-only media, followers-only posts, a booru's hidden files.
+REVEALS = ("pixiv", "patreon", "xenforo:", "mastodon:", "booru:")
+
+
+def _login_changed(key, how="new"):
+    """A first login opens older posts the early stop would never reach again:
+    the sources it covers walk their whole history on the next sync. Not after
+    a renewed login (the same posts as before) or a logout, and not on X or
+    Bluesky, where a login shows nothing more -- a walk there is only risk."""
+    if how != "new" or not key.startswith(REVEALS):
+        return
     with db.connect() as con:
         for row in con.execute("SELECT id, url FROM sources").fetchall():
             if sources.account_key(row["url"]) == key:
@@ -708,7 +790,11 @@ def repair():
     if action == "avatars":
         with db.connect() as con:
             ids = [r[0] for r in con.execute("SELECT id FROM artists")]
-        _background(lambda: [sync.check_card(i) for i in ids])
+        def run():                     # one card after another, a few seconds apart, like a sync
+            for i in ids:
+                sync.check_card(i)
+                time.sleep(random.uniform(3, 10))
+        _background(run)
         return jsonify(message="Profile pictures and link checks are being refreshed.")
     if action not in ("venv", "reinstall", "restart"):
         abort(400)

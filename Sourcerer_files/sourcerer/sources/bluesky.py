@@ -244,6 +244,20 @@ def _blobs(embed):
         yield from _blobs(embed.get("media"))
 
 
+def _views(embed):
+    """The post view's pictures, in the record's order: thumb and fullsize on
+    Bluesky's CDN for the gallery (the files themselves still come from the PDS)."""
+    if not embed:
+        return
+    kind = embed.get("$type", "")
+    if kind.startswith("app.bsky.embed.images"):
+        yield from embed.get("images") or []
+    elif kind.startswith("app.bsky.embed.video"):
+        yield embed
+    elif kind.startswith("app.bsky.embed.recordWithMedia"):
+        yield from _views(embed.get("media"))
+
+
 def _ref(blob):
     # Current records: {"ref": {"$link": cid}}; the oldest ones: {"cid": cid}.
     return (blob.get("ref") or {}).get("$link") or blob.get("cid"), blob.get("mimeType", "")
@@ -266,9 +280,11 @@ def pages(url):
                 continue
             record = post.get("record") or {}
             rkey = post.get("uri", "").rsplit("/", 1)[-1]
-            for cid, mime in _blobs(record.get("embed")):
+            views = list(_views(post.get("embed")))
+            for i, (cid, mime) in enumerate(_blobs(record.get("embed"))):
                 if not cid:
                     continue
+                view = views[i] if i < len(views) else {}
                 page.append(Media(
                     remote_key="bluesky:%s:%s" % (did, cid),
                     url="%s/xrpc/com.atproto.sync.getBlob?%s" % (
@@ -276,7 +292,14 @@ def pages(url):
                     post_url="https://bsky.app/profile/%s/post/%s" % (did, rkey),
                     posted=record.get("createdAt") or post.get("indexedAt") or "",
                     # Bluesky keeps no file names; the blob's id stands in for one.
-                    name=cid[-16:], mime=mime, filename=cid))
+                    name=cid[-16:], mime=mime, filename=cid,
+                    thumb=view.get("thumb") or view.get("thumbnail") or "",
+                    # A video plays from the blob itself: the view only offers a stream playlist.
+                    large=view.get("fullsize") or "%s/xrpc/com.atproto.sync.getBlob?%s" % (
+                        pds, urllib.parse.urlencode({"did": did, "cid": cid})),
+                    video=mime.startswith("video/"),
+                    width=(view.get("aspectRatio") or {}).get("width") or 0,
+                    height=(view.get("aspectRatio") or {}).get("height") or 0))
         yield page
         cursor = feed.get("cursor")
         if not cursor or not feed.get("feed"):

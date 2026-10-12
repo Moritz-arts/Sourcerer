@@ -41,11 +41,19 @@ log = logging.getLogger(__name__)
 # so an account with years of posts cannot keep a sync running for a day.
 MAX_PAGES = int(os.environ.get("SOURCERER_MAX_PAGES", "500"))
 AVATAR_DAYS = 7              # how often a profile picture is looked for again
-ACCOUNT_HOURS = 6            # how often the saved logins are checked
+ACCOUNT_HOURS = (5, 9)       # how often the saved logins are checked, drawn anew each time
+CHECKED_HOURS = 12           # a login checked this recently is not asked again at a start
+# Automatic syncs come no closer than this to a site where an account can be
+# locked (a sync started by hand does not wait).
+MIN_HOURS = {"x": 12, "pixiv": 6, "patreon": 6, "xenforo": 12}
+NEXT_CARD = (20, 90)         # seconds before the next card asks a login site the last one used
+GIVE_UP = 3                  # syncs a file may fail before its source completes without it
 
 _lock = threading.Lock()
 _save = threading.Lock()     # deciding and saving happen one file at a time
 _queue = []                  # artist ids waiting
+_auto = set()                # of those, queued by the automatic sync
+_used = {}                   # login site -> (artist id, when its last card was done with it)
 _current = None              # what the running sync is doing, for the window
 _worker = None
 _cancel = threading.Event()
@@ -136,10 +144,13 @@ def _final_path(folder, media, ext, server_name, posted):
 
 # ---- queue ------------------------------------------------------------------
 
-def enqueue(artist_ids=None):
-    """Queue artists (all when None). Returns how many were added."""
+def enqueue(artist_ids=None, auto=False):
+    """Queue artists (all when None). Returns how many were added.
+
+    The longest unsynced first, in a random order among equals: not the same
+    cards in the same order every day."""
     with db.connect() as con:
-        ids = [r[0] for r in con.execute("SELECT id FROM artists ORDER BY name COLLATE NOCASE")]
+        ids = [r[0] for r in con.execute("SELECT id FROM artists ORDER BY COALESCE(last_sync, ''), RANDOM()")]
     if artist_ids is not None:
         wanted = set(artist_ids)
         ids = [i for i in ids if i in wanted]
@@ -148,6 +159,8 @@ def enqueue(artist_ids=None):
         busy = _current["artist_id"] if _current else None
         added = [i for i in ids if i not in _queue and i != busy]
         _queue.extend(added)
+        if auto:
+            _auto.update(added)
         # Under the same lock the worker clears _worker in when it runs dry, so
         # an artist queued in that moment never waits for a worker that is gone.
         if added and _worker is None:
@@ -160,6 +173,7 @@ def cancel(artist_id):
     with _lock:
         if artist_id in _queue:
             _queue.remove(artist_id)
+            _auto.discard(artist_id)
             return True
         if _current and _current["artist_id"] == artist_id:
             _cancel.set()
@@ -176,9 +190,11 @@ def _work():
                 _state["finished"] = _now()
                 return
             artist_id = _queue.pop(0)
+            auto = artist_id in _auto
+            _auto.discard(artist_id)
             _cancel.clear()
         try:
-            _sync_artist(artist_id)
+            _sync_artist(artist_id, auto)
         except Exception as e:                       # never leave a card stuck as running
             log.exception("sync failed")
             event("error", "Sync failed: %s" % net.reason(e))
@@ -192,35 +208,53 @@ def scheduler():
     And a look at every saved login, right at the start and then every
     ACCOUNT_HOURS, so a login that ran out is shown before a sync needs it."""
     def run():
-        time.sleep(3)                     # the window first
+        time.sleep(random.uniform(20, 60))    # the window first, and not the start's own second
         check_accounts_at_start()
-        next_check = time.monotonic() + ACCOUNT_HOURS * 3600
+        next_check = time.monotonic() + random.uniform(*ACCOUNT_HOURS) * 3600
         while True:
             time.sleep(60)
             _upgrade_gallery_dl()
             if time.monotonic() >= next_check:
-                next_check = time.monotonic() + ACCOUNT_HOURS * 3600
+                next_check = time.monotonic() + random.uniform(*ACCOUNT_HOURS) * 3600
                 try:
-                    check_accounts()
+                    check_accounts(spread=True, fresh_hours=CHECKED_HOURS / 2)
                 except Exception:
                     log.exception("account check")
             try:
                 if db.get_setting("auto_sync") != "1":
                     continue
-                hours = db.setting_int("auto_hours", 1, 168)
-                last = db.get_setting("last_auto") or ""
-                due = not last or (datetime.datetime.now(datetime.timezone.utc) -
-                                   datetime.datetime.fromisoformat(last)).total_seconds() >= hours * 3600
-                if due:
+                now = time.time()
+                if now >= _next_auto(now):
+                    hours = db.setting_int("auto_hours", 1, 168)
+                    # Not every n hours on the dot: a regular robot is the easiest to spot.
+                    db.set_setting("next_auto", str(now + hours * 3600 * random.uniform(0.85, 1.2)))
                     db.set_setting("last_auto", datetime.datetime.now(datetime.timezone.utc).isoformat())
-                    # A few minutes either way, so syncs do not land on the same
-                    # second every day -- a regular robot is easier to spot.
                     time.sleep(random.randint(0, 180))
-                    if enqueue():
+                    if enqueue(auto=True):
                         event("info", "Automatic sync started")
             except Exception:
                 log.exception("scheduler")
     threading.Thread(target=run, daemon=True, name="scheduler").start()
+
+
+def _next_auto(now):
+    """When the next automatic sync is due (Unix time)."""
+    try:
+        return float(db.get_setting("next_auto") or "")
+    except ValueError:
+        pass
+    last = db.get_setting("last_auto") or ""      # before next_auto existed
+    if not last:
+        return now
+    hours = db.setting_int("auto_hours", 1, 168)
+    return datetime.datetime.fromisoformat(last).timestamp() + hours * 3600
+
+
+def _paused_event(site, until, why):
+    event("warn", "%s rests until %s: %s" % (net.name_of(site), time.strftime("%H:%M", time.localtime(until)), why))
+
+
+net.PAUSED.append(_paused_event)
 
 
 # ---- logins ---------------------------------------------------------------------------
@@ -264,15 +298,38 @@ def _upgrade_gallery_dl():
         log.info("gallery-dl not updated: %s", e)
 
 
-def check_accounts(keys=None):
+def _hours_since(stamp):
+    try:
+        then = datetime.datetime.fromisoformat(stamp)
+    except (TypeError, ValueError):
+        return 1e9
+    return (datetime.datetime.now(datetime.timezone.utc) - then).total_seconds() / 3600
+
+
+def check_accounts(keys=None, spread=False, fresh_hours=0):
     """Ask every saved login (or those in keys) whether the site still takes it.
-    Returns {label: True (works) / False (ran out) / None (not checked) / reason}."""
-    found = {}
+    Returns {label: True (works) / False (ran out) / None (not checked) / reason}.
+
+    spread: a pause of a few seconds between two sites, never all at once.
+    fresh_hours: a login checked more recently counts as it was found then,
+    without asking -- X, which can only be asked by reading a timeline, a day.
+    A site that is resting is not asked at all."""
+    found, first = {}, True
     for a in accounts.accounts():
         if not a["logged_in"] or (keys and a["key"] not in keys):
             continue
         name = a["label"] if a["group"] != "Mastodon" else "Mastodon (%s)" % a["label"]
         stamp = accounts.saved(a["key"])
+        if net.paused(_site_url(a["key"])):
+            found[name] = "resting"
+            continue
+        fresh = max(fresh_hours, 24 if a["key"] == "x" and not keys else 0)
+        if fresh and a["state"] == "ok" and _hours_since(a["checked"]) < fresh:
+            found[name] = True
+            continue
+        if spread and not first:
+            time.sleep(random.uniform(5, 30))
+        first = False
         try:
             ok = _still_logged_in(a["key"])
         except Exception as e:             # no answer says nothing about the login
@@ -287,6 +344,15 @@ def check_accounts(keys=None):
     return found
 
 
+def _site_url(key):
+    """A URL of the site a login belongs to, for its pause."""
+    if key in accounts.SITES:
+        return "https://" + accounts.SITES[key][2][0]
+    if key == "bluesky":
+        return "https://bsky.app"
+    return "https://" + key.split(":", 1)[1]
+
+
 def _and(names):
     return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
 
@@ -294,13 +360,13 @@ def _and(names):
 def check_accounts_at_start():
     """Every saved login, once at every start, said in the activity log."""
     try:
-        found = check_accounts()
+        found = check_accounts(spread=True, fresh_hours=CHECKED_HOURS)
     except Exception:
         log.exception("account check")
         return
     works = [n for n, ok in found.items() if ok is True]
     out = [n for n, ok in found.items() if ok is False]
-    unsure = ["%s (%s)" % (n, ok) for n, ok in found.items() if isinstance(ok, str)]
+    unsure = ["%s (%s)" % (n, ok) for n, ok in found.items() if isinstance(ok, str) and ok != "resting"]
     if not works and not out and not unsure:
         return
     parts = (["%s work%s" % (_and(works), "s" if len(works) == 1 else "")] if works else []) + \
@@ -414,7 +480,37 @@ def refresh_avatar(artist_id, force=False):
 
 # ---- one artist ---------------------------------------------------------------
 
-def _sync_artist(artist_id):
+def _too_soon(src, site, auto):
+    """An automatic sync leaves a site where accounts get locked alone for MIN_HOURS."""
+    hours = MIN_HOURS.get(net.site_of(src["url"])) or MIN_HOURS.get(site.KIND)
+    if not auto or not hours or not src["last_checked"]:
+        return False
+    return _hours_since(src["last_checked"].replace(" ", "T") + "+00:00") < hours
+
+
+def _space_out(where, artist_id):
+    """A card after a card on the same login site: a pause first, as a person
+    moving on to the next artist would take -- not the next request at once."""
+    used = _used.get(where)
+    if used and used[0] != artist_id:
+        wait = random.uniform(*NEXT_CARD) - (time.monotonic() - used[1])
+        if wait > 0:
+            _cancel.wait(wait)
+
+
+def _gave_up(artist_id, key, failed):
+    """Count a file's failed syncs; True once it should no longer hold its source back."""
+    with db.connect() as con:
+        if not failed:
+            con.execute("DELETE FROM failures WHERE artist_id = ? AND remote_key = ?", (artist_id, key))
+            return False
+        con.execute("INSERT INTO failures (artist_id, remote_key, count) VALUES (?, ?, 1) "
+                    "ON CONFLICT (artist_id, remote_key) DO UPDATE SET count = count + 1", (artist_id, key))
+        return con.execute("SELECT count FROM failures WHERE artist_id = ? AND remote_key = ?",
+                           (artist_id, key)).fetchone()[0] >= GIVE_UP
+
+
+def _sync_artist(artist_id, auto=False):
     global _current
     with db.connect() as con:
         artist = con.execute("SELECT * FROM artists WHERE id = ?", (artist_id,)).fetchone()
@@ -437,26 +533,41 @@ def _sync_artist(artist_id):
     event("start", "Checking %d %s" % (len(srcs), "source" if len(srcs) == 1 else "sources"), artist)
     refresh_avatar(artist_id)
 
-    todo, walked = [], {}
+    todo, walked, logins = [], {}, set()
     for src in srcs:
         if _cancel.is_set():
             break
         site = sources.site_for(src["url"])
+        where = net.site_of(src["url"])
         login = sources.account_key(src["url"])
         login = login if login and accounts.logged_in(login) else None
         stamp = accounts.saved(login) if login else None
         error = level = None
-        try:
-            fresh, walked[src["id"]] = _scan(src, site, known, cur)
-            todo += [(src, site, m) for m in fresh]
-            # No "still logged in" from a scan that went well: Mastodon and Bluesky
-            # read as a visitor when a login died, Patreon answers one as a guest.
-        except Exception as e:
-            error, level = net.reason(e), net.level(e)
-            if login and error.startswith(net.LOGIN):
-                _login_ran_out(login, site.LABEL, stamp)
-            else:
-                event("warn", "%s could not be reached: %s" % (site.LABEL, error), artist)
+        rest = net.paused(src["url"])
+        if rest:                                  # not even one request: the site said stop
+            error, level = "%s rests until %s: %s" % (site.LABEL, time.strftime(
+                "%H:%M", time.localtime(rest[0])), rest[1]), "warn"
+        elif _too_soon(src, site, auto):
+            continue
+        else:
+            if login:
+                _space_out(where, artist_id)
+                logins.add(where)
+            try:
+                fresh, walked[src["id"]], capped = _scan(src, site, known, cur)
+                todo += [(src, site, m) for m in fresh]
+                if capped and src["complete"]:
+                    # The early stop would skip the rest of this backlog: walk on next time.
+                    with db.connect() as con:
+                        con.execute("UPDATE sources SET complete = 0 WHERE id = ?", (src["id"],))
+                # No "still logged in" from a scan that went well: Mastodon and Bluesky
+                # read as a visitor when a login died, Patreon answers one as a guest.
+            except Exception as e:
+                error, level = net.reason(e), net.level(e)
+                if login and error.startswith(net.LOGIN):
+                    _login_ran_out(login, site.LABEL, stamp)
+                elif not isinstance(e, net.SlowDown):    # a pause says so itself, once
+                    event("warn", "%s could not be reached: %s" % (site.LABEL, error), artist)
         with db.connect() as con:
             con.execute("UPDATE sources SET last_checked = datetime('now'), last_error = ?, "
                         "last_level = ? WHERE id = ?", (error, level, src["id"]))
@@ -470,13 +581,20 @@ def _sync_artist(artist_id):
         src, site, media = job
         if _cancel.is_set():
             return
-        if not _fetch(artist, src, site, media, cur):
+        done = _fetch(artist, src, site, media, cur)
+        if done is None:                           # its site rests: not tried, not counted
+            failed_sources.add(src["id"])
+        elif _gave_up(artist_id, media.remote_key, not done):
+            event("warn", "Gave up on %s after %d failed syncs" % (media.post_url or media.url, GIVE_UP), artist)
+        elif not done:
             failed_sources.add(src["id"])
         with _lock:
             cur["done"] += 1
 
     with ThreadPoolExecutor(max_workers=db.setting_int("parallel", 1, 16)) as pool:
         list(pool.map(one, todo))
+    for where in logins:
+        _used[where] = (artist_id, time.monotonic())
 
     cancelled = _cancel.is_set()
     with db.connect() as con:
@@ -508,9 +626,12 @@ def _walk_again(src, site):
 
 
 def _scan(src, site, known, cur):
-    """What this source has that is new: (media newest first, walked-to-the-end flag)."""
+    """What this source has that is new: (media newest first, walked-to-the-end
+    flag, stopped-at-a-cap flag)."""
     fresh, seen = [], set()
-    for number, page in enumerate(site.pages(src["url"]), 1):
+    # A site that can skip what is known without asking for it (pixiv's chunks).
+    listing = site.pages(src["url"], known) if getattr(site, "SKIPS_KNOWN", False) else site.pages(src["url"])
+    for number, page in enumerate(listing, 1):
         new = [m for m in page if m.remote_key not in known and m.remote_key not in seen]
         seen.update(m.remote_key for m in new)
         fresh += new
@@ -520,23 +641,24 @@ def _scan(src, site, known, cur):
         # rest comes with the next sync, which walks on from where this stopped.
         cap = getattr(site, "MAX_NEW", 0)
         if cap and len(fresh) >= cap:
-            event("info", "%s: %d new files this time; the next sync fetches more." % (
-                site.LABEL, len(fresh)))
-            return fresh, False
+            event("info", "%s: %d new files this time; the next sync fetches more." % (site.LABEL, cap))
+            return fresh[:cap], False, True
         # Newest first: once a page holds something already seen, everything
         # older was seen too -- but only after one sync has gone all the way.
         if src["complete"] and len(new) < len(page) and not _walk_again(src, site):
-            return fresh, True
+            return fresh, True, False
         if number >= MAX_PAGES:
             event("info", "%s: stopped after %d pages; the next sync carries on." % (
                 site.LABEL, number))
-            return fresh, False
+            return fresh, False, True
         if _cancel.is_set():
-            return fresh, False
-    return fresh, True
+            return fresh, False, False
+    return fresh, True, False
 
 
 def _fetch(artist, src, site, media, cur):
+    """Download one file: True when it is there (or a duplicate), False when it
+    failed, None when its site rests and it was not even asked for."""
     folder = target_folder(artist, site.LABEL)
     if _adopt(artist, src, media, folder, cur):
         return True
@@ -546,8 +668,17 @@ def _fetch(artist, src, site, media, cur):
         else:
             part, sha, ext, server_name = net.download(media.url, folder, media.mime, _count_bytes,
                                                        headers=media.headers)
+    except net.SlowDown:                           # the site rests: said once, when it began
+        with _lock:
+            cur["failed"] += 1
+        return None
     except Exception as e:
-        event("warn", "Download failed: %s (%s)" % (media.post_url or media.url, net.reason(e)), artist)
+        reason = net.reason(e)
+        login = sources.account_key(src["url"])
+        if login and reason.startswith(net.LOGIN) and accounts.logged_in(login):
+            _login_ran_out(login, site.LABEL)     # pixiv's /pages answers a dead login with 401
+        else:
+            event("warn", "Download failed: %s (%s)" % (media.post_url or media.url, reason), artist)
         with _lock:
             cur["failed"] += 1
         return False
