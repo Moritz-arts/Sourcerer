@@ -129,7 +129,10 @@ Do not create releases or tags yourself, and do not push to `main`.
 - **`Sourcerer_files/Userdata/` holds logins, tokens and cookies.** It is
   git-ignored and must stay that way. Never commit it, never write its
   contents to a log, never put a credential into a commit message, an issue or
-  a test fixture.
+  a test fixture. Manage Accounts has a *Login files* button (`/api/open`,
+  target `accounts`): users copy the folder to keep their logins and put it
+  back to restore them -- `accounts.py` reads the files on every call, so
+  that works without a restart.
 
 ### Inherited from TrackImage — they apply to the updater (`updater.py`)
 

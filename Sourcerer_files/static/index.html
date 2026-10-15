@@ -213,6 +213,7 @@
 <dialog id="dlg-accounts" class="dlg accounts">
   <div class="dlg-head">
     <span>Manage Accounts</span><span class="grow"></span>
+    <button type="button" class="mini" data-open="accounts" title="Show the folder where your logins are kept"><svg class="ic"><use href="#i-folder"/></svg> Login files</button>
     <button type="button" id="btn-acc-check" class="mini" title="Ask every site whether its login still works">Check all</button>
     <button type="button" class="icon flat" data-close aria-label="Close"><svg class="ic"><use href="#i-x"/></svg></button>
   </div>
@@ -221,6 +222,9 @@
     <p class="hint"><span class="dot ok"></span> The login works. <span class="dot warn"></span> It works, but the site rests for a while.
        <span class="dot error"></span> It ran out &ndash; log in again. <span class="dot blank"></span> Not logged in.
        Sourcerer keeps what proves a login on this computer, never your password, and checks every login at each start.</p>
+    <p class="hint"><b>Login files:</b> each login is one file in that folder. Copy them to keep your logins; to log in again
+       without typing, put them back and press <b>Check all</b>. They hold cookies and tokens, so whoever has them can use your
+       logins &ndash; keep them private.</p>
     <p id="acc-browser" class="hint hidden">Sourcerer open in the browser instead of its own window? Export the site's cookies with a
        browser extension such as "Get cookies.txt LOCALLY" and use <b>Import&hellip;</b>.</p>
     <input type="file" id="acc-file" accept=".txt,text/plain" class="hidden">

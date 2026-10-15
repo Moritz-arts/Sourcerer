@@ -204,6 +204,8 @@ add the one that replaced it.
 - [x] Manage Accounts: one row per login, one under the other, with a
       green / orange (the site rests) / red (ran out) dot, "Check all",
       a red badge on the toolbar button; the card dialog lists only logged-in sites
+- [x] Manage Accounts: a *Login files* button opens the folder the logins are kept in
+      (transparency; copy it to back the logins up, put it back to restore them)
 - [x] Account safety: a login's slow lane with random gaps and breaks,
       daily budgets, site pauses, randomised automatic syncs and login
       checks, X's limits and locks respected, one gallery-dl per site
