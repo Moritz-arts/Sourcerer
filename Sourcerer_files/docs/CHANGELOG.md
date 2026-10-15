@@ -5,6 +5,10 @@ automatically -- one line per change, newest first. A release is drafted by hand
 from the tag of whichever version is judged ready, and this is the text to paste
 into it.
 
+## v0.9 — 2026-10-15
+
+- Manage Accounts: a box per login with a status dot beside Sync all, and the card dialog lists only logged-in sites (#9)
+
 ## v0.8 — 2026-10-12
 
 - A gallery per card shows all its sources at once, and logged-in accounts are protected from looking like a bot
