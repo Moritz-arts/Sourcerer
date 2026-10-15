@@ -292,8 +292,25 @@ Do not create releases or tags yourself, and do not push to `main`.
   every host one company runs (`_SITES`): a stop from pixiv's API stops
   i.pximg.net too. Never retry into a 429 on a login -- that is how
   accounts get flagged; pause and let the next sync carry on.
-- **One gallery-dl per site** (`_gdl._busy`): a gallery and a sync listing
-  X at once looked like two clients on one session.
+- **One gallery-dl reads per site at a time** (`_gdl._busy`): a gallery and
+  a sync listing X at once looked like two clients on one session. The lock
+  is held while a page is read, never while a caller keeps a listing
+  suspended -- a gallery does, between pages, and two X accounts on one
+  card (or a sync during an open gallery) deadlocked on it. It waits
+  `WAIT_INFO` seconds, then raises `SlowDown` ("busy"), which is a yellow
+  dot and no pause.
+- **pixiv skips what is saved, but not unfinished works** (`SKIPS_KNOWN`,
+  `sync._sync_artist`): a chunk of works whose first pages are all saved is
+  not even listed. A work with a page that failed, was not tried (cancel,
+  pause, MAX_NEW cut) or is still being retried (`failures`, count below
+  `GIVE_UP`) is taken out of that set, or its missing page would be lost for
+  good; one given up on is put in, or it would be listed on every sync.
+- **X's "locked" is gallery-dl's exact "Account temporarily locked".** A
+  plain `"locked" in text` also matched "<artist> blocked your account" and
+  paused X for a day for every card.
+- **A refused Mastodon token is sent once** (`mastodon._dead`): net counts a
+  login's 401s, three rest the whole server, and the visitor fallback made
+  every request send the dead token first. A new login is another token.
 - **The gallery fetches only what a listing handed out.** The proxy
   (`/api/gallery/<gallery>/<n>/thumb|large`) takes an item number, never a
   URL: any page could otherwise make Sourcerer fetch with the user's

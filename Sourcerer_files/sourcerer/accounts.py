@@ -244,10 +244,11 @@ def logout(key):
     _changed(key, "logout")
 
 
-def jar(key):
-    """The saved cookies of an account as {name: value}, empty when not logged in."""
+def jar(key, fresh=False):
+    """The saved cookies of an account as {name: value}, empty when not logged in.
+    fresh: only those that may still go out (_fresh) -- what gallery-dl is given."""
     data = load(key)
-    return {c["name"]: c["value"] for c in data.get("cookies") or []} if data else {}
+    return {c["name"]: c["value"] for c in data.get("cookies") or [] if not fresh or _fresh(c)} if data else {}
 
 
 def logged_in(key):

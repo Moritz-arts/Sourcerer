@@ -35,6 +35,7 @@ _lock = threading.Lock()
 _galleries = {}
 _cache = collections.OrderedDict()       # (gallery, item, size) -> (content type, bytes)
 _cached = [0]
+_flight = {}                             # (gallery, item, size) -> Event, while it is being fetched
 
 
 def _when(posted):
@@ -53,7 +54,8 @@ class _Source:
         self.listing = None
         self.buffer = collections.deque()
         self.done, self.error = self.site is None, ""
-        self.last = float("inf")              # an undated item stays where its source put it
+        self.last = None                      # an undated item keeps the time of the one before it
+        self.turn = 0                         # when this source last gave an item (see _Gallery.more)
 
     def fill(self):
         """One more page from the site -- one request, or none while it rests."""
@@ -75,7 +77,7 @@ class _Source:
         for m in page:
             when = _when(m.posted)
             self.last = when if when is not None else self.last
-            self.buffer.append((self.last, m))
+            self.buffer.append((self.last, m))         # None: this source has no dates at all
 
     def close(self):
         # Ends a gallery-dl process (and frees X's or a forum's turn for a sync).
@@ -93,6 +95,7 @@ class _Gallery:
         self.lock = threading.Lock()
         self.seen = time.monotonic()
         self.items = {}                        # item number -> (_Source, Media)
+        self.spoken = 0
         self.keys = set()
         with db.connect() as con:
             rows = con.execute("SELECT * FROM sources WHERE artist_id = ? ORDER BY id", (artist["id"],)).fetchall()
@@ -113,8 +116,17 @@ class _Gallery:
                     s.fill()
             live = [s for s in self.sources if s.buffer]
             if not live:
-                break
-            s = max(live, key=lambda s: s.buffer[0][0])
+                if out or all(s.done for s in self.sources):
+                    break
+                continue                            # a page with nothing to show: ask the sources on
+            # A source with no dates (forums) takes the time of the newest dated item waiting; of
+            # equal times the source that spoke longest ago goes first. Its items then alternate
+            # with the others' instead of coming all first (its +inf once drained every other source).
+            dated = [s.buffer[0][0] for s in live if s.buffer[0][0] is not None]
+            newest = max(dated) if dated else float("-inf")
+            s = max(live, key=lambda s: (newest if s.buffer[0][0] is None else s.buffer[0][0], -s.turn))
+            self.spoken += 1
+            s.turn = self.spoken
             _when_, m = s.buffer.popleft()
             if m.remote_key in self.keys:           # a post two sources share by id (mirrors)
                 continue
@@ -219,16 +231,35 @@ def picture(gallery_id, number, size):
         if hit:
             _cache.move_to_end(key)
             return hit
-    url = (m.thumb if size == "thumb" else "") or m.large or m.thumb or m.url
-    ctype, data = net.fetch_picture(url, headers=m.preview_headers or None, first=size == "large")
-    if size == "thumb" and not m.thumb and ctype.startswith("image/"):
-        # A forum gives no small picture: one is made here, in memory.
-        data, ctype = imaging.preview(io.BytesIO(data), 400), "image/jpeg"
-    with _lock:
-        _cache[key] = (ctype, data)
-        _cached[0] += len(data)
-        while _cached[0] > MEMORY and len(_cache) > 1:
-            _cached[0] -= len(_cache.popitem(last=False)[1][1])
+    # One fetch per picture: a second request for it (stepping away and back in the
+    # large view) waits for the first instead of asking the site -- with a login -- again.
+    while True:
+        with _lock:
+            hit = _cache.get(key)
+            if hit:
+                _cache.move_to_end(key)
+                return hit
+            flight = _flight.get(key)
+            if flight is None:
+                _flight[key] = threading.Event()
+                break
+        flight.wait(120)
+    try:
+        url = (m.thumb if size == "thumb" else "") or m.large or m.thumb or m.url
+        ctype, data = net.fetch_picture(url, headers=m.preview_headers or None, first=size == "large")
+        if size == "thumb" and not m.thumb and ctype.startswith("image/"):
+            # A forum gives no small picture: one is made here, in memory.
+            data, ctype = imaging.preview(io.BytesIO(data), 400), "image/jpeg"
+        with _lock:
+            if gallery_id not in _galleries:        # closed while it was on its way: keep nothing
+                return ctype, data
+            _cache[key] = (ctype, data)
+            _cached[0] += len(data)
+            while _cached[0] > MEMORY and len(_cache) > 1:
+                _cached[0] -= len(_cache.popitem(last=False)[1][1])
+    finally:
+        with _lock:
+            _flight.pop(key).set()
     return ctype, data
 
 
@@ -248,9 +279,10 @@ def download(gallery_id, number):
                           "AND remote_key = ?", (g.artist["id"], m.remote_key)).fetchone()
     if row:
         g.saved[m.remote_key] = dict(row)
+    kept = bool(cur["new"] or cur["existing"])         # else the same picture was already there
     if cur["new"]:
         sync.event("done", "Saved from the gallery: %s" % (m.post_url or m.url), g.artist)
-    return g.item(number)
+    return g.item(number), kept
 
 
 def _reaper():

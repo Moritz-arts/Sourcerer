@@ -22,16 +22,19 @@ import subprocess
 import sys
 import threading
 
-from .. import config
+from .. import config, net
 
 log = logging.getLogger(__name__)
 DIR = config.USERDATA / "gallery-dl"
 CACHE = DIR / "cache.sqlite3"
 PAGE = 20                     # files per page handed to sync's scan, for its early stop
 _count = [0]
-# One gallery-dl per site at a time: its pacing (sleep-request) lives inside
-# one process, so two of them -- a sync and a link check -- would each ask at
-# full speed. A link check waits a little, then gives up.
+# One gallery-dl per site reads at a time: its pacing (sleep-request) lives
+# inside one process, so two of them -- a sync and a link check -- would each
+# ask at full speed. The lock is held while a page is read, not while a caller
+# keeps a listing suspended (a gallery does, between pages): two X accounts on
+# one card, or a sync during an open gallery, would otherwise wait for it
+# forever. Whoever cannot get its turn in WAIT_INFO seconds gives up.
 _busy = {}
 _busy_lock = threading.Lock()
 WAIT_INFO = 30
@@ -134,11 +137,20 @@ def items(url, section, options, fields):
     """
     fmt = "prepare:{{" + ",".join('"%s":%s' % (k, v) for k, v in fields.items()) + "}}"
     lock = _site_lock(section)
-    lock.acquire()
+    listing = _items(url, section, options, fmt)
     try:
-        yield from _items(url, section, options, fmt)
+        while True:
+            if not lock.acquire(timeout=WAIT_INFO):
+                raise net.SlowDown("busy with another listing of this site; try again in a moment")
+            try:
+                page = next(listing, None)
+            finally:
+                lock.release()
+            if page is None:
+                return
+            yield page
     finally:
-        lock.release()
+        listing.close()
 
 
 def _items(url, section, options, fmt):
@@ -186,7 +198,7 @@ def info(url, section, options):
     """The JSON gallery-dl gives for a small listing (a profile's info): its messages."""
     lock = _site_lock(section)
     if not lock.acquire(timeout=WAIT_INFO):
-        raise RuntimeError("busy with a sync of this site; try again in a moment")
+        raise net.SlowDown("busy with another listing of this site; try again in a moment")
     try:
         return _info(url, section, options)
     finally:

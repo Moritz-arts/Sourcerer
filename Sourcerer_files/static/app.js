@@ -261,11 +261,14 @@ function renderActivity() {
       esc(l.label) + ": log in again</button>";
   });
   // A site that said stop rests; Sourcerer asks it nothing until then.
-  (S.pauses || []).forEach(function (p) {
-    var until = new Date(p.until * 1000);
+  (S.pauses || []).filter(function (p) { return p.until * 1000 > Date.now(); }).forEach(function (p) {
+    var until = new Date(p.until * 1000), now = new Date();
+    var days = Math.round((new Date(until.getFullYear(), until.getMonth(), until.getDate()) -
+                           new Date(now.getFullYear(), now.getMonth(), now.getDate())) / 864e5);
     html += '<span class="pill rest" title="' + esc(p.why) + '">' + icon("clock") + esc(p.name) + " rests until " +
       esc(until.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })) +
-      (until.toDateString() !== new Date().toDateString() ? " tomorrow" : "") + "</span>";
+      (days === 1 ? " tomorrow" : days > 1 ? " on " + esc(until.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" })) : "") +
+      "</span>";
   });
   if (S.settings.auto_sync === "1") {
     html += '<span class="pill" title="Settings › Sync">' + icon("clock") + "Auto-sync every " +
@@ -322,8 +325,9 @@ var lastKey = "";
 function poll() {
   api("GET", "/api/sync").then(function (s) {
     var key = (s.current ? s.current.artist_id : "-") + "|" + s.running + "|" + (s.queue || []).join(",") +
-      "|" + (s.log || []).length;
+      "|" + (s.log || []).length + "|" + (s.pauses || []).map(function (p) { return p.site; }).join(",");
     S.sync = s;
+    if (s.pauses) S.pauses = s.pauses;
     if (key !== lastKey) { lastKey = key; return load(); }
     if (s.current) render(); else renderActivity();
   }).catch(function () {}).then(function () {
@@ -334,7 +338,7 @@ function poll() {
 function sync(artistId) {
   api("POST", "/api/sync", artistId ? { artist_id: artistId } : {}).then(function () {
     lastKey = ""; return api("GET", "/api/sync");
-  }).then(function (s) { S.sync = s; render(); }).catch(fail);
+  }).then(function (s) { S.sync = s; if (s.pauses) S.pauses = s.pauses; render(); }).catch(fail);
 }
 
 function removeArtist(a) {
@@ -484,35 +488,46 @@ galSeen.observe($("gal-end"));
 // opens six connections to Sourcerer at most: fifty of them asked for at once
 // held back the large view, the next page and the state poll. So two at a
 // time, those near the screen only.
-var galQueue = [], galLoading = 0;
+var galQueue = [], galFlight = new Set();
 var galNear = new IntersectionObserver(function (entries) {
   entries.forEach(function (e) {
-    if (e.isIntersecting) { galNear.unobserve(e.target); galQueue.push(e.target); }
+    if (e.isIntersecting) { galNear.unobserve(e.target); e.target.dataset.q = "1"; galQueue.push(e.target); }
   });
   galPump();
 }, { root: $("gal-body"), rootMargin: "400px" });
 
+// An image is queued once (data-q) and counts as loading only while it is in
+// galFlight: a second entry for one that already started, or a picture of a
+// closed gallery finishing late, must not take or give back a slot.
 function galPump() {
-  while (galLoading < 2 && galQueue.length) {
+  while (galFlight.size < 2 && galQueue.length) {
     var img = galQueue.shift();
-    if (!img.isConnected) continue;
-    galLoading++;
+    delete img.dataset.q;
+    if (!img.isConnected || img.hasAttribute("src")) continue;
+    if (img.closest(".gal-tile.hidden")) { galNear.observe(img); continue; }   // when its source is shown again
+    galFlight.add(img);
     img.addEventListener("load", galDone); img.addEventListener("error", galDone);
+    // Lazy loading would hold back one that is off screen -- and its slot with it.
+    img.loading = "eager";
     img.src = img.dataset.lazy;
   }
 }
 
 function galDone(e) {
   e.target.removeEventListener("load", galDone); e.target.removeEventListener("error", galDone);
-  galLoading = Math.max(0, galLoading - 1);
-  galPump();
+  if (galFlight.delete(e.target)) galPump();
+}
+
+// Proxied thumbnails of the grid that nobody has queued yet.
+function galWatch() {
+  $("gal-grid").querySelectorAll("img[data-lazy]:not([src]):not([data-q])").forEach(function (img) { galNear.observe(img); });
 }
 
 function openGallery(a) {
   closeMenu();
   if (!a) return;
-  G = { artist: a, id: null, items: [], busy: false, done: false, hidden: {}, view: -1 };
-  galQueue = []; galLoading = 0; galNear.disconnect();
+  G = { artist: a, id: null, items: [], busy: false, done: false, hidden: {}, view: -1, sources: null, downloading: {} };
+  galQueue = []; galFlight.clear(); galNear.disconnect();
   $("gal-title").textContent = a.name;
   $("gal-grid").innerHTML = ""; $("gal-sources").innerHTML = "";
   $("gal-end").textContent = "Asking the sites…";
@@ -521,7 +536,7 @@ function openGallery(a) {
   var g = G;
   api("POST", "/api/gallery/open", { artist_id: a.id }).then(function (d) {
     if (g !== G) return api("POST", "/api/gallery/close", { gallery: d.gallery });
-    g.id = d.gallery;
+    g.id = d.gallery; g.sources = d.sources;
     galSources(d.sources);
     moreGallery();
   }).catch(function (e) { $("gal-end").textContent = e.message; });
@@ -530,15 +545,17 @@ function openGallery(a) {
 function moreGallery() {
   var g = G;
   if (!g || !g.id || g.busy || g.done) return;
+  // Only hidden sources have more: nothing to show for the requests it would take.
+  if (g.sources && !g.sources.some(function (s) { return !g.hidden[s.id] && s.state === "more"; })) return;
   g.busy = true;
   $("gal-end").textContent = "Asking the sites…";
   api("POST", "/api/gallery/more", { gallery: g.id, n: 60 }).then(function (d) {
     if (g !== G) return;
-    g.busy = false; g.done = d.done;
+    g.busy = false; g.done = d.done; g.sources = d.sources;
     var start = g.items.length;
     g.items = g.items.concat(d.items);
     $("gal-grid").insertAdjacentHTML("beforeend", d.items.map(function (it, k) { return tileHtml(it, start + k); }).join(""));
-    $("gal-grid").querySelectorAll("img[data-lazy]:not([src])").forEach(function (img) { galNear.observe(img); });
+    galWatch();
     galSources(d.sources);
     $("gal-end").textContent = !g.done ? "" : g.items.length ? plural(g.items.length, "picture") + " – that is all" : "Nothing found.";
     // The observer fires on a change only: while the end is still in sight, ask on.
@@ -594,16 +611,21 @@ function viewItem(i) {
   if (img) {
     // What to try next when one will not load: Sourcerer's own fetch, then the small one.
     var next = [proxyOf(it, "large"), small ? "" : it.thumb].filter(function (u) { return u && u !== img.getAttribute("src"); });
-    img.onload = function () { var ph = $("gal-stage").querySelector(".gal-ph"); if (ph) ph.remove(); img.classList.remove("gal-big"); };
+    img.onload = function () {
+      if (!img.isConnected) return;                // the view moved on: not this item's stand-in any more
+      var ph = $("gal-stage").querySelector(".gal-ph"); if (ph) ph.remove(); img.classList.remove("gal-big");
+    };
     img.onerror = function () {
+      if (!img.isConnected) return;
       if (next.length) img.src = next.shift();
       else { img.onerror = null; if (small) img.remove(); }
     };
   }
   $("gal-info").textContent = [it.source, it.posted ? new Date(it.posted).toLocaleString() : "",
     it.w ? it.w + " × " + it.h : "", (i + 1) + " / " + G.items.length + (G.done ? "" : "+")].filter(Boolean).join(" · ");
-  $("gal-download").disabled = it.saved;
-  $("gal-download").querySelector("span").textContent = it.saved ? "Downloaded" : "Download";
+  var busy = !!G.downloading[it.id];
+  $("gal-download").disabled = it.saved || busy;
+  $("gal-download").querySelector("span").textContent = it.saved ? "Downloaded" : busy ? "Downloading…" : "Download";
   $("gal-view").classList.remove("hidden");
   // Near the end of what is listed: the next page, before it is needed.
   if (i > G.items.length - 8) moreGallery();
@@ -647,7 +669,7 @@ $("gal-sources").addEventListener("click", function (e) {
   G.hidden[id] = !G.hidden[id];
   chip.classList.toggle("off", !!G.hidden[id]);
   $$('#gal-grid .gal-tile[data-src="' + id + '"]').forEach(function (t) { t.classList.toggle("hidden", !!G.hidden[id]); });
-  moreGallery();
+  if (!G.hidden[id]) { galWatch(); moreGallery(); }
 });
 $("gal-view").addEventListener("click", function (e) {
   var b = e.target.closest("[data-gal]");
@@ -659,19 +681,23 @@ $("gal-view").addEventListener("click", function (e) {
   else if (b.dataset.gal === "post" && it && it.post) api("POST", "/api/open-url", { url: it.post }).catch(fail);
   else if (b.dataset.gal === "download" && it && !it.saved) {
     var g = G, i = G.view;
+    g.downloading[it.id] = true;
     b.disabled = true;
     b.querySelector("span").textContent = "Downloading…";
     api("POST", "/api/gallery/download", { gallery: g.id, item: it.id }).then(function (d) {
       if (g !== G) return;
+      delete g.downloading[it.id];
       g.items[i] = d.item;
       var tile = document.querySelector('#gal-grid .gal-tile[data-i="' + i + '"]');
-      if (tile) tile.outerHTML = tileHtml(d.item, i);
+      if (tile) { tile.outerHTML = tileHtml(d.item, i); galWatch(); }
       if (g.view === i) viewItem(i);
-      toast("Saved in " + g.artist.name + "'s folder");
+      toast(d.kept ? "Saved in " + g.artist.name + "'s folder" : "Not saved: the same picture is already in the folder");
       load();
     }).catch(function (err) {
       fail(err);
-      if (g === G && g.view === i) viewItem(i);
+      if (g !== G) return;
+      delete g.downloading[it.id];
+      if (g.view === i) viewItem(i);
     });
   }
 });

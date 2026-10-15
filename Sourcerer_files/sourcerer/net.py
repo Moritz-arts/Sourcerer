@@ -142,6 +142,23 @@ def pause(url, seconds, why):
             log.exception("after pausing %s", site)
 
 
+# What a pause says when a login began it: a new login ends it (lift).
+LOGIN_PAUSES = ("refused the login", "bot check", "took Sourcerer for a bot", "let only a browser through")
+
+
+def lift(url):
+    """A login saved anew ends the rest its refusal or a bot check began -- the advice
+    was to log in -- and forgets the refusals counted against the old one."""
+    site = site_of(url)
+    with _lock:
+        _refused.pop(site, None)
+        pauses = _stored("paused")
+        entry = pauses.get(site)
+        if entry and any(w in entry[1] for w in LOGIN_PAUSES):
+            del pauses[site]
+            _store("paused")
+
+
 def paused(url):
     """(until, why) while a site is paused, else None."""
     entry = _stored("paused").get(site_of(url))
@@ -412,7 +429,9 @@ def _get(url, params=None, stream=False, headers=None, method="GET", data=None, 
             if code == 409 or "is_suspected_bot" in resp.headers.get("Set-Cookie", ""):
                 pause(url, _hours(6, 12), "it took Sourcerer for a bot")
                 resp.raise_for_status()
-            if code == 429 or (code == 503 and attempt == tries - 1):
+            # A 503 that stays after the retries: with a single try (a gallery picture) one
+            # transient 503 says nothing, and resting a whole site for it would stop its syncs.
+            if code == 429 or (code == 503 and tries > 1 and attempt == tries - 1):
                 wait = _retry_after(resp)
                 if host in STOP_HOSTS or login or attempt == tries - 1 or (wait or 0) > CAP:
                     resp.close()
@@ -421,6 +440,10 @@ def _get(url, params=None, stream=False, headers=None, method="GET", data=None, 
                     raise SlowDown("%s asked Sourcerer to slow down; it rests for a while" % host)
             if (code == 429 or code >= 500) and attempt < tries - 1:
                 wait = _retry_after(resp)
+                if (wait or 0) > CAP:               # a maintenance page's "come back in two hours"
+                    resp.close()
+                    pause(url, wait * random.uniform(1.05, 1.3), "it asked Sourcerer to slow down")
+                    raise SlowDown("%s asked Sourcerer to slow down; it rests for a while" % host)
                 resp.close()
                 delay = (wait if wait is not None else 5 * 2 ** attempt) * random.uniform(1.0, 1.25)
                 log.info("%s answered %s; waiting %ds", host, code, delay)

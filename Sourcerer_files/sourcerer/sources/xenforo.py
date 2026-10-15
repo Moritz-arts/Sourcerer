@@ -12,6 +12,7 @@ login window is one: its cookies -- Cloudflare's pass among them -- and its
 User-Agent go along with every request to the forum (accounts.py).
 """
 import html
+import random
 import re
 import urllib.parse
 
@@ -26,7 +27,8 @@ LABEL = "XenForo"
 _PATH = re.compile(r"^(.*?)/(?:index\.php\?)?(media/users|members|media/albums|threads)/([^/?#]+)", re.I)
 # tls12: off, so gallery-dl shakes hands with TLS 1.3 only, as net.py does --
 # VerticalScope's forums answered its usual handshake with 409 (see net._Tls13).
-OPTIONS = {"sleep-request": "2.0-5.0", "metadata": False, "tls12": False}
+# retries: 0 -- gallery-dl would answer a 429 with four more requests, with the login.
+OPTIONS = {"sleep-request": "2.0-5.0", "metadata": False, "tls12": False, "retries": 0}
 FIELDS = {"url": "{_url!j}", "id": "{id!j}"}
 LOGIN = ("recommended", "Most forums show their media to members only.")
 
@@ -67,7 +69,7 @@ def _host(url):
 
 
 def _options(url):
-    options = dict(OPTIONS, cookies=accounts.jar("xenforo:" + _host(url)))
+    options = dict(OPTIONS, cookies=accounts.jar("xenforo:" + _host(url), fresh=True))
     # The forum's own pass (Cloudflare) holds only with the browser that earned it.
     options.update({"user-agent": accounts.headers_for(url).get("User-Agent") or config.USER_AGENT,
                     "browser": ""})
@@ -109,11 +111,17 @@ def pages(url):
         except StopIteration:
             return
         except _gdl.Failed as e:
-            if e.slow or "409" in str(e):
+            # The status, not the digits: a thread id may contain 409.
+            status = re.search(r"'(\d{3}) ", str(e))
+            status = status.group(1) if status else ""
+            if status == "429" or (e.slow and status != "409"):
+                net.pause(url, random.uniform(1, 3) * 3600, "it asked Sourcerer to slow down")
+                raise net.SlowDown("%s asked Sourcerer to slow down; it rests for a while" % host) from e
+            if e.slow or status == "409":
                 net.pause(url, 6 * 3600, "it let only a browser through")
                 raise net.SlowDown("%s let only a browser through: log in to it under Settings > "
                                    "Accounts, so Sourcerer can use your login window's pass" % host) from e
-            if e.auth or "403" in str(e):
+            if e.auth or status == "403":
                 raise LoginRequired("this forum shows it to members only") from e
             raise
         yield [Media(remote_key="xenforo:%s:%s" % (host, f["id"]), url=f["url"],

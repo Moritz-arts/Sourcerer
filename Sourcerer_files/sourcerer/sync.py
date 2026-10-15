@@ -161,6 +161,8 @@ def enqueue(artist_ids=None, auto=False):
         _queue.extend(added)
         if auto:
             _auto.update(added)
+        else:                              # somebody asked: not the careful automatic kind any more
+            _auto.difference_update(ids)
         # Under the same lock the worker clears _worker in when it runs dry, so
         # an artist queued in that moment never waits for a worker that is gone.
         if added and _worker is None:
@@ -279,6 +281,8 @@ def _still_logged_in(key):
             return True
         except sources.LoginRequired:
             return False
+        except net.SlowDown:
+            return None                    # busy with another listing, or resting: no answer
     site = next((s for s in sources.SITES if s.KIND == key.split(":", 1)[0]), None)
     check = getattr(site, "still_logged_in", None)
     return check(key) if check else None
@@ -510,6 +514,17 @@ def _gave_up(artist_id, key, failed):
                            (artist_id, key)).fetchone()[0] >= GIVE_UP
 
 
+_P0 = re.compile(r"_p\d+$")
+
+
+def _held(artist_id, keys):
+    """Files not tried this time (a site rested, the sync was cancelled or capped): they
+    count as unfinished, so a site that skips what it knows lists their chunk again."""
+    with db.connect() as con:
+        con.executemany("INSERT OR IGNORE INTO failures (artist_id, remote_key, count) VALUES (?, ?, 0)",
+                        [(artist_id, k) for k in keys])
+
+
 def _sync_artist(artist_id, auto=False):
     global _current
     with db.connect() as con:
@@ -520,6 +535,14 @@ def _sync_artist(artist_id, auto=False):
                            (artist_id,)).fetchall()
         known = {r[0] for r in con.execute(
             "SELECT remote_key FROM files WHERE artist_id = ?", (artist_id,))}
+        held = con.execute("SELECT remote_key, count FROM failures WHERE artist_id = ?",
+                           (artist_id,)).fetchall()
+    # A site that skips what is saved by a work's first page (pixiv) must still list a work
+    # whose other pages are unfinished -- and not one given up on, which would be listed on
+    # every sync for nothing.
+    pending = {r[0] for r in held if r[1] < GIVE_UP}
+    skip = (known | {_P0.sub("_p0", r[0]) for r in held if r[1] >= GIVE_UP}) - \
+           {_P0.sub("_p0", k) for k in pending}
     master = artist["master_source_id"] if artist["dedupe"] == "master" else None
     # The master first: its copies are then already there when the others come,
     # instead of replacing theirs one by one afterwards.
@@ -554,7 +577,7 @@ def _sync_artist(artist_id, auto=False):
                 _space_out(where, artist_id)
                 logins.add(where)
             try:
-                fresh, walked[src["id"]], capped = _scan(src, site, known, cur)
+                fresh, walked[src["id"]], capped = _scan(src, site, known, cur, skip, bool(pending))
                 todo += [(src, site, m) for m in fresh]
                 if capped and src["complete"]:
                     # The early stop would skip the rest of this backlog: walk on next time.
@@ -593,6 +616,11 @@ def _sync_artist(artist_id, auto=False):
 
     with ThreadPoolExecutor(max_workers=db.setting_int("parallel", 1, 16)) as pool:
         list(pool.map(one, todo))
+    left = [m.remote_key for _src, site, m in todo if getattr(site, "SKIPS_KNOWN", False)]
+    if left:
+        with db.connect() as con:
+            have = {r[0] for r in con.execute("SELECT remote_key FROM files WHERE artist_id = ?", (artist_id,))}
+        _held(artist_id, [k for k in left if k not in have])
     for where in logins:
         _used[where] = (artist_id, time.monotonic())
 
@@ -625,12 +653,14 @@ def _walk_again(src, site):
     return (datetime.datetime.now(datetime.timezone.utc) - last).days >= days
 
 
-def _scan(src, site, known, cur):
+def _scan(src, site, known, cur, skip=frozenset(), retry=False):
     """What this source has that is new: (media newest first, walked-to-the-end
-    flag, stopped-at-a-cap flag)."""
+    flag, stopped-at-a-cap flag). skip: what a site that can skip what is known
+    without asking for it (pixiv's chunks) may leave out; retry: some file is
+    unfinished, so such a site walks on instead of stopping at the first known page."""
     fresh, seen = [], set()
-    # A site that can skip what is known without asking for it (pixiv's chunks).
-    listing = site.pages(src["url"], known) if getattr(site, "SKIPS_KNOWN", False) else site.pages(src["url"])
+    skips = getattr(site, "SKIPS_KNOWN", False)
+    listing = site.pages(src["url"], skip) if skips else site.pages(src["url"])
     for number, page in enumerate(listing, 1):
         new = [m for m in page if m.remote_key not in known and m.remote_key not in seen]
         seen.update(m.remote_key for m in new)
@@ -642,10 +672,12 @@ def _scan(src, site, known, cur):
         cap = getattr(site, "MAX_NEW", 0)
         if cap and len(fresh) >= cap:
             event("info", "%s: %d new files this time; the next sync fetches more." % (site.LABEL, cap))
+            if skips:                      # a work cut in two must be listed again
+                _held(src["artist_id"], [m.remote_key for m in fresh[cap:]])
             return fresh[:cap], False, True
         # Newest first: once a page holds something already seen, everything
         # older was seen too -- but only after one sync has gone all the way.
-        if src["complete"] and len(new) < len(page) and not _walk_again(src, site):
+        if src["complete"] and len(new) < len(page) and not (skips and retry) and not _walk_again(src, site):
             return fresh, True, False
         if number >= MAX_PAGES:
             event("info", "%s: stopped after %d pages; the next sync carries on." % (

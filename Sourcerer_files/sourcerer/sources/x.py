@@ -51,7 +51,7 @@ def normalize(url):
 
 
 def _options():
-    return dict(OPTIONS, cookies=accounts.jar("x"))
+    return dict(OPTIONS, cookies=accounts.jar("x", fresh=True))
 
 
 def _run(fn, *args):
@@ -60,7 +60,11 @@ def _run(fn, *args):
         return fn(*args)
     except _gdl.Failed as e:
         text = str(e).lower()
-        if "locked" in text:                   # "Account temporarily locked": not a dead login
+        # An artist who blocked the account or protects their tweets says "...blocked your
+        # account" -- not a lock of ours, and not a dead login either: only that source fails.
+        if "blocked your account" in text or "tweets are protected" in text:
+            raise RuntimeError("X: %s" % str(e).split(":", 1)[-1].strip()) from e
+        if "temporarily locked" in text:       # gallery-dl: "Account temporarily locked"
             net.pause("https://x.com", random.uniform(24, 48) * 3600,
                       "X locked the account -- unlock it at x.com in your browser")
             raise net.SlowDown("X locked the account; Sourcerer leaves X alone for a day or two") from e
@@ -95,6 +99,7 @@ def pages(url):
     net._stopped("https://x.com")
     listing = _gdl.items("https://x.com/%s/media" % _name(url), "twitter", _options(), FIELDS)
     while True:
+        net._stopped("https://x.com")      # spent or refused meanwhile: gallery-dl cannot see a pause
         try:
             batch = _run(next, listing)
         except StopIteration:
