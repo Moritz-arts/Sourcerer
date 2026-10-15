@@ -5,6 +5,10 @@ automatically -- one line per change, newest first. A release is drafted by hand
 from the tag of whichever version is judged ready, and this is the text to paste
 into it.
 
+## v0.12 — 2026-10-15
+
+- Manage Accounts: a Login files button opens the folder where the logins are kept
+
 ## v0.11 — 2026-10-15
 
 - Manage Accounts: one row per login, one under the other, with a green, orange or red dot
