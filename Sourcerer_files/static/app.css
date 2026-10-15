@@ -128,10 +128,11 @@ input[type=range] { accent-color: var(--fill-accent); cursor: pointer; }
 .br-n { font-size: 11px; color: var(--text-muted); }
 .br-item.selected .br-n { color: inherit; opacity: .8; }
 .br-main { flex: 1; min-width: 0; display: flex; flex-direction: column; position: relative; }
-.br-head { display: flex; align-items: center; gap: 10px; padding: 9px 14px; border-bottom: .5px solid var(--border); }
-.br-title { font-weight: 600; font-size: 15px; white-space: nowrap; }
-@media (max-width: 720px) { .br-side { width: 160px; } }
-.gal-sources { display: flex; flex-wrap: wrap; gap: 6px; margin-left: 6px; min-width: 0; }
+.br-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 9px 14px; border-bottom: .5px solid var(--border); }
+.br-title { font-weight: 600; font-size: 15px; white-space: nowrap; min-width: 0; max-width: 40%; overflow: hidden; text-overflow: ellipsis; }
+#br-download { white-space: nowrap; flex: none; }
+@media (max-width: 800px) { .br-side { width: 160px; } #version { display: none; } .seg { margin-left: 6px; } }
+.gal-sources { display: flex; flex-wrap: wrap; flex: 1 1 140px; gap: 6px; margin-left: 6px; min-width: 0; }
 .chip { font-size: 12px; font-weight: 400; padding: 2px 10px; border-radius: 12px; display: inline-flex; align-items: center; gap: 6px; }
 .chip.off { opacity: .45; }
 #gal-size { width: 120px; }
@@ -144,7 +145,7 @@ input[type=range] { accent-color: var(--fill-accent); cursor: pointer; }
 .gal-noimg, .gal-play { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--text-muted); }
 .gal-play { color: #fff; filter: drop-shadow(0 1px 3px rgba(0, 0, 0, .6)); }
 .gal-play .ic, .gal-noimg .ic { width: 34px; height: 34px; }
-.gal-tag { position: absolute; left: 6px; bottom: 6px; font-size: 11px; padding: 1px 7px; border-radius: 9px; background: rgba(0, 0, 0, .55); color: #fff; }
+.gal-tag { position: absolute; left: 6px; bottom: 6px; max-width: calc(100% - 12px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 11px; padding: 1px 7px; border-radius: 9px; background: rgba(0, 0, 0, .55); color: #fff; }
 .gal-saved { position: absolute; right: 6px; top: 6px; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center;
   justify-content: center; background: var(--fill-accent); color: var(--on-accent); }
 .gal-saved .ic { width: 16px; height: 16px; }

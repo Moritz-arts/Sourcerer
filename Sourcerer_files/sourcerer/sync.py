@@ -167,10 +167,19 @@ def enqueue(artist_ids=None, auto=False, only=None):
                 _only[i] = set(only)
             else:
                 _only.pop(i, None)
+        for i in ids:
+            if i in added or i not in _queue:
+                continue
+            # Asked for again while it waits: a full request makes the wait a full sync; a restricted
+            # one adds its sources to a restricted wait and leaves a full one full.
+            if not only:
+                _only.pop(i, None)
+            elif i in _only:
+                _only[i] |= set(only)
         if auto:
             _auto.update(added)
         else:                              # somebody asked: not the careful automatic kind any more
-            _auto.difference_update(ids)
+            _auto.difference_update(added if only else ids)     # (a restricted ask of a queued card changes nothing else)
         # Under the same lock the worker clears _worker in when it runs dry, so
         # an artist queued in that moment never waits for a worker that is gone.
         if added and _worker is None:
