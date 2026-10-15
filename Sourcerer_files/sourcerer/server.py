@@ -691,6 +691,13 @@ def get_accounts():
         if a["kind"] == "api_key":
             a.update(booru.login_help(a["key"]))
     boorus = [dict(b, **booru.login_help("booru:" + b["host"])) for b in booru.LOGIN_SITES]
+    for a in rows:
+        host = a["key"].split(":", 1)[1] if ":" in a["key"] else (
+            accounts.SITES[a["key"]][2][0] if a["key"] in accounts.SITES else "bsky.social")
+        if a["key"].startswith("booru:"):
+            host = booru.BOORUS.get(host, (0, 0, 0, 0, None))[4] or host       # paused under its API host
+        rest = net.paused(host)
+        a["rest"] = {"until": rest[0], "why": rest[1]} if rest else None
     return jsonify(accounts=rows, window=WINDOW is not None, boorus=boorus)
 
 

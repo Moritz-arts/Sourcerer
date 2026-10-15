@@ -209,7 +209,7 @@
   </div>
 </dialog>
 
-<!-- Manage Accounts: one box per login, the only place logins are made. -->
+<!-- Manage Accounts: one row per login, the only place logins are made. -->
 <dialog id="dlg-accounts" class="dlg accounts">
   <div class="dlg-head">
     <span>Manage Accounts</span><span class="grow"></span>
@@ -218,7 +218,8 @@
   </div>
   <div class="dlg-body">
     <div id="acc-grid" class="acc-grid"></div>
-    <p class="hint">A green dot: the login works. Red: it ran out &ndash; log in again.
+    <p class="hint"><span class="dot ok"></span> The login works. <span class="dot warn"></span> It works, but the site rests for a while.
+       <span class="dot error"></span> It ran out &ndash; log in again. <span class="dot blank"></span> Not logged in.
        Sourcerer keeps what proves a login on this computer, never your password, and checks every login at each start.</p>
     <p id="acc-browser" class="hint hidden">Sourcerer open in the browser instead of its own window? Export the site's cookies with a
        browser extension such as "Get cookies.txt LOCALLY" and use <b>Import&hellip;</b>.</p>
