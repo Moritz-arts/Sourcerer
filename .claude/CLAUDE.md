@@ -332,8 +332,19 @@ Do not create releases or tags yourself, and do not push to `main`.
 - **A refused Mastodon token is sent once** (`mastodon._dead`): net counts a
   login's 401s, three rest the whole server, and the visitor fallback made
   every request send the dead token first. A new login is another token.
-- **The gallery asks its sources at the same time** (`gallery._Source`, one
-  thread per source, each in its own polite lane): the first page leaves once
+- **Browse is the gallery, in the window** (`#browse`, the *Cards | Browse*
+  switch): the artists left, one artist's posts -- or "All artists", one
+  timeline over every card (`gallery.open_gallery(None)`) -- right. The filter is
+  **by site** (`G.hidden`, a label like "Pixiv"; kept across artists in
+  localStorage): the page sends the ids of the switched-off sources as `off`
+  and the server does not list them. *Download all* is `/api/sync` with
+  `sources`: `sync.enqueue(only=...)` asks just those sources of that card.
+  Every item says its artist (`artist_id`): a download goes to *its* card's
+  folder with *its* dedupe rules, in "All artists" too. The mockup's card grid
+  stays the default view; Browse is the second one, never a replacement.
+- **The gallery asks its sources at the same time** (`gallery._Source`, on
+  `POOL` threads shared by all galleries, each source in its own polite lane;
+  a site gallery-dl reads -- `SERIAL`: X, forums -- one source at a time): the first page leaves once
   something can be shown and `SLOW` seconds have gone for the rest, later pages
   wait `SLOW_LATER` -- a slow source (X through gallery-dl, a forum) comes with
   a later page instead of holding the fast ones up. A source whose waiting

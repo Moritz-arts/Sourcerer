@@ -225,7 +225,7 @@ function cardHtml(a) {
       ? '<button class="mini" data-act="cancel">Cancel</button>'
       : '<button class="mini" data-act="sync" aria-label="Sync now" title="Sync now (U)"' +
         (supported ? "" : " disabled") + ">" + icon("refresh") + "</button>" +
-        '<button class="mini" data-act="gallery" aria-label="Gallery" title="Gallery: every source, straight from the sites (G)"' +
+        '<button class="mini" data-act="gallery" aria-label="Browse" title="Browse: every source, straight from the sites (G)"' +
         (supported ? "" : " disabled") + ">" + icon("photo") + "</button>" +
         '<button class="mini" data-act="folder" aria-label="Open folder" title="Open the downloaded files (O)">' + icon("folder") + "</button>" +
         '<button class="mini" data-act="more" aria-label="More" title="More">' + icon("dots") + "</button>") +
@@ -317,6 +317,7 @@ function load() {
     $("btn-quit").classList.toggle("hidden", S.window);
     applySettings();
     render();
+    if (S.view === "browse") { renderBrowseList(); renderBrowseHead(); }
     showUpdate();
     showAccounts();
   });
@@ -333,6 +334,7 @@ function poll() {
       "|" + s.previews;                        // new pictures found for a card: the cards load them
     S.sync = s;
     if (s.pauses) S.pauses = s.pauses;
+    if (S.view === "browse") renderBrowseHead();
     if (key !== lastKey) { lastKey = key; return load(); }
     if (s.current) render(); else renderActivity();
   }).catch(function () {}).then(function () {
@@ -460,6 +462,11 @@ document.addEventListener("keydown", function (e) {
   if (ctrl && k === "-") { e.preventDefault(); return setSize(+$("size").value - 20, true); }
   if (ctrl && k === "0") { e.preventDefault(); return setSize(DEFAULT_SIZE, true); }
   if (dialog) return;
+  if (S.view === "browse") {
+    if (ctrl && low === "n") { e.preventDefault(); return openCard(null); }
+    if ((ctrl && low === "f") || (k === "/" && !typing)) { e.preventDefault(); $("br-search").focus(); return $("br-search").select(); }
+    return;
+  }
   if (ctrl && low === "n") { e.preventDefault(); return openCard(null); }
   if ((ctrl && low === "f") || (k === "/" && !typing)) { e.preventDefault(); $("search").focus(); return $("search").select(); }
   if (k === "F5" || (ctrl && low === "r")) { e.preventDefault(); return sync(null); }
@@ -476,10 +483,12 @@ document.addEventListener("keydown", function (e) {
   else if (k === "Delete") removeArtist(a);
 });
 
-// ---- the gallery ------------------------------------------------------------
+// ---- browse: the artists on the left, their posts on the right ---------------
 
-// One card's every source in one stream, newest first, straight from the
-// sites: nothing is saved unless asked for. The server lists a page per
+// One artist's every source -- or every artist's, "All artists" -- in one stream,
+// newest first, straight from the sites: nothing is saved unless asked for. The
+// filter on top is by site (Pixiv, X, Booru ...) and stays when another artist is
+// picked; a site switched off is not asked at all. The server lists a page per
 // source only when the grid has scrolled near its end, and fetches through
 // Sourcerer what a site wants a Referer or a login for; the rest the page
 // loads itself, with no referrer.
@@ -529,18 +538,76 @@ function galWatch() {
   $("gal-grid").querySelectorAll("img[data-lazy]:not([src]):not([data-q])").forEach(function (img) { galNear.observe(img); });
 }
 
+var BR_HIDDEN = "sourcerer.browse.hidden";
+S.view = "cards"; S.brArtist = 0;
+try { S.brHidden = JSON.parse(localStorage.getItem(BR_HIDDEN) || "{}"); } catch (e) { S.brHidden = {}; }
+
+function setView(view) {
+  S.view = view;
+  var browse = view === "browse";
+  $$(".filterbar, #main").forEach(function (e) { e.classList.toggle("hidden", browse); });
+  $("browse").classList.toggle("hidden", !browse);
+  $("view-cards").classList.toggle("selected", !browse);
+  $("view-browse").classList.toggle("selected", browse);
+  if (browse) { renderBrowseList(); if (!G) browseOpen(S.brArtist); }
+  else browseClose();
+}
+
+// From a card: Browse, with this artist picked.
 function openGallery(a) {
   closeMenu();
   if (!a) return;
-  G = { artist: a, id: null, items: [], busy: false, done: false, hidden: {}, view: -1, sources: null, downloading: {} };
+  S.brArtist = a.id;
+  if (S.view === "browse") browseOpen(a.id); else setView("browse");
+}
+
+function browseClose() {
+  if (G && G.id) api("POST", "/api/gallery/close", { gallery: G.id }).catch(function () {});
+  G = null;
   galQueue = []; galFlight.clear(); galNear.disconnect();
-  $("gal-title").textContent = a.name;
   $("gal-grid").innerHTML = ""; $("gal-sources").innerHTML = "";
+  closeView();
+}
+
+// The artists, "All artists" first; the one open is marked.
+function renderBrowseList() {
+  var q = $("br-search").value.trim().toLowerCase();
+  var list = S.artists.slice().sort(function (x, y) { return x.name.localeCompare(y.name); })
+    .filter(function (a) { return !q || a.name.toLowerCase().indexOf(q) >= 0; });
+  $("br-list").innerHTML = (q ? "" : '<button type="button" class="br-item all' + (!S.brArtist ? " selected" : "") +
+    '" data-id="0">' + icon("photo") + '<span class="br-name">All artists</span></button>') +
+    list.map(function (a) {
+      var n = a.sources.filter(function (s) { return s.supported; }).length;
+      return '<button type="button" class="br-item' + (S.brArtist === a.id ? " selected" : "") + '" data-id="' + a.id + '">' +
+        avatarHtml(a) + '<span class="br-name" title="' + esc(a.name) + '">' + esc(a.name) + "</span>" +
+        '<span class="br-n">' + (n || "") + "</span></button>";
+    }).join("");
+}
+
+function renderBrowseHead() {
+  var cur = S.sync.current && G && G.artist && S.sync.current.artist_id === G.artist.id ? S.sync.current : null;
+  var queued = G && G.artist && (S.sync.queue || []).indexOf(G.artist.id) >= 0;
+  $("br-progress").textContent = cur ? (cur.phase === "scan" ? "Checking sources…" : "Downloading " + cur.done + " / " + cur.total)
+    : queued ? "Queued" : "";
+  $("br-download").classList.toggle("hidden", !G || G.all);
+}
+
+function browseOpen(id) {
+  closeMenu();
+  var a = id ? artistById(id) : null;
+  if (id && !a) return;
+  S.brArtist = id || 0;
+  if (G && G.id) api("POST", "/api/gallery/close", { gallery: G.id }).catch(function () {});
+  G = { artist: a, all: !id, id: null, items: [], busy: false, done: false, hidden: S.brHidden, view: -1, sources: null, downloading: {} };
+  galQueue = []; galFlight.clear(); galNear.disconnect();
+  $("gal-title").textContent = a ? a.name : "All artists";
+  $("gal-grid").innerHTML = ""; $("gal-sources").innerHTML = "";
+  $("gal-body").scrollTop = 0;
   $("gal-end").textContent = "Asking the sites…";
-  $("gal-view").classList.add("hidden");
-  $("dlg-gallery").showModal();
+  closeView();
+  renderBrowseList(); renderBrowseHead();
   var g = G;
-  api("POST", "/api/gallery/open", { artist_id: a.id }).then(function (d) {
+  api("POST", "/api/gallery/open", { artist_id: id || 0 }).then(function (d) {
     if (g !== G) return api("POST", "/api/gallery/close", { gallery: d.gallery });
     g.id = d.gallery; g.sources = d.sources;
     galSources(d.sources);
@@ -548,15 +615,20 @@ function openGallery(a) {
   }).catch(function (e) { $("gal-end").textContent = e.message; });
 }
 
+// The ids of the sources whose site the filter has switched off.
+function offIds(g) {
+  return (g.sources || []).filter(function (s) { return g.hidden[s.label]; }).map(function (s) { return s.id; });
+}
+
 function moreGallery() {
   var g = G;
   if (!g || !g.id || g.busy || g.done) return;
   // Only hidden sources have more: nothing to show for the requests it would take.
-  if (g.sources && !g.sources.some(function (s) { return !g.hidden[s.id] && s.state === "more"; })) return;
+  if (g.sources && !g.sources.some(function (s) { return !g.hidden[s.label] && s.state === "more"; })) return;
   g.busy = true;
   $("gal-end").textContent = "Asking the sites…";
   // The first page is only what the window shows: it is there as soon as one source answered.
-  api("POST", "/api/gallery/more", { gallery: g.id, n: g.items.length ? 60 : 24 }).then(function (d) {
+  api("POST", "/api/gallery/more", { gallery: g.id, n: g.items.length ? 60 : 24, off: offIds(g) }).then(function (d) {
     if (g !== G) return;
     g.busy = false; g.done = d.done; g.sources = d.sources;
     var start = g.items.length;
@@ -586,18 +658,26 @@ function tileHtml(it, i) {
   var picture = it.thumb
     ? '<img loading="lazy" decoding="async" referrerpolicy="no-referrer" ' + (proxied ? "data-lazy" : "src") + '="' + esc(it.thumb) + '" alt="">'
     : '<span class="gal-noimg">' + icon(it.video ? "play" : "photo") + "</span>";
-  return '<button type="button" class="gal-tile' + (G.hidden[it.src] ? " hidden" : "") + '" data-i="' + i +
-    '" data-src="' + it.src + '" title="' + esc(it.source + (it.posted ? " · " + it.posted.slice(0, 10) : "")) + '">' +
+  var who = G.all ? it.artist + " · " + it.source : it.source;
+  return '<button type="button" class="gal-tile' + (G.hidden[it.source] ? " hidden" : "") + '" data-i="' + i +
+    '" data-src="' + esc(it.source) + '" title="' + esc(who + (it.posted ? " · " + it.posted.slice(0, 10) : "")) + '">' +
     picture + (it.video && it.thumb ? '<span class="gal-play">' + icon("play") + "</span>" : "") +
-    '<span class="gal-tag">' + esc(it.source) + "</span>" +
+    '<span class="gal-tag">' + esc(who) + "</span>" +
     (it.saved ? '<span class="gal-saved" title="Downloaded">' + icon("check") + "</span>" : "") + "</button>";
 }
 
+// One chip per site the open gallery has a source of: switching it off hides its posts and
+// stops asking it; the choice is kept for the next artist.
 function galSources(list) {
-  $("gal-sources").innerHTML = list.map(function (s) {
-    return '<button type="button" class="chip' + (G.hidden[s.id] ? " off" : "") + '" data-galsrc="' + s.id +
-      '" title="' + esc(s.error ? s.label + ": " + s.error : "Show or hide " + s.label + " – " + s.url) + '"><i class="dot ' +
-      (s.error ? "warn" : s.state === "done" ? "ok" : "blank") + '"></i>' + esc(s.label) + "</button>";
+  var sites = [];
+  list.forEach(function (s) { if (sites.indexOf(s.label) < 0) sites.push(s.label); });
+  $("gal-sources").innerHTML = sites.map(function (label) {
+    var of = list.filter(function (s) { return s.label === label; });
+    var bad = of.filter(function (s) { return s.error; });
+    var tip = bad.length ? label + ": " + bad[0].error : "Show or hide " + label + (G.all ? " (" + plural(of.length, "source") + ")" : "");
+    return '<button type="button" class="chip' + (G.hidden[label] ? " off" : "") + '" data-galsrc="' + esc(label) +
+      '" title="' + esc(tip) + '"><i class="dot ' + (bad.length ? "warn" : of.every(function (s) { return s.state === "done"; }) ? "ok" : "blank") +
+      '"></i>' + esc(label) + "</button>";
   }).join("");
 }
 
@@ -628,7 +708,7 @@ function viewItem(i) {
       else { img.onerror = null; if (small) img.remove(); }
     };
   }
-  $("gal-info").textContent = [it.source, it.posted ? new Date(it.posted).toLocaleString() : "",
+  $("gal-info").textContent = [G.all ? it.artist : "", it.source, it.posted ? new Date(it.posted).toLocaleString() : "",
     it.w ? it.w + " × " + it.h : "", (i + 1) + " / " + G.items.length + (G.done ? "" : "+")].filter(Boolean).join(" · ");
   var busy = !!G.downloading[it.id];
   $("gal-download").disabled = it.saved || busy;
@@ -641,7 +721,7 @@ function viewItem(i) {
 function step(by) {
   if (!G) return;
   var i = G.view;
-  do { i += by; } while (G.items[i] && G.hidden[G.items[i].src]);
+  do { i += by; } while (G.items[i] && G.hidden[G.items[i].source]);
   if (G.items[i]) viewItem(i);
 }
 
@@ -672,11 +752,13 @@ $("gal-grid").addEventListener("error", function (e) {
 $("gal-sources").addEventListener("click", function (e) {
   var chip = e.target.closest("[data-galsrc]");
   if (!chip || !G) return;
-  var id = +chip.dataset.galsrc;
-  G.hidden[id] = !G.hidden[id];
-  chip.classList.toggle("off", !!G.hidden[id]);
-  $$('#gal-grid .gal-tile[data-src="' + id + '"]').forEach(function (t) { t.classList.toggle("hidden", !!G.hidden[id]); });
-  if (!G.hidden[id]) { galWatch(); moreGallery(); }
+  var label = chip.dataset.galsrc;
+  G.hidden[label] = !G.hidden[label];
+  try { localStorage.setItem(BR_HIDDEN, JSON.stringify(G.hidden)); } catch (e2) {}
+  chip.classList.toggle("off", !!G.hidden[label]);
+  $$("#gal-grid .gal-tile").forEach(function (t) { if (t.dataset.src === label) t.classList.toggle("hidden", !!G.hidden[label]); });
+  if (!G.hidden[label]) { G.done = false; galWatch(); }
+  moreGallery();
 });
 $("gal-view").addEventListener("click", function (e) {
   var b = e.target.closest("[data-gal]");
@@ -698,7 +780,7 @@ $("gal-view").addEventListener("click", function (e) {
       var tile = document.querySelector('#gal-grid .gal-tile[data-i="' + i + '"]');
       if (tile) { tile.outerHTML = tileHtml(d.item, i); galWatch(); }
       if (g.view === i) viewItem(i);
-      toast(d.kept ? "Saved in " + g.artist.name + "'s folder" : "Not saved: the same picture is already in the folder");
+      toast(d.kept ? "Saved in " + d.item.artist + "'s folder" : "Not saved: the same picture is already in the folder");
       load();
     }).catch(function (err) {
       fail(err);
@@ -709,20 +791,32 @@ $("gal-view").addEventListener("click", function (e) {
   }
 });
 $("gal-size").addEventListener("input", function () { $("gal-grid").style.setProperty("--gal", this.value + "px"); });
-$("dlg-gallery").addEventListener("keydown", function (e) {
-  if ($("gal-view").classList.contains("hidden")) return;
-  if (e.key === "ArrowLeft") { e.preventDefault(); step(-1); }
-  else if (e.key === "ArrowRight") { e.preventDefault(); step(1); }
+// The large view: arrows step, Esc closes it (the keys of the card grid do not apply here).
+document.addEventListener("keydown", function (e) {
+  if (S.view !== "browse" || document.querySelector("dialog[open]")) return;
+  var open = !$("gal-view").classList.contains("hidden");
+  if (e.key === "Escape" && open) { e.preventDefault(); e.stopPropagation(); closeView(); }
+  else if (open && e.key === "ArrowLeft") { e.preventDefault(); step(-1); }
+  else if (open && e.key === "ArrowRight") { e.preventDefault(); step(1); }
+}, true);
+$("view-cards").addEventListener("click", function () { setView("cards"); });
+$("view-browse").addEventListener("click", function () { setView("browse"); });
+$("br-search").addEventListener("input", renderBrowseList);
+$("br-list").addEventListener("click", function (e) {
+  var b = e.target.closest("[data-id]");
+  if (b) browseOpen(+b.dataset.id);
 });
-// Esc closes the large view first, the gallery after.
-$("dlg-gallery").addEventListener("cancel", function (e) {
-  if (!$("gal-view").classList.contains("hidden")) { e.preventDefault(); closeView(); }
-});
-$("dlg-gallery").addEventListener("close", function () {
-  closeView();
-  if (G && G.id) api("POST", "/api/gallery/close", { gallery: G.id }).catch(function () {});
-  G = null;
-  $("gal-grid").innerHTML = "";
+// Download all: the card is synced, but only through the sources that are switched on.
+$("br-download").addEventListener("click", function () {
+  if (!G || G.all) return;
+  var ids = (G.sources || []).filter(function (s) { return !G.hidden[s.label]; }).map(function (s) { return s.id; });
+  if (!ids.length) return toast("Switch on at least one source first.", true);
+  var b = this;
+  b.disabled = true;
+  api("POST", "/api/sync", { artist_id: G.artist.id, sources: ids }).then(function (d) {
+    toast(d.added ? "Downloading from " + plural(ids.length, "source") + "…" : "This card is syncing or queued already.");
+    lastKey = ""; return api("GET", "/api/sync");
+  }).then(function (s) { S.sync = s; renderBrowseHead(); }).catch(fail).then(function () { b.disabled = false; });
 });
 
 // ---- the card dialog -------------------------------------------------------

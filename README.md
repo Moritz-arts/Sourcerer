@@ -61,13 +61,17 @@ Open Anyway**.
    the file's own name. Cards wait in a queue; a running one can be cancelled.
    The bar at the bottom shows progress, speed and the queue; **Activity**
    opens the log.
-3. **Gallery** (the picture button on a card, `G`, or the card's menu) —
-   everything the card's sources show, merged into one stream, newest
-   first, straight from the sites: nothing is saved unless you ask. Scroll
-   and it asks the sites for more; click a picture to see it large (arrow
-   keys step through), **Download** puts that one file into the card's
-   folder the way a sync would, **Open post** opens it on the site. The
-   chips at the top show or hide a source. Most pictures come from the
+3. **Browse** (the *Browse* switch at the top, or the picture button on a card,
+   `G`) — the artists you follow on the left, their posts on the right,
+   everything their sources show merged into one stream, newest first,
+   straight from the sites: nothing is saved unless you ask. **All artists**
+   is one timeline over every card. The chips at the top switch whole sites on
+   and off (Pixiv, X, Booru …); a site that is off is not asked at all, and
+   the choice stays when you pick another artist. Scroll and it asks the
+   sites for more; click a picture to see it large (arrow keys step through),
+   **Download** puts that one file into the artist's folder the way a sync
+   would, **Open post** opens it on the site, and **Download all** syncs the
+   artist through the sites that are switched on. Most pictures come from the
    sites' own image servers; those that need a login or a Referer (Pixiv,
    Gelbooru, forums) are fetched by Sourcerer and kept in memory only.
 4. **Settings** (the gear) — library folder, file names, automatic sync,

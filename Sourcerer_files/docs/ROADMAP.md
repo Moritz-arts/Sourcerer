@@ -175,6 +175,17 @@ add the one that replaced it.
   pre-selected Gelbooru confused; the gallery and its download were slow;
   cards should show the newest pictures without downloading them first.
 
+- 2026-10-15 — **Browse**, a second view beside the cards (*Cards | Browse*):
+  the artists the user follows on the left, their posts on the right, from
+  every source at once, with a filter by site and a download of one picture
+  or of everything the switched-on sites have. "All artists" is one timeline
+  over every card. It is the gallery moved out of its dialog into the window,
+  not a second implementation. — The user wants "Instagram, but from all
+  platforms": follow favourite artists across sites in one app, and download
+  from the sources they choose, or all. Pikura (GPL-3.0, pixiv only) was the
+  picture of the layout; no code taken. Next: a cached timeline so "All
+  artists" opens without asking every site (see below).
+
 ## Done
 
 - [x] Repository workshop: CLAUDE.md, docs, version workflow
@@ -226,6 +237,9 @@ add the one that replaced it.
 - [x] Gallery faster: sources asked at the same time, the next page fetched ahead,
       small pictures through their own lane, a download ahead of the queue
 - [x] Cards show the 4 newest posts of their sources without any download
+- [x] Browse: artists left, their posts from every source right, "All artists"
+      as one timeline, a site filter, download one picture or everything from
+      the sites that are on
 
 ## Next
 
@@ -244,3 +258,8 @@ add the one that replaced it.
       newest pages again (gallery-dl's cursor).
 - [ ] Quiet hours: no automatic sync of a logged-in site at night.
 - [ ] Gallery: a filter by date.
+- [ ] Browse: "All artists" reads every source's first page live. A cached
+      timeline (the first pages kept by the background worker that already
+      fetches the cards' previews) would open at once and ask the login sites
+      less; downloads from it need the sites' `Media.fetch` rebuilt.
+- [ ] Browse: select several pictures and download them together.

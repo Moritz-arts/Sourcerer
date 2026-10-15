@@ -390,7 +390,9 @@ def avatar(artist_id):
 def start_sync():
     body = request.get_json(silent=True) or {}
     ids = [int(body["artist_id"])] if body.get("artist_id") else None
-    return jsonify(added=sync.enqueue(ids))
+    # sources: only these of the card (Browse: download what the filter shows).
+    only = [int(i) for i in body.get("sources") or []] if ids else None
+    return jsonify(added=sync.enqueue(ids, only=only))
 
 
 @app.post("/api/sync/cancel")
@@ -444,7 +446,8 @@ def _own_page():
 @app.post("/api/gallery/open")
 def gallery_open():
     try:
-        return jsonify(gallery.open_gallery(int((request.get_json(force=True) or {}).get("artist_id") or 0)))
+        # No artist: every card (All artists).
+        return jsonify(gallery.open_gallery(int((request.get_json(force=True) or {}).get("artist_id") or 0) or None))
     except KeyError:
         abort(404)
 
@@ -453,7 +456,7 @@ def gallery_open():
 def gallery_more():
     body = request.get_json(force=True) or {}
     try:
-        return jsonify(gallery.more(body.get("gallery") or "", body.get("n") or gallery.PAGE))
+        return jsonify(gallery.more(body.get("gallery") or "", body.get("n") or gallery.PAGE, body.get("off")))
     except KeyError:
         return jsonify(error="This gallery was closed; open it again."), 410
 
