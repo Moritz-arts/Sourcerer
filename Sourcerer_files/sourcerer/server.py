@@ -402,7 +402,7 @@ def cancel_sync():
 
 @app.get("/api/sync")
 def sync_status():
-    return jsonify(sync.status())
+    return jsonify(dict(sync.status(), pauses=net.pauses()))
 
 
 @app.get("/api/thumb/<int:file_id>")
@@ -480,7 +480,8 @@ def gallery_file(file_id):
 def gallery_download():
     body = request.get_json(force=True) or {}
     try:
-        return jsonify(item=gallery.download(body.get("gallery") or "", int(body.get("item") or 0)))
+        item, kept = gallery.download(body.get("gallery") or "", int(body.get("item") or 0))
+        return jsonify(item=item, kept=kept)
     except KeyError:
         return jsonify(error="This gallery was closed; open it again."), 410
     except Exception as e:
@@ -537,6 +538,8 @@ def save_settings():
             return jsonify(error="Unknown setting: %s." % key), 400
         clean[key] = value
     for key, value in clean.items():
+        if key in ("auto_sync", "auto_hours") and db.get_setting(key) != value:
+            db.set_setting("next_auto", "")        # drawn from the old interval: draw anew when due
         db.set_setting(key, value)
     net.configure(per_host=db.setting_int("per_host", 1, 8), pace_ms=db.setting_int("pace_ms", 0, 5000))
     return get_settings()
@@ -603,7 +606,13 @@ def _login_changed(key, how="new"):
     """A first login opens older posts the early stop would never reach again:
     the sources it covers walk their whole history on the next sync. Not after
     a renewed login (the same posts as before) or a logout, and not on X or
-    Bluesky, where a login shows nothing more -- a walk there is only risk."""
+    Bluesky, where a login shows nothing more -- a walk there is only risk.
+    Any new login also ends a rest the old one's refusals or a bot check began."""
+    if how in ("new", "renewed"):
+        try:
+            net.lift(sync._site_url(key))
+        except (KeyError, IndexError):
+            pass
     if how != "new" or not key.startswith(REVEALS):
         return
     with db.connect() as con:

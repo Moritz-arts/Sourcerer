@@ -58,22 +58,30 @@ def account_key(url):
     return "mastodon:" + _parse(url)[0].lower()
 
 
-def _auth(server):
+_dead = {}      # server -> the token it refused: not sent again (a new login is another token)
+
+
+def _auth(server, force=False):
     data = accounts.secrets("mastodon:" + server.lower())
-    return {"Authorization": "Bearer " + data["token"]} if data else None
+    if not data or (not force and _dead.get(server.lower()) == data["token"]):
+        return None
+    return {"Authorization": "Bearer " + data["token"]}
 
 
 def _api(server, path, params=None):
-    url, auth = "https://%s/api/v1/%s" % (server, path), _auth(server)
+    check = path == "accounts/verify_credentials"
+    url, auth = "https://%s/api/v1/%s" % (server, path), _auth(server, force=check)
     try:
         try:
             return net.get_json(url, params, headers=auth)
         except requests.HTTPError as e:
             # A token the server took back makes even public reads a 401: read
-            # as a visitor then. The account check says the login ran out.
-            if not (auth and path != "accounts/verify_credentials" and
-                    e.response is not None and e.response.status_code == 401):
+            # as a visitor then. The account check says the login ran out. A
+            # refused login is counted by net (three in a row rest the whole
+            # server), so the token goes once only, not with every request.
+            if not (auth and not check and e.response is not None and e.response.status_code == 401):
                 raise
+            _dead[server.lower()] = auth["Authorization"][7:]
             return net.get_json(url, params)
     except requests.HTTPError as e:
         # 401: a server whose API is for its users only (or a token it no
