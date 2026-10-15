@@ -47,6 +47,15 @@ function utc(iso) {
   // SQLite's datetime('now') is UTC without a zone mark.
   return iso ? new Date(iso.replace(" ", "T") + (/[zZ+]/.test(iso.slice(10)) ? "" : "Z")) : null;
 }
+// "14:30", "14:30 tomorrow" or "14:30 on Fri, 3 Oct" for a Unix time.
+function restUntil(sec) {
+  var until = new Date(sec * 1000), now = new Date();
+  var days = Math.round((new Date(until.getFullYear(), until.getMonth(), until.getDate()) -
+                         new Date(now.getFullYear(), now.getMonth(), now.getDate())) / 864e5);
+  return until.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) +
+    (days === 1 ? " tomorrow" : days > 1 ? " on " + until.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" }) : "");
+}
+
 function ago(iso) {
   var d = utc(iso);
   if (!d || isNaN(d)) return "never";
@@ -262,13 +271,7 @@ function renderActivity() {
   });
   // A site that said stop rests; Sourcerer asks it nothing until then.
   (S.pauses || []).filter(function (p) { return p.until * 1000 > Date.now(); }).forEach(function (p) {
-    var until = new Date(p.until * 1000), now = new Date();
-    var days = Math.round((new Date(until.getFullYear(), until.getMonth(), until.getDate()) -
-                           new Date(now.getFullYear(), now.getMonth(), now.getDate())) / 864e5);
-    html += '<span class="pill rest" title="' + esc(p.why) + '">' + icon("clock") + esc(p.name) + " rests until " +
-      esc(until.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })) +
-      (days === 1 ? " tomorrow" : days > 1 ? " on " + esc(until.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" })) : "") +
-      "</span>";
+    html += '<span class="pill rest" title="' + esc(p.why) + '">' + icon("clock") + esc(p.name) + " rests until " + esc(restUntil(p.until)) + "</span>";
   });
   if (S.settings.auto_sync === "1") {
     html += '<span class="pill" title="Settings › Sync">' + icon("clock") + "Auto-sync every " +
@@ -1053,6 +1056,7 @@ function accState(a) {
   var expired = a.logged_in && a.state === "expired";
   return a.pending === "waiting" ? "Waiting for you to log in in the other window…"
     : expired ? "The login has run out" + (a.checked ? " (noticed " + ago(a.checked) + ")" : "") + " – log in again."
+    : a.logged_in && a.rest ? "Works, but the site rests until " + restUntil(a.rest.until) + ": " + a.rest.why
     : a.logged_in ? "Logged in" + (a.user ? " as " + a.user : "") + (a.checked ? " · checked " + ago(a.checked) : "")
     : a.pending.indexOf("failed: ") === 0 ? a.pending.slice(8)
     : a.pending === "cancelled" ? "Login window closed before the login was finished."
@@ -1084,7 +1088,8 @@ function accBox(a, win) {
   var expired = a.logged_in && a.state === "expired", waiting = a.pending === "waiting";
   var key = esc(a.key), need = !a.logged_in || expired, fields = need && !waiting ? accFields(a) : "";
   var byWindow = a.kind === "window" || a.kind === "oauth";
-  var dot = waiting || S.accChecking[a.key] ? "checking" : expired ? "error" : a.logged_in ? "ok" : "blank";
+  // Green: the login works. Orange: it works but the site rests. Red: it ran out. Hollow: no login.
+  var dot = waiting || S.accChecking[a.key] ? "checking" : expired ? "error" : a.logged_in && a.rest ? "warn" : a.logged_in ? "ok" : "blank";
   var btns = "";
   if (!waiting) {
     if (need) {
@@ -1100,11 +1105,19 @@ function accBox(a, win) {
     if (a.kind === "window" && !win) btns += '<button type="button" data-acc="import" title="Import a cookies.txt">Import&hellip;</button>';
   }
   return '<form class="accbox' + (expired ? " expired" : "") + (a.key === S.accFocus ? " focus" : "") + '" data-key="' + key + '" data-kind="' + a.kind + '">' +
-    '<div class="acc-top"><i class="dot ' + dot + '"></i><b>' + esc(a.group || a.label) + "</b>" +
-    (a.group ? '<span class="muted small">' + esc(a.label) + "</span>" : "") + "</div>" +
-    '<p class="hint acc-state' + (expired ? " bad" : "") + '">' + esc(accState(a)) + "</p>" + fields +
-    '<p class="error">' + esc(S.accError[a.key] || "") + "</p>" +
-    '<div class="acc-btns">' + btns + "</div></form>";
+    accId(dot, a.group || a.label, a.group ? a.label : "", accState(a), dot === "warn" ? "warn" : expired ? "bad" : "") +
+    (fields ? '<div class="acc-fields">' + fields + "</div>" : "") +
+    '<div class="acc-btns">' + btns + "</div>" +
+    '<p class="error">' + esc(S.accError[a.key] || "") + "</p></form>";
+}
+
+var ACC_DOT = { ok: "Works", warn: "Works, but needs attention", error: "Ran out: log in again", blank: "Not logged in", checking: "Checking…" };
+
+// The left of a row: the status dot, the name and what is known about the login.
+function accId(dot, name, sub, state, tone) {
+  return '<div class="acc-id"><i class="dot ' + dot + '" title="' + ACC_DOT[dot] + '"></i><div class="acc-text">' +
+    '<div class="acc-top"><b>' + esc(name) + "</b>" + (sub ? '<span class="muted small">' + esc(sub) + "</span>" : "") + "</div>" +
+    '<p class="hint acc-state' + (tone ? " " + tone : "") + '">' + esc(state) + "</p></div></div>";
 }
 
 // The blank box of a kind that has to be told where to log in.
@@ -1119,12 +1132,11 @@ function accSlot(kind, d) {
       esc(s.label) + '" autocomplete="off" spellcheck="false">';
   }
   return '<form class="accbox" data-key="' + key + '" data-kind="' + s.kind + '" data-slot="' + kind + '">' +
-    '<div class="acc-top"><i class="dot blank"></i><b>' + esc(s.title) + "</b></div>" +
-    '<p class="hint acc-state">Not logged in</p>' + fields +
-    '<p class="error">' + esc(S.accError[key] || "") + "</p>" +
+    accId("blank", s.title, "", "Not logged in", "") + '<div class="acc-fields">' + fields + "</div>" +
     '<div class="acc-btns"><button type="submit" class="primary"' +
     ((S.accBusy[key] || (s.window && !d.window)) ? " disabled" : "") +
-    (s.window && !d.window ? ' title="Needs Sourcerer\'s own window"' : "") + ">Log in</button></div></form>";
+    (s.window && !d.window ? ' title="Needs Sourcerer\'s own window"' : "") + ">Log in</button></div>" +
+    '<p class="error">' + esc(S.accError[key] || "") + "</p></form>";
 }
 
 // One box per account, then the blank box of each kind with no login yet (a box that waits

@@ -233,9 +233,12 @@ Do not create releases or tags yourself, and do not push to `main`.
 ### Program
 
 - **Logins are made in Manage Accounts (`#dlg-accounts`) and nowhere else**:
-  one box per login, the fields inside the box, no "add another" line --
-  Mastodon, XenForo and Booru show one blank box (`SLOT` in `app.js`) only
-  while no login of their kind exists. Settings has no Accounts pane. The
+  one row per login, one under the other (never side by side): dot and
+  name, the fields in the middle, the buttons at the right; no "add another"
+  line -- Mastodon, XenForo and Booru show one blank row (`SLOT` in `app.js`)
+  only while no login of their kind exists. The dot: green works, orange
+  works but the site rests (`rest` in `/api/accounts`, from `net.paused`), red
+  ran out, hollow not logged in. Settings has no Accounts pane. The
   toolbar button shows `S.logins` (the ones that ran out) as a red count.
 - **The card dialog lists a site only when a login of it is saved**
   (`fields[].logged_in` in `/api/state`, an expired one counts) -- plus

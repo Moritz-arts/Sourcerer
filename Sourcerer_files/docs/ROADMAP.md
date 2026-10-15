@@ -201,7 +201,8 @@ add the one that replaced it.
 - [x] Logins for every site (Bluesky, Mastodon, boorus added), checked at
       every start; the card dialog warns about a missing login
 - [x] Boorus: Danbooru, e621, Gelbooru, Rule 34, yande.re, Konachan and more
-- [x] Manage Accounts: a box per login with a working/ran-out dot, "Check all",
+- [x] Manage Accounts: one row per login, one under the other, with a
+      green / orange (the site rests) / red (ran out) dot, "Check all",
       a red badge on the toolbar button; the card dialog lists only logged-in sites
 - [x] Account safety: a login's slow lane with random gaps and breaks,
       daily budgets, site pauses, randomised automatic syncs and login
