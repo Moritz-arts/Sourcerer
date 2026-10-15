@@ -65,6 +65,17 @@ CREATE TABLE IF NOT EXISTS failures (
     count       INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (artist_id, remote_key)
 );
+-- The newest posts of an artist's sources, as the card shows them (previews.py): what was
+-- found on the sites, with or without a download. file: the kept small copy in
+-- Userdata/Previews, NULL where the library has the picture.
+CREATE TABLE IF NOT EXISTS previews (
+    artist_id   INTEGER NOT NULL REFERENCES artists(id) ON DELETE CASCADE,
+    pos         INTEGER NOT NULL,
+    remote_key  TEXT NOT NULL,
+    posted      TEXT,
+    file        TEXT,
+    PRIMARY KEY (artist_id, pos)
+);
 CREATE TABLE IF NOT EXISTS settings (
     key    TEXT PRIMARY KEY,
     value  TEXT NOT NULL
@@ -87,6 +98,7 @@ COLUMNS = {
         "folder": "TEXT",                 # chosen on the card; NULL: <library>/<name>
         "avatar": "TEXT",                 # file name in Userdata/Avatars
         "avatar_checked": "TEXT",         # when the profile picture was last looked for
+        "previews_at": "TEXT",            # when the sites were last asked for the card's newest pictures
     },
     "sources": {
         # 'ok', 'warn' (works with a catch: login, bot check, slow down) or 'error'

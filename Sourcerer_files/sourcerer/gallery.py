@@ -6,6 +6,13 @@ time, only when the page has scrolled near the end), so it costs what a
 sync's scan costs and keeps the same limits: one request at a time and random
 gaps for a login, a site's pause, the day's budget.
 
+Speed: the sources are asked at the same time (each in its own lane, so a slow
+site -- X through gallery-dl, a forum -- no longer makes the fast ones wait),
+and a page that has something to show leaves after SLOW seconds without the
+sources that are not ready: their pictures come with the next page. A source
+whose waiting pictures run low gets its next page in the background, one page
+ahead, so scrolling does not stop at every page.
+
 Pictures: most sites' preview hosts are plain CDNs the page loads itself
 (Media.thumb / large, sent with no referrer). Those that want a Referer or a
 login (pixiv, Gelbooru, forums: Media.preview_headers) are fetched by
@@ -16,9 +23,12 @@ the library. "Download" takes the sync's own path: same names, same
 duplicate rules, the card's folder.
 """
 import collections
+import dataclasses
 import datetime
+import hashlib
 import io
 import logging
+import os
 import threading
 import time
 import uuid
@@ -30,6 +40,9 @@ MEMORY = 160 << 20           # bytes of fetched pictures kept, the oldest droppe
 IDLE = 900                   # a gallery nobody asked anything of this long is closed
 MAX_GALLERIES = 3
 PAGE = 60                    # items a page asks for at a time
+SLOW = 2.5                   # seconds the first page waits for a source that is not ready, once something can be shown
+SLOW_LATER = 0.8             # ... and every later page: the sources are mid-way, a slow one must not hold the rest up
+AHEAD = 24                   # a source with fewer pictures waiting than this is asked for its next page already
 
 _lock = threading.Lock()
 _galleries = {}
@@ -56,6 +69,20 @@ class _Source:
         self.done, self.error = self.site is None, ""
         self.last = None                      # an undated item keeps the time of the one before it
         self.turn = 0                         # when this source last gave an item (see _Gallery.more)
+        self.lock = threading.Lock()          # one request for this source's listing at a time
+        self.thread = None
+        self.closed = False
+
+    def running(self):
+        return self.thread is not None and self.thread.is_alive()
+
+    def start_fill(self):
+        """The next page, asked for in the background -- not twice at once."""
+        with self.lock:
+            if self.done or self.closed or self.running():
+                return
+            self.thread = threading.Thread(target=self.fill, daemon=True, name="gallery-source")
+            self.thread.start()
 
     def fill(self):
         """One more page from the site -- one request, or none while it rests."""
@@ -74,18 +101,25 @@ class _Source:
             self.done, self.error = True, net.reason(e)
             log.info("gallery: %s stopped: %s", self.row["url"], self.error)
             return
+        finally:
+            if self.closed:
+                self._end()
         for m in page:
             when = _when(m.posted)
             self.last = when if when is not None else self.last
             self.buffer.append((self.last, m))         # None: this source has no dates at all
 
-    def close(self):
+    def _end(self):
         # Ends a gallery-dl process (and frees X's or a forum's turn for a sync).
         if self.listing is not None:
             try:
                 self.listing.close()
             except Exception:
                 pass
+
+    def close(self):
+        self.closed = True
+        self._end()                 # a page still on its way closes it when it comes back (fill)
 
 
 class _Gallery:
@@ -108,12 +142,28 @@ class _Gallery:
                  "state": "error" if s.error else "done" if s.done and not s.buffer else "more",
                  "error": s.error} for s in self.sources]
 
+    def _settle(self, deadline, grace):
+        """Wait for the pages on their way: as long as it takes while there is nothing to show,
+        and grace seconds from the moment there is. Returns the time to stop waiting at."""
+        while any(s.running() and not s.buffer for s in self.sources):
+            now = time.monotonic()
+            if deadline is None and any(s.buffer for s in self.sources):
+                deadline = now + grace
+            if deadline is not None and now >= deadline:
+                break
+            time.sleep(0.03)
+        return deadline
+
     def more(self, n):
-        out = []
+        out, deadline = [], None
+        grace = SLOW if not self.items else SLOW_LATER
         while len(out) < n:
             for s in self.sources:                 # every source's next item is needed to sort
                 if not s.buffer and not s.done:
-                    s.fill()
+                    s.start_fill()
+            if out and deadline is None:
+                deadline = time.monotonic() + grace
+            deadline = self._settle(deadline, grace)
             live = [s for s in self.sources if s.buffer]
             if not live:
                 if out or all(s.done for s in self.sources):
@@ -134,6 +184,9 @@ class _Gallery:
             number = len(self.items) + 1
             self.items[number] = (s, m)
             out.append(self.item(number))
+        for s in self.sources:                      # the next page before it is needed
+            if not s.done and len(s.buffer) < AHEAD:
+                s.start_fill()
         return out
 
     def item(self, number):
@@ -271,7 +324,13 @@ def download(gallery_id, number):
            "file": "", "size": 0}
     with db.connect() as con:
         src = con.execute("SELECT * FROM sources WHERE id = ?", (s.row["id"],)).fetchone()
-    done = sync._fetch(g.artist, src or s.row, s.site, m, cur)
+    with _lock:
+        seen = _cache.get((gallery_id, number, "large"))
+    if seen and m.large and m.large == m.url and m.filename and not m.fetch:
+        m = _from_memory(m, *seen)             # the large view already fetched the original: no second request
+    # Somebody is waiting for this one: ahead of what waits in the site's lane, no reading break.
+    with net.interactive():
+        done = sync._fetch(g.artist, src or s.row, s.site, m, cur)
     if not done:
         raise RuntimeError("the download did not go through -- see the activity log")
     with db.connect() as con:
@@ -283,6 +342,18 @@ def download(gallery_id, number):
     if cur["new"]:
         sync.event("done", "Saved from the gallery: %s" % (m.post_url or m.url), g.artist)
     return g.item(number), kept
+
+
+def _from_memory(media, ctype, data):
+    """The item with a fetch that writes bytes already in hand, the way net.download would
+    have: (part file, sha256, extension, server's name)."""
+    def fetch(folder, progress):
+        folder.mkdir(parents=True, exist_ok=True)
+        part = folder / (".%s.part" % os.urandom(6).hex())
+        part.write_bytes(data)
+        progress(len(data))
+        return part, hashlib.sha256(data).hexdigest(), net.extension(ctype, media.url), ""
+    return dataclasses.replace(media, fetch=fetch)
 
 
 def _reaper():

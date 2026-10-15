@@ -9,6 +9,7 @@ Layers, each importing only the ones above it:
     imaging    picture fingerprints, sizes, thumbnails, avatars (Pillow)
     sources/   one module per site; each turns a URL into pages of media
     sync       runs the sources of an artist, downloads what is new, dedupes
+    previews   the newest pictures of a card, found on the sites before any download
     updater    updates and repair: Sourcerer.zip, swapped in by a helper
     server     the Flask app the window talks to (API + static files)
     desktop    main(): starts the server, opens the window or the browser

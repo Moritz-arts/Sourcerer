@@ -191,7 +191,7 @@ function cardHtml(a) {
   var thumbs = "";
   for (var i = 0; i < 4; i++) {
     thumbs += a.thumbs[i]
-      ? '<img loading="lazy" src="/api/thumb/' + a.thumbs[i].id + "?v=" + a.thumbs[i].v + '" alt="">'
+      ? '<img loading="lazy" src="' + a.thumbs[i].src + '" alt="">'
       : '<div style="background:' + (i % 2 ? c[3] : c[2]) + ';opacity:.45"></div>';
   }
   var html = '<div class="card' + (cur ? " busy" : "") + (S.selected === a.id ? " selected" : "") +
@@ -490,8 +490,9 @@ galSeen.observe($("gal-end"));
 
 // Pictures Sourcerer fetches wait in the site's polite lane, and the browser
 // opens six connections to Sourcerer at most: fifty of them asked for at once
-// held back the large view, the next page and the state poll. So two at a
-// time, those near the screen only.
+// held back the large view, the next page and the state poll. So GAL_AT_ONCE
+// at a time (the server's lane for small pictures takes four), those near the screen only.
+var GAL_AT_ONCE = 4;
 var galQueue = [], galFlight = new Set();
 var galNear = new IntersectionObserver(function (entries) {
   entries.forEach(function (e) {
@@ -504,7 +505,7 @@ var galNear = new IntersectionObserver(function (entries) {
 // galFlight: a second entry for one that already started, or a picture of a
 // closed gallery finishing late, must not take or give back a slot.
 function galPump() {
-  while (galFlight.size < 2 && galQueue.length) {
+  while (galFlight.size < GAL_AT_ONCE && galQueue.length) {
     var img = galQueue.shift();
     delete img.dataset.q;
     if (!img.isConnected || img.hasAttribute("src")) continue;
@@ -553,7 +554,8 @@ function moreGallery() {
   if (g.sources && !g.sources.some(function (s) { return !g.hidden[s.id] && s.state === "more"; })) return;
   g.busy = true;
   $("gal-end").textContent = "Asking the sites…";
-  api("POST", "/api/gallery/more", { gallery: g.id, n: 60 }).then(function (d) {
+  // The first page is only what the window shows: it is there as soon as one source answered.
+  api("POST", "/api/gallery/more", { gallery: g.id, n: g.items.length ? 60 : 24 }).then(function (d) {
     if (g !== G) return;
     g.busy = false; g.done = d.done; g.sources = d.sources;
     var start = g.items.length;
@@ -1039,17 +1041,19 @@ $$("[data-open]").forEach(function (b) {
 
 // ---- accounts ----------------------------------------------------------------
 
-// Manage Accounts: one box per login. Bluesky and the boorus log in with fields
-// in the box, the others in a window of Sourcerer's own. Mastodon, XenForo and
-// Booru have a blank box (the server, forum or site to fill in) while no login
-// of their kind exists; there is nothing to add beyond that.
+// Manage your accounts: one row per login that exists -- saved, or being made in a
+// window -- and an "Add account" button at the end. A site without a login has no row:
+// it is added by choosing its type. Bluesky and the boorus log in with fields, the
+// others in a window of Sourcerer's own.
 var accTimer = null;
-var SLOT = {
-  mastodon: { title: "Mastodon", field: "server", label: "Server", placeholder: "mastodon.social", kind: "oauth", window: true },
-  xenforo: { title: "XenForo", field: "forum", label: "Forum", placeholder: "forum.example.com", kind: "window" },
-  booru: { title: "Booru", field: "booru", kind: "api_key" }
+// What the add panel asks for besides the type: a Mastodon server or a forum is typed in,
+// a booru is chosen from the list, Bluesky takes its fields. X, Pixiv and Patreon need nothing.
+var ADD = {
+  mastodon: { field: "server", label: "Server", placeholder: "mastodon.social" },
+  xenforo: { field: "forum", label: "Forum", placeholder: "forum.example.com" }
 };
-S.accKeys = []; S.accFocus = ""; S.accScroll = false; S.accHtml = ""; S.accData = null; S.accWaiting = false;
+S.accFocus = ""; S.accScroll = false; S.accHtml = ""; S.accData = null; S.accWaiting = false; S.accWant = "";
+S.accAdding = false; S.accType = ""; S.accBooru = ""; S.accPre = ""; S.importBody = null; S.importAdd = false;
 S.accBusy = {}; S.accError = {}; S.accChecking = {};     // per box: sending, what the site said, being asked
 
 function accState(a) {
@@ -1060,7 +1064,6 @@ function accState(a) {
     : a.logged_in ? "Logged in" + (a.user ? " as " + a.user : "") + (a.checked ? " · checked " + ago(a.checked) : "")
     : a.pending.indexOf("failed: ") === 0 ? a.pending.slice(8)
     : a.pending === "cancelled" ? "Login window closed before the login was finished."
-    : a.need === "required" ? "Not logged in – " + a.label + " answers only with an API key"
     : "Not logged in";
 }
 
@@ -1088,7 +1091,7 @@ function accBox(a, win) {
   var expired = a.logged_in && a.state === "expired", waiting = a.pending === "waiting";
   var key = esc(a.key), need = !a.logged_in || expired, fields = need && !waiting ? accFields(a) : "";
   var byWindow = a.kind === "window" || a.kind === "oauth";
-  // Green: the login works. Orange: it works but the site rests. Red: it ran out. Hollow: no login.
+  // Green: the login works. Orange: it works but the site rests. Red: it ran out. Hollow: not logged in.
   var dot = waiting || S.accChecking[a.key] ? "checking" : expired ? "error" : a.logged_in && a.rest ? "warn" : a.logged_in ? "ok" : "blank";
   var btns = "";
   if (!waiting) {
@@ -1101,6 +1104,8 @@ function accBox(a, win) {
     if (a.logged_in) {
       btns += '<button type="button" data-acc="check" title="Ask the site whether the login still works"' +
         (S.accChecking[a.key] ? " disabled" : "") + ">Check</button>" + '<button type="button" data-acc="logout">Log out</button>';
+    } else {
+      btns += '<button type="button" data-acc="drop" title="Forget this attempt">Remove</button>';   // a login that failed or was closed
     }
     if (a.kind === "window" && !win) btns += '<button type="button" data-acc="import" title="Import a cookies.txt">Import&hellip;</button>';
   }
@@ -1120,42 +1125,52 @@ function accId(dot, name, sub, state, tone) {
     '<p class="hint acc-state' + (tone ? " " + tone : "") + '">' + esc(state) + "</p></div></div>";
 }
 
-// The blank box of a kind that has to be told where to log in.
-function accSlot(kind, d) {
-  var s = SLOT[kind], key = "slot:" + kind, first = d.boorus[0] || {}, fields;
-  if (kind === "booru") {
-    fields = '<select name="booru" aria-label="Booru">' + d.boorus.map(function (b) {
-      return '<option value="' + esc(b.host) + '">' + esc(b.name) + "</option>"; }).join("") + "</select>" +
-      accFields({ kind: "api_key", user_label: first.user_label, key_hint: first.key_hint, help: first.help });
-  } else {
-    fields = '<input name="' + s.field + '" type="text" placeholder="' + esc(s.label + ": " + s.placeholder) + '" aria-label="' +
-      esc(s.label) + '" autocomplete="off" spellcheck="false">';
+// The end of the list: the Add account button, or -- once it is pressed -- the row that adds one.
+// The type and, for a booru, the site start empty: nothing is chosen for the user.
+function accAdd(d) {
+  if (!S.accAdding) {
+    return '<button type="button" class="accadd" data-acc="add"><svg class="ic"><use href="#i-plus"/></svg> Add account</button>';
   }
-  return '<form class="accbox" data-key="' + key + '" data-kind="' + s.kind + '" data-slot="' + kind + '">' +
-    accId("blank", s.title, "", "Not logged in", "") + '<div class="acc-fields">' + fields + "</div>" +
-    '<div class="acc-btns"><button type="submit" class="primary"' +
-    ((S.accBusy[key] || (s.window && !d.window)) ? " disabled" : "") +
-    (s.window && !d.window ? ' title="Needs Sourcerer\'s own window"' : "") + ">Log in</button></div>" +
-    '<p class="error">' + esc(S.accError[key] || "") + "</p></form>";
+  var types = d.types.filter(function (t) { return t.many || !d.accounts.some(function (a) { return a.key === t.type; }); });
+  var t = types.filter(function (x) { return x.type === S.accType; })[0], fields = "", go = !!t;
+  var window_ = t && (t.kind === "window" || t.kind === "oauth");
+  if (t && t.type === "bluesky") fields = accFields({ kind: "password" });
+  else if (t && ADD[t.type]) {
+    var f = ADD[t.type];
+    fields = '<input name="' + f.field + '" type="text" placeholder="' + esc(f.label + ": " + f.placeholder) + '" aria-label="' + esc(f.label) +
+      '" value="' + esc(S.accPre) + '" autocomplete="off" spellcheck="false">';
+  } else if (t && t.type === "booru") {
+    var b = d.boorus.filter(function (x) { return x.host === S.accBooru; })[0];
+    fields = '<select name="booru" aria-label="Booru"><option value="">Choose a booru…</option>' + d.boorus.map(function (x) {
+      return '<option value="' + esc(x.host) + '"' + (x.host === S.accBooru ? " selected" : "") + ">" + esc(x.name) + "</option>"; }).join("") + "</select>" +
+      (b ? accFields({ kind: "api_key", user_label: b.user_label, key_hint: b.key_hint, help: b.help }) : "");
+    go = !!b;
+  } else if (t) {
+    fields = '<p class="hint">' + (S.window ? "A window of Sourcerer's own opens: log in to " + esc(t.label) + " there."
+      : "Sourcerer's own window is needed for this login. Import the site's cookies.txt instead.") + "</p>";
+  }
+  var needsWindow = window_ && !S.window;
+  var btns = '<button type="submit" class="primary"' + (!go || S.accBusy.add || needsWindow ? " disabled" : "") +
+    (needsWindow ? ' title="Needs Sourcerer\'s own window"' : "") + ">Log in</button>";
+  if (t && t.kind === "window" && !S.window) btns += '<button type="button" data-acc="import-add" title="Import a cookies.txt">Import&hellip;</button>';
+  btns += '<button type="button" data-acc="cancel">Cancel</button>';
+  return '<form class="accbox adding' + (S.accFocus === "add" ? " focus" : "") + '" data-key="add" data-add="1" data-kind="' + (t ? t.kind : "") + '">' +
+    '<div class="acc-id"><i class="dot blank"></i><div class="acc-text"><div class="acc-top"><b>Add account</b></div>' +
+    '<select name="type" aria-label="Type of account"><option value="">Choose the type of account…</option>' +
+    types.map(function (x) { return '<option value="' + x.type + '"' + (x.type === S.accType ? " selected" : "") + ">" + esc(x.label) + "</option>"; }).join("") +
+    "</select></div></div>" + (fields ? '<div class="acc-fields">' + fields + "</div>" : "") +
+    '<div class="acc-btns">' + btns + "</div>" +
+    '<p class="error">' + esc(S.accError.add || "") + "</p></form>";
 }
 
-// One box per account, then the blank box of each kind with no login yet (a box that waits
-// for a login -- a card's link, a mistyped forum -- does not count), in the card dialog's order.
+// One row per account there is, then the end of the list.
 function accBoxes(d) {
-  var order = S.fields.map(function (f) { return f.label.toLowerCase(); });
-  var boxes = d.accounts.map(function (a) { return { kind: a.key.split(":")[0], html: accBox(a, d.window), on: a.logged_in }; });
-  Object.keys(SLOT).forEach(function (kind) {
-    if (!boxes.some(function (b) { return b.kind === kind && b.on; })) boxes.push({ kind: kind, html: accSlot(kind, d) });
-  });
-  boxes.sort(function (x, y) { return order.indexOf(x.kind) - order.indexOf(y.kind); });
-  return boxes.map(function (b) { return b.html; }).join("");
+  return d.accounts.map(function (a) { return accBox(a, d.window); }).join("") + accAdd(d);
 }
-
-function addKey(key) { if (S.accKeys.indexOf(key) < 0) S.accKeys.push(key); }
 
 function openAccounts(key) {
   closeMenu();
-  if (key) { S.accFocus = key; S.accScroll = true; addKey(key); }
+  S.accWant = key || "";
   S.accHtml = "";
   $("acc-browser").classList.toggle("hidden", S.window);
   if (!$("dlg-accounts").open) $("dlg-accounts").showModal();
@@ -1164,16 +1179,29 @@ function openAccounts(key) {
 
 function loadAccounts() {
   clearTimeout(accTimer);
-  var q = S.accKeys.map(function (k) { return "key=" + encodeURIComponent(k); }).join("&");
-  return api("GET", "/api/accounts" + (q ? "?" + q : "")).then(function (d) {
+  return api("GET", "/api/accounts").then(function (d) {
     S.accData = d;
     drawAccounts();
   }).catch(fail);
 }
 
+// A login a card's link asks for: its row when there is one, else the add panel with the
+// type (and server, forum or booru) of that link already in -- only because the link named it.
+function accWanted(d) {
+  var key = S.accWant;
+  S.accWant = "";
+  if (!key) return;
+  if (d.accounts.some(function (a) { return a.key === key; })) { S.accFocus = key; S.accScroll = true; return; }
+  var type = key.split(":")[0], host = key.split(":").slice(1).join(":");
+  S.accAdding = true; S.accType = type; S.accFocus = "add"; S.accScroll = true;
+  S.accPre = type === "mastodon" || type === "xenforo" ? host : "";
+  S.accBooru = type === "booru" ? host : "";
+}
+
 function drawAccounts() {
   var d = S.accData;
   if (!d) return;
+  accWanted(d);
   var html = accBoxes(d);
   // Asked every 1.5 s while a login window is open: redrawn only when
   // something changed, and then what is typed meanwhile stays.
@@ -1185,25 +1213,13 @@ function drawAccounts() {
     var box = document.querySelector('#acc-grid .accbox[data-key="' + S.accFocus + '"]');
     if (box) box.scrollIntoView({ block: "nearest" });
   }
-  // While a login window is open, follow it; the box turns green by itself, and
+  // While a login window is open, follow it; the row turns green by itself, and
   // when the window is gone the cards and the links learn what the login gave.
   var waiting = d.accounts.some(function (a) { return a.pending === "waiting"; });
   if (S.accWaiting && !waiting) afterAccounts();
   S.accWaiting = waiting;
   clearTimeout(accTimer);
   if (waiting) accTimer = setTimeout(loadAccounts, 1500);      // also with the dialog closed: the window may finish later
-}
-
-// A booru's own words for its user name and key, under the select of the blank box.
-function boorusHelp(form) {
-  var host = form.elements.booru.value;
-  var b = ((S.accData || {}).boorus || []).filter(function (x) { return x.host === host; })[0];
-  if (!b) return;
-  form.elements.user.placeholder = b.user_label;
-  form.elements.user.setAttribute("aria-label", b.user_label);
-  form.elements.api_key.placeholder = b.key_hint;
-  var link = form.querySelector("[data-acc=help]");
-  if (link) link.dataset.url = b.help;
 }
 
 function redrawAccounts(html) {
@@ -1219,8 +1235,9 @@ function redrawAccounts(html) {
     if (typed[id(i)] !== undefined) i.value = typed[id(i)];
     if (id(i) === at) i.focus();
   });
-  Array.prototype.forEach.call(grid.querySelectorAll("select[name=booru]"), function (sel) { boorusHelp(sel.form); });
 }
+
+function addClosed() { S.accAdding = false; S.accType = ""; S.accBooru = ""; S.accPre = ""; S.accError.add = ""; }
 
 // Back from a login: the cards, the badge and the links of an open card dialog catch up.
 function afterAccounts() {
@@ -1237,16 +1254,10 @@ function showAccounts() {
 }
 
 function accLogin(body) {
-  var show = function (key) {
-    S.accFocus = key; S.accScroll = true; addKey(key);
+  return api("POST", "/api/accounts/login", body).then(function (d) {
+    S.accFocus = d.key; S.accScroll = true;
     return loadAccounts();
-  };
-  return api("POST", "/api/accounts/login", body).then(function (d) { return show(d.key); })
-    .catch(function (e) {
-      // In the browser a forum's login comes from a cookies.txt: its box has Import….
-      if (e.data && e.data.key && /^xenforo:/.test(e.data.key)) { toast(e.message, true); return show(e.data.key); }
-      throw e;
-    });
+  });
 }
 
 // Asks the sites, one after the other, whether the logins still work.
@@ -1262,11 +1273,12 @@ function accCheck(keys) {
   }, Promise.resolve()).then(afterAccounts);
 }
 
-// From the card dialog: the login a link needs, at once where a window does it.
+// From the card dialog: the login a link needs, at once where a window does it; else the add
+// panel with what the link names already in (the fields are typed there).
 function loginFor(acc, url) {
-  openAccounts(acc.key);
-  if (acc.kind === "password" || acc.kind === "api_key" || !S.window) return;   // those have their fields in the box
-  accLogin({ key: acc.key, url: url }).catch(fail);
+  var inWindow = (acc.kind === "window" || acc.kind === "oauth") && S.window;
+  openAccounts(inWindow ? "" : acc.key);
+  if (inWindow) accLogin({ key: acc.key, url: url }).catch(fail);
 }
 
 $("acc-grid").addEventListener("click", function (e) {
@@ -1275,31 +1287,52 @@ $("acc-grid").addEventListener("click", function (e) {
   e.preventDefault();
   var box = b.closest("[data-key]"), key = box ? box.dataset.key : "", act = b.dataset.acc;
   if (act === "help") return api("POST", "/api/open-url", { url: b.dataset.url }).catch(fail);
-  if (act === "import") { S.importKey = key; $("acc-file").value = ""; return $("acc-file").click(); }
+  if (act === "add") {
+    S.accAdding = true; S.accType = ""; S.accFocus = "add"; S.accScroll = true;
+    drawAccounts();
+    var sel = $("acc-grid").querySelector("select[name=type]");
+    return sel && sel.focus();
+  }
+  if (act === "cancel") { addClosed(); return drawAccounts(); }
+  if (act === "import") { S.importBody = { key: key }; S.importAdd = false; $("acc-file").value = ""; return $("acc-file").click(); }
+  if (act === "import-add") {
+    var f = b.form, type = f.elements.type.value;
+    if (type === "xenforo") {
+      if (!f.elements.forum.value.trim()) return f.elements.forum.focus();
+      S.importBody = { forum: f.elements.forum.value };
+    } else S.importBody = { key: type };
+    S.importAdd = true;
+    $("acc-file").value = "";
+    return $("acc-file").click();
+  }
   if (act === "check") return accCheck([key]);
   if (act === "login") {
     b.disabled = true;
     return accLogin({ key: key }).catch(fail).then(function () { b.disabled = false; });
   }
-  if (act === "logout") {
-    if (!confirm("Log out? Sourcerer forgets what it kept for this login.")) return;
+  if (act === "logout" || act === "drop") {
+    if (act === "logout" && !confirm("Log out? Sourcerer forgets what it kept for this login.")) return;
     b.disabled = true;
     api("POST", "/api/accounts/logout", { key: key }).then(function () {
-      S.accKeys = S.accKeys.filter(function (k) { return k !== key; });
       return loadAccounts();
     }).then(afterAccounts).catch(fail).then(function () { b.disabled = false; });
   }
 });
 $("acc-grid").addEventListener("change", function (e) {
-  if (e.target.name === "booru") boorusHelp(e.target.form);
+  var add = e.target.form && e.target.form.dataset.add;
+  if (add && e.target.name === "type") { S.accType = e.target.value; S.accPre = ""; S.accBooru = ""; S.accError.add = ""; drawAccounts(); }
+  else if (add && e.target.name === "booru") { S.accBooru = e.target.value; drawAccounts(); }
 });
 $("acc-grid").addEventListener("submit", function (e) {
   e.preventDefault();
-  var f = e.target, key = f.dataset.key, body = f.dataset.slot ? {} : { key: key };
+  var f = e.target, key = f.dataset.key, add = !!f.dataset.add, type = add ? f.elements.type.value : "";
   if (S.accBusy[key]) return;
-  Array.prototype.forEach.call(f.elements, function (i) { if (i.name) body[i.name] = i.value; });
-  var where = f.dataset.slot && SLOT[f.dataset.slot].label ? f.elements[SLOT[f.dataset.slot].field] : null;
-  if (where && !where.value.trim()) return where.focus();
+  var body = add ? (ADD[type] || type === "booru" ? {} : { key: type }) : { key: key };
+  Array.prototype.forEach.call(f.elements, function (i) { if (i.name && i.name !== "type") body[i.name] = i.value; });
+  // A server or a forum is typed in; a booru is chosen: nothing is guessed for the user.
+  var needed = add ? (ADD[type] ? f.elements[ADD[type].field] : type === "booru" ? f.elements.booru : null) : null;
+  if (add && !type) return f.elements.type.focus();
+  if (needed && !needed.value.trim()) return needed.focus();
   // The grid may be redrawn meanwhile: the box is found again by its key.
   var show = function () {
     var box = document.querySelector('#acc-grid .accbox[data-key="' + key + '"]');
@@ -1312,10 +1345,11 @@ $("acc-grid").addEventListener("submit", function (e) {
   // Bluesky and the boorus are logged in when the answer comes; the others open a window.
   var instant = f.dataset.kind === "password" || f.dataset.kind === "api_key";
   (instant ? api("POST", "/api/accounts/login", body).then(function (d) {
-    S.accFocus = d.key; S.accScroll = true; addKey(d.key);
+    S.accFocus = d.key; S.accScroll = true;
     toast("Logged in");
+    if (add) addClosed();
     return loadAccounts().then(afterAccounts);
-  }) : accLogin(body)).then(function () {
+  }) : accLogin(body).then(function () { if (add) addClosed(); return loadAccounts(); })).then(function () {
     delete S.accBusy[key]; show();
   }, function (err) {
     delete S.accBusy[key]; S.accError[key] = err.message; show();
@@ -1323,11 +1357,13 @@ $("acc-grid").addEventListener("submit", function (e) {
 });
 $("acc-file").addEventListener("change", function () {
   var file = this.files[0];
-  if (!file) return;
+  if (!file || !S.importBody) return;
   file.text().then(function (text) {
-    return api("POST", "/api/accounts/import", { key: S.importKey, text: text });
+    return api("POST", "/api/accounts/import", Object.assign({ text: text }, S.importBody));
   }).then(function (d) {
     toast("Imported: " + plural(d.cookies, "cookie"));
+    if (S.importAdd) addClosed();
+    S.accFocus = d.key || ""; S.accScroll = true;
     return loadAccounts().then(afterAccounts);
   }).catch(fail);
 });
@@ -1423,9 +1459,8 @@ $$("[data-repair]").forEach(function (b) {
 // ---- the rest --------------------------------------------------------------
 
 $("dlg-accounts").addEventListener("close", function () {
-  // A box nobody logged in to is forgotten; one whose login window is still open is followed on.
-  var open = ((S.accData || {}).accounts || []).filter(function (a) { return a.pending === "waiting"; }).map(function (a) { return a.key; });
-  S.accFocus = ""; S.accHtml = ""; S.accKeys = S.accKeys.filter(function (k) { return open.indexOf(k) >= 0; });
+  // An unfinished add is dropped; a login window that is still open is followed on.
+  addClosed(); S.accFocus = ""; S.accHtml = "";
   if (S.accWaiting) loadAccounts(); else clearTimeout(accTimer);
   afterAccounts().then(function () {
     // Back from a login: the links that wanted one say what they get now.

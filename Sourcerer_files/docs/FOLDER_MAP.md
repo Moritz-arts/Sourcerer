@@ -17,7 +17,7 @@ Sourcerer/                        <- what Sourcerer.zip unpacks to; move it free
     ├─ requirements.txt           the packages, one list for all three systems
     ├─ sourcerer/                 the Python package; layers listed in __init__.py
     │   ├─ config.py              paths, version, user agent, setting defaults
-    │   ├─ db.py                  SQLite: artists, sources, files, failed files, settings
+    │   ├─ db.py                  SQLite: artists, sources, files, failed files, card previews, settings
     │   │                           (also a site's pause, the day's requests, the next auto sync)
     │   ├─ net.py                 HTTP (requests, TLS 1.3 first): JSON, downloads, per-site
     │   │                           limits, a login's slow lane, site pauses, daily budgets
@@ -36,6 +36,8 @@ Sourcerer/                        <- what Sourcerer.zip unpacks to; move it free
     │   │                           automatic sync, link checks, profile pictures
     │   ├─ gallery.py             the gallery: all sources of a card in one stream,
     │   │                           straight from the sites, pictures in memory only
+    │   ├─ previews.py            the 4 newest pictures on a card, downloaded or not:
+    │   │                           first page of each source, small copies kept
     │   ├─ accounts.py            logins: login window, cookies.txt, saved cookies
     │   ├─ updater.py             updates and repair: Sourcerer.zip, the helper
     │   ├─ server.py              Flask: /api/* and the page
@@ -61,6 +63,8 @@ Sourcerer/                        <- what Sourcerer.zip unpacks to; move it free
         ├─ Logs/                  sourcerer.log; update.log (the update helper's
         │                           steps); console.log (the program's own output)
         ├─ Avatars/               profile pictures, <artist>.jpg
+        ├─ Previews/              a cache: <artist id>/<hash>.jpg, the small pictures
+        │                           cards show of posts that are not downloaded
         ├─ gallery-dl/            gallery-dl's cache (its login state) and the
         │                           config of a running listing (mode 600, deleted after)
         ├─ _update/               an update: new/ unpacked, old/ the version it
