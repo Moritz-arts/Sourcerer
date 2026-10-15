@@ -4,7 +4,7 @@ Files are fetched as the original blob from the account's own server (its
 PDS), not from the CDN, which hands out recompressed JPEGs and video as a
 stream playlist. The blob's id (its CID) names the file and keys it.
 
-A login (Settings > Accounts) takes the handle and an app password -- a
+A login (Manage Accounts) takes the handle and an app password -- a
 password Bluesky makes for apps, which can be revoked on its own; the
 account's real password is refused before it is sent. Logged in, the feed is
 read through the user's own server, as Bluesky's app does. Today the public

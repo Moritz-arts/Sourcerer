@@ -12,7 +12,7 @@ dialog (sources with a live dot each, own folder, master source, folder
 layout, what to do with the same picture from two sources), a queued
 background sync that downloads from Bluesky, Mastodon, Pixiv, Patreon, X,
 XenForo forums and boorus, a gallery per card (all its sources, straight from
-the sites), a login for every site (checked at each start),
+the sites), a login for every site (Manage Accounts, checked at each start),
 settings like TrackImage's, and an
 updater with Stable/Beta and repair; and the workshop —
 these notes, the docs and the automation that versions every push. `Sourcerer_files/sourcerer/__init__.py`
@@ -232,6 +232,17 @@ Do not create releases or tags yourself, and do not push to `main`.
 
 ### Program
 
+- **Logins are made in Manage Accounts (`#dlg-accounts`) and nowhere else**:
+  one box per login, the fields inside the box, no "add another" line --
+  Mastodon, XenForo and Booru show one blank box (`SLOT` in `app.js`) only
+  while no login of their kind exists. Settings has no Accounts pane. The
+  toolbar button shows `S.logins` (the ones that ran out) as a red count.
+- **The card dialog lists a site only when a login of it is saved**
+  (`fields[].logged_in` in `/api/state`, an expired one counts) -- plus
+  every link already on the card. Hiding a row must never drop a saved
+  source: `renderSources` keeps a row with a link, `filledRows` still saves it.
+- **`net.LOGIN` is only a message; code matches `net.LOGIN_PREFIX`.** Errors
+  stored by older versions end differently, and the dot must still read them.
 - **A new site is one module in `sourcerer/sources/`** with `KIND`, `LABEL`,
   `match(url)` and `pages(url)` yielding lists of `Media`, newest first, then
   added to `SITES`. Always fetch the original file, never a preview: Bluesky's

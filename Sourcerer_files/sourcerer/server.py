@@ -44,7 +44,7 @@ def _status(s):
     if not s["supported"]:
         return "unsupported"
     if s["last_error"]:
-        if s["last_error"].startswith(net.LOGIN):
+        if s["last_error"].startswith(net.LOGIN_PREFIX):
             return "login"
         return "warn" if s.get("last_level") == "warn" else "error"
     return "ok" if s["last_checked"] else "unknown"
@@ -243,10 +243,16 @@ def quit_app():
 
 @app.get("/api/state")
 def state():
+    rows = accounts.accounts()
+    # The card dialog lists the sites with a saved login (even one that ran out:
+    # the link then says so) -- a site is its accounts' key before the colon.
+    have = {a["key"].split(":", 1)[0] for a in rows if a["logged_in"] and _shown(a["key"])}
+    on = {s.LABEL: s.KIND in have for s in sources.SITES}
     return jsonify(version=config.VERSION, library=sync.library(), sep=os.sep,
                    sites=[s.LABEL for s in sources.SITES], settings=db.settings(),
-                   fields=[{"label": label, "example": example} for label, example in sources.FIELDS],
-                   logins=accounts.problems(), pauses=net.pauses(),
+                   fields=[{"label": label, "example": example, "logged_in": on.get(label, False)}
+                           for label, example in sources.FIELDS],
+                   logins=accounts.problems(rows), pauses=net.pauses(),
                    artists=_artists(), sync=sync.status(), window=WINDOW is not None)
 
 
@@ -268,7 +274,7 @@ def detect():
                     handle=p.get("handle", ""), from_site=bool(p.get("name")) and not p.get("from_link"))
     except Exception as e:
         why = net.reason(e)
-        info.update(status="login" if why.startswith(net.LOGIN) else net.level(e), error=why)
+        info.update(status="login" if why.startswith(net.LOGIN_PREFIX) else net.level(e), error=why)
     info["account"] = note = _login_note(url, info["status"])
     if note and note["need"] == "required" and info["status"] == "ok":
         # The account is there, but nothing downloads without the login: yellow, not green.
@@ -655,7 +661,7 @@ def _account_key(body):
 
 
 def _shown(key):
-    """A key Settings may list: one a site of Sourcerer's would use."""
+    """A key Manage Accounts may list: one a site of Sourcerer's would use."""
     from .sources import booru
     try:
         how = accounts.kind(key)
@@ -667,7 +673,7 @@ def _shown(key):
 
 @app.get("/api/accounts")
 def get_accounts():
-    """Every login, and those of the keys asked for (a booru picked in Settings,
+    """Every login, and those of the keys asked for (a booru typed in Manage Accounts,
     a link in the card dialog that is not saved yet)."""
     from .sources import booru
     keys = [k for k in _used_keys() + request.args.getlist("key") if k and _shown(k)]
@@ -675,7 +681,8 @@ def get_accounts():
     for a in rows:
         if a["kind"] == "api_key":
             a.update(booru.login_help(a["key"]))
-    return jsonify(accounts=rows, window=WINDOW is not None, boorus=booru.LOGIN_SITES)
+    boorus = [dict(b, **booru.login_help("booru:" + b["host"])) for b in booru.LOGIN_SITES]
+    return jsonify(accounts=rows, window=WINDOW is not None, boorus=boorus)
 
 
 @app.post("/api/accounts/login")

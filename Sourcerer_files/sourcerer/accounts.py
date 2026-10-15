@@ -54,7 +54,7 @@ SITES = {
     "pixiv": ("Pixiv", "https://accounts.pixiv.net/login", ("pixiv.net",),
               lambda c: bool(re.match(r"\d+_", c.get("PHPSESSID", "")))),
 }
-# Settings' order: the big sites by name, then one row per server, forum and booru.
+# Manage Accounts' order: the big sites by name, then one row per server, forum and booru.
 ORDER = ["bluesky", "mastodon", "pixiv", "x", "patreon", "xenforo", "booru"]
 GROUPS = {"mastodon": "Mastodon", "xenforo": "XenForo", "booru": "Booru"}
 # XenForo forums are one account each, keyed "xenforo:<host>". The cookie
@@ -232,10 +232,11 @@ def mark(key, ok, why="", stamp=None):
         log.info("%s: login %s%s", key, data["state"], (" (%s)" % why) if why else "")
 
 
-def problems():
-    """The logins that ran out: [{key, label, why}], for the warning in the window."""
+def problems(rows=None):
+    """The logins that ran out: [{key, label, why}], for the warning in the window.
+    rows: accounts() when the caller has it already."""
     return [{"key": a["key"], "label": a["label"], "why": a["why"]}
-            for a in accounts() if a["state"] == "expired"]
+            for a in (accounts() if rows is None else rows) if a["state"] == "expired"]
 
 
 def logout(key):
@@ -317,7 +318,7 @@ def secrets(key):
 
 
 def accounts(keys=()):
-    """Every account Settings shows: the fixed sites, then each server, forum
+    """Every account Manage Accounts shows: the fixed sites, then each server, forum
     and booru a card uses (keys) or that has a login saved."""
     have = [k for k in keys if k]
     if DIR.is_dir():

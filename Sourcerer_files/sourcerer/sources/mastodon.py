@@ -92,7 +92,7 @@ def _account(url):
     return server, _api(server, "accounts/lookup", {"acct": user})
 
 
-# ---- logging in (Settings > Accounts) ---------------------------------------------------
+# ---- logging in (Manage Accounts) ---------------------------------------------------
 
 def server_of(text):
     """The server a typed name or link stands for: baraag.net, https://baraag.net/@a."""

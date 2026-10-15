@@ -94,7 +94,8 @@ on the card until their site is supported. The dot beside each link says how it 
 works, yellow works with a catch (a login, a bot check, a site asking to slow
 down), red does not work, grey is not checked yet.
 
-**Accounts** (Settings › Accounts) has a login for every site: X needs
+**Manage Accounts** (the button beside *Sync all*) has a box for every site, with a dot
+that says whether its login works. X needs
 one, Pixiv shows R-18 works and Patreon a patron's posts only to a
 logged-in account, many forums and some Mastodon servers show their media
 to members only, and Gelbooru and Rule 34 answer only to an API key.
@@ -108,10 +109,11 @@ to members only, and Gelbooru and Rule 34 answer only to an API key.
   your account settings; for Gelbooru and Rule 34, paste the whole
   `&api_key=…&user_id=…` line.
 
-Everything stays on this computer, and no password is kept. When you add a
-link whose site wants a login you do not have yet, the card dialog says so
-under the link, with a button to log in. Every start checks all logins;
-when one runs out, the bottom bar says so until you log in again.
+Everything stays on this computer, and no password is kept. The card dialog
+lists only the sites you are logged in to; a link already on a card stays
+even when its login is gone, and says so with a button to log in. Every
+start checks all logins; when one runs out, the *Manage Accounts* button
+turns red and the bottom bar says so until you log in again.
 
 ## How Sourcerer talks to sites
 

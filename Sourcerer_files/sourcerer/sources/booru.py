@@ -204,7 +204,7 @@ def login_need(url):
 
 
 def login_help(key):
-    """What Settings shows next to a booru's login fields."""
+    """What Manage Accounts shows next to a booru's login fields."""
     host = key.split(":", 1)[1]
     engine, name, need, page, _api = BOORUS[host]
     gel = engine == "gelbooru"

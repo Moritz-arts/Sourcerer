@@ -130,10 +130,11 @@ add the one that replaced it.
   TLS 1.2 kept for hosts that lack 1.3. — baraag.net (Mastodon) and
   VerticalScope's forums refused urllib3's handshake whatever the headers;
   this one passes, and Sourcerer still says who it is.
-- 2026-10-11 — Every site has a login in Settings › Accounts, each the way
+- ~~2026-10-11 — Every site has a login in Settings › Accounts, each the way
   the site offers: its login page in the window (cookies; Mastodon: OAuth
   with a read-only token), a Bluesky app password, a booru's API key. The
-  card dialog says under a link when its site wants a login that is missing.
+  card dialog says under a link when its site wants a login that is missing.~~
+  Moved to Manage Accounts on 2026-10-15 (below); the ways to log in stay.
 - 2026-10-11 — Boorus in Sourcerer's own code on their JSON APIs, not
   gallery-dl: three engines, small and stable; a source is a tag search.
 - 2026-10-12 — Protecting logged-in accounts comes before speed: a login's
@@ -151,6 +152,16 @@ add the one that replaced it.
   path. — The user wants to browse an artist without downloading
   everything. Pikura (GPL-3.0, ideas only, no code) does the same with
   pixiv's small previews and a Referer; Sourcerer keeps no disk cache.
+
+- 2026-10-15 — Logins moved out of Settings into **Manage Accounts**, a
+  button beside *Sync all* that turns red when a login ran out: one box per
+  login with a dot (green works, red ran out, hollow not logged in), the
+  fields in the box, no "add another" lines (Mastodon, XenForo and Booru show
+  one blank box until a login of their kind exists). The card dialog lists
+  only the sites with a saved login, no longer offers "Add another link", and
+  keeps the rows of links already on the card. — The user: a link only works
+  once its account is set up, and the accounts page should be nothing but the
+  boxes.
 
 ## Done
 
@@ -190,6 +201,8 @@ add the one that replaced it.
 - [x] Logins for every site (Bluesky, Mastodon, boorus added), checked at
       every start; the card dialog warns about a missing login
 - [x] Boorus: Danbooru, e621, Gelbooru, Rule 34, yande.re, Konachan and more
+- [x] Manage Accounts: a box per login with a working/ran-out dot, "Check all",
+      a red badge on the toolbar button; the card dialog lists only logged-in sites
 - [x] Account safety: a login's slow lane with random gaps and breaks,
       daily budgets, site pauses, randomised automatic syncs and login
       checks, X's limits and locks respected, one gallery-dl per site

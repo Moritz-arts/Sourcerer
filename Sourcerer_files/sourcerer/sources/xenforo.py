@@ -1,6 +1,6 @@
 """XenForo forums: a member's media gallery (XenForo Media Gallery), an album,
 or a thread's attachments. Most forums show their media to members only:
-log in to the forum under Settings > Accounts.
+log in to the forum under Manage Accounts.
 
 Listing goes through gallery-dl's generic XenForo extractor (_gdl.py, with
 the "xenforo:" prefix that makes it work on any forum); the files are the
@@ -111,7 +111,7 @@ def pages(url):
         except _gdl.Failed as e:
             if e.slow or "409" in str(e):
                 net.pause(url, 6 * 3600, "it let only a browser through")
-                raise net.SlowDown("%s let only a browser through: log in to it under Settings > "
+                raise net.SlowDown("%s let only a browser through: log in to it under Manage "
                                    "Accounts, so Sourcerer can use your login window's pass" % host) from e
             if e.auth or "403" in str(e):
                 raise LoginRequired("this forum shows it to members only") from e

@@ -263,7 +263,7 @@ def _login_ran_out(key, label, stamp=None):
     was = (accounts.load(key) or {}).get("state")
     accounts.mark(key, False, "the site no longer accepts the login", stamp)
     if was != "expired" and (accounts.load(key) or {}).get("state") == "expired":   # once, not on every sync
-        event("error", "%s: the login has run out -- log in again under Settings > Accounts" % label)
+        event("error", "%s: the login has run out -- log in again under Manage Accounts" % label)
 
 
 def _still_logged_in(key):
@@ -564,7 +564,7 @@ def _sync_artist(artist_id, auto=False):
                 # read as a visitor when a login died, Patreon answers one as a guest.
             except Exception as e:
                 error, level = net.reason(e), net.level(e)
-                if login and error.startswith(net.LOGIN):
+                if login and error.startswith(net.LOGIN_PREFIX):
                     _login_ran_out(login, site.LABEL, stamp)
                 elif not isinstance(e, net.SlowDown):    # a pause says so itself, once
                     event("warn", "%s could not be reached: %s" % (site.LABEL, error), artist)
@@ -675,7 +675,7 @@ def _fetch(artist, src, site, media, cur):
     except Exception as e:
         reason = net.reason(e)
         login = sources.account_key(src["url"])
-        if login and reason.startswith(net.LOGIN) and accounts.logged_in(login):
+        if login and reason.startswith(net.LOGIN_PREFIX) and accounts.logged_in(login):
             _login_ran_out(login, site.LABEL)     # pixiv's /pages answers a dead login with 401
         else:
             event("warn", "Download failed: %s (%s)" % (media.post_url or media.url, reason), artist)
