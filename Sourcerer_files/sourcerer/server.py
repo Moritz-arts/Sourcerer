@@ -401,7 +401,7 @@ def cancel_sync():
 
 @app.get("/api/sync")
 def sync_status():
-    return jsonify(dict(sync.status(), pauses=net.pauses()))
+    return jsonify(dict(sync.status(), pauses=net.pauses(), previews=previews.version))
 
 
 @app.get("/api/thumb/<int:file_id>")

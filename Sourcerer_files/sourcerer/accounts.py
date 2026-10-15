@@ -326,8 +326,9 @@ def secrets(key):
 
 def accounts():
     """Every account there can be: the fixed sites, then each server, forum and booru
-    with a login saved. The caller keeps those that are logged in or being logged in."""
-    have = []
+    with a login saved or being made (a window open, closed too early, failed) -- that one
+    has no file yet. The caller keeps those that are logged in or being logged in."""
+    have = list(_pending)
     if DIR.is_dir():
         for p in DIR.glob("*.json"):
             data = load(p.stem) or {}

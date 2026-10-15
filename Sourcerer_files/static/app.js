@@ -329,7 +329,8 @@ var lastKey = "";
 function poll() {
   api("GET", "/api/sync").then(function (s) {
     var key = (s.current ? s.current.artist_id : "-") + "|" + s.running + "|" + (s.queue || []).join(",") +
-      "|" + (s.log || []).length + "|" + (s.pauses || []).map(function (p) { return p.site; }).join(",");
+      "|" + (s.log || []).length + "|" + (s.pauses || []).map(function (p) { return p.site; }).join(",") +
+      "|" + s.previews;                        // new pictures found for a card: the cards load them
     S.sync = s;
     if (s.pauses) S.pauses = s.pauses;
     if (key !== lastKey) { lastKey = key; return load(); }
@@ -1461,6 +1462,7 @@ $$("[data-repair]").forEach(function (b) {
 $("dlg-accounts").addEventListener("close", function () {
   // An unfinished add is dropped; a login window that is still open is followed on.
   addClosed(); S.accFocus = ""; S.accHtml = "";
+  $("acc-grid").innerHTML = "";      // what was typed belongs to this visit: not put back into the next one
   if (S.accWaiting) loadAccounts(); else clearTimeout(accTimer);
   afterAccounts().then(function () {
     // Back from a login: the links that wanted one say what they get now.

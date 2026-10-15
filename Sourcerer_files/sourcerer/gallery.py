@@ -119,6 +119,7 @@ class _Source:
 
     def close(self):
         self.closed = True
+        self.done = True            # a closed source has nothing more to give: more() must not wait for it
         self._end()                 # a page still on its way closes it when it comes back (fill)
 
 
@@ -139,7 +140,8 @@ class _Gallery:
 
     def state(self):
         return [{"id": s.row["id"], "label": s.label, "url": s.row["url"],
-                 "state": "error" if s.error else "done" if s.done and not s.buffer else "more",
+                 # Items still waiting are more to show, whatever a later page did (a prefetch that failed).
+                 "state": "more" if s.buffer else "error" if s.error else "done" if s.done else "more",
                  "error": s.error} for s in self.sources]
 
     def _settle(self, deadline, grace):
@@ -168,6 +170,9 @@ class _Gallery:
             if not live:
                 if out or all(s.done for s in self.sources):
                     break
+                deadline = None                     # nothing to show yet: wait for the pages on their way
+                if not any(s.running() for s in self.sources):
+                    time.sleep(0.03)                # (one just ended: ask the sources on, without spinning)
                 continue                            # a page with nothing to show: ask the sources on
             # A source with no dates (forums) takes the time of the newest dated item waiting; of
             # equal times the source that spoke longest ago goes first. Its items then alternate
@@ -350,8 +355,12 @@ def _from_memory(media, ctype, data):
     def fetch(folder, progress):
         folder.mkdir(parents=True, exist_ok=True)
         part = folder / (".%s.part" % os.urandom(6).hex())
-        part.write_bytes(data)
-        progress(len(data))
+        try:
+            part.write_bytes(data)
+            progress(len(data))
+        except BaseException:                # a half-written file is nobody's: as net.download
+            part.unlink(missing_ok=True)
+            raise
         return part, hashlib.sha256(data).hexdigest(), net.extension(ctype, media.url), ""
     return dataclasses.replace(media, fetch=fetch)
 
