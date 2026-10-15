@@ -152,6 +152,16 @@ add the one that replaced it.
   everything. Pikura (GPL-3.0, ideas only, no code) does the same with
   pixiv's small previews and a Referer; Sourcerer keeps no disk cache.
 
+- 2026-10-15 — Logins moved out of Settings into **Manage Accounts**, a
+  button beside *Sync all* that turns red when a login ran out: one box per
+  login with a dot (green works, red ran out, hollow not logged in), the
+  fields in the box, no "add another" lines (Mastodon, XenForo and Booru show
+  one blank box until a login of their kind exists). The card dialog lists
+  only the sites with a saved login, no longer offers "Add another link", and
+  keeps the rows of links already on the card. — The user: a link only works
+  once its account is set up, and the accounts page should be nothing but the
+  boxes.
+
 ## Done
 
 - [x] Repository workshop: CLAUDE.md, docs, version workflow
@@ -190,6 +200,8 @@ add the one that replaced it.
 - [x] Logins for every site (Bluesky, Mastodon, boorus added), checked at
       every start; the card dialog warns about a missing login
 - [x] Boorus: Danbooru, e621, Gelbooru, Rule 34, yande.re, Konachan and more
+- [x] Manage Accounts: a box per login with a working/ran-out dot, "Check all",
+      a red badge on the toolbar button; the card dialog lists only logged-in sites
 - [x] Account safety: a login's slow lane with random gaps and breaks,
       daily budgets, site pauses, randomised automatic syncs and login
       checks, X's limits and locks respected, one gallery-dl per site

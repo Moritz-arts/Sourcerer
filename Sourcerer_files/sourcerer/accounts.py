@@ -232,10 +232,11 @@ def mark(key, ok, why="", stamp=None):
         log.info("%s: login %s%s", key, data["state"], (" (%s)" % why) if why else "")
 
 
-def problems():
-    """The logins that ran out: [{key, label, why}], for the warning in the window."""
+def problems(rows=None):
+    """The logins that ran out: [{key, label, why}], for the warning in the window.
+    rows: accounts() when the caller has it already."""
     return [{"key": a["key"], "label": a["label"], "why": a["why"]}
-            for a in accounts() if a["state"] == "expired"]
+            for a in (accounts() if rows is None else rows) if a["state"] == "expired"]
 
 
 def logout(key):

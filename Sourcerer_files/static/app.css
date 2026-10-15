@@ -104,7 +104,8 @@ input[type=range] { accent-color: var(--fill-accent); cursor: pointer; }
 .dot.checking { animation: pulse 1s ease-in-out infinite alternate; }
 @keyframes pulse { from { opacity: .2; } to { opacity: .8; } }
 #btn-settings .dot { position: absolute; top: 3px; right: 3px; background: var(--fill-accent); opacity: 1; }
-#btn-settings .dot.warn { background: var(--dot-bad); }
+#btn-accounts.warn { background: var(--bg-danger); color: var(--text-danger); border-color: var(--dot-bad); }
+#btn-accounts .count { background: var(--dot-bad); color: #fff; border-radius: 8px; padding: 0 5px; font-size: 10px; line-height: 15px; }
 .pill.warn { background: var(--bg-danger); color: var(--text-danger); border: none; font-size: 12px; padding: 2px 8px; border-radius: 10px; }
 .pill.warn .ic { color: var(--text-danger); }
 .pill.rest { background: var(--bg-warning); color: var(--text-warning); }
@@ -318,8 +319,6 @@ p.error:empty { display: none; }   /* p only: a status dot is .dot.error, and em
 .srcrow .srcinput:focus { border-color: var(--border-accent); background: var(--surface-2); }
 .srcrow .srcinput::placeholder { color: var(--text-muted); opacity: .7; }
 .dot.blank { background: transparent; border: 1.5px solid var(--border-strong); opacity: 1; }
-.addlink { margin-top: 6px; border-color: transparent; color: var(--text-accent); padding: 4px 8px; font-size: 12px; }
-.addlink:hover:not(:disabled) { background: var(--bg-accent); }
 .srcrow .url { flex: 1; min-width: 0; font-family: var(--font-mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .srcrow .state { font-size: 11px; max-width: 42%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); }
 .srcrow .state.error { color: var(--text-danger); }
@@ -328,7 +327,7 @@ p.error:empty { display: none; }   /* p only: a status dot is .dot.error, and em
 .srcrow button { padding: 3px; border-color: transparent; }
 .srcrow .crown { color: var(--text-warning); }
 .srcrow .point { color: var(--text-muted); }
-.srcempty { padding: 10px; font-size: 13px; color: var(--text-muted); }
+.srcempty { padding: 10px; font-size: 13px; color: var(--text-muted); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .srcnote { display: flex; align-items: center; gap: 8px; margin: 0 6px 6px 38px; padding: 5px 6px 5px 10px; border-radius: var(--radius);
   background: var(--bg-warning); color: var(--text-warning); font-size: 12px; line-height: 1.4; }
 .srcnote span { flex: 1; min-width: 0; }
@@ -381,16 +380,18 @@ p.error:empty { display: none; }   /* p only: a status dot is .dot.error, and em
 .row-title { font-size: 13px; font-weight: 500; }
 .row > button { flex: none; min-width: 96px; justify-content: center; }
 .row.focus .row-title { color: var(--text-accent); }
-.acc-group { font-size: 11px; font-weight: 500; letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted); margin: 18px 0 0; }
-.acc-add { padding: 8px 0 10px; border-bottom: .5px solid var(--border); }
-.acc-add .label { display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; }
-.acc-add select { flex: 1; }
-/* form.acc-form: .dlg form makes every form in a dialog a flex column. */
-.dlg form.acc-form { display: grid; grid-template-columns: max-content 1fr; gap: 6px 12px; align-items: center; padding: 4px 0 12px 22px;
-  border-bottom: .5px solid var(--border); font-size: 13px; }
-.acc-form label { color: var(--text-secondary); }
-.acc-form .hint, .acc-form p.error { margin: 0; }
-.acc-form input[type=password] { font: inherit; }
+/* Manage Accounts: a box per login. form.accbox: .dlg form makes every form in a dialog a flex column. */
+.dlg.accounts { width: min(760px, 96vw); }
+.acc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; align-items: stretch; }
+.dlg form.accbox { gap: 8px; padding: 12px; border: .5px solid var(--border-strong); border-radius: 12px; background: var(--surface-2); max-height: none; }
+.accbox.expired { border-color: var(--dot-bad); background: var(--bg-danger); }
+.accbox.focus { box-shadow: 0 0 0 2px var(--bg-accent); border-color: var(--fill-accent); }
+.acc-top { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 14px; }
+.acc-top .small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acc-state { margin: 0; }
+.accbox .hint { margin: 0; }
+.acc-btns { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; }
+.acc-btns:empty { display: none; }
 .switch { position: relative; width: 38px; height: 22px; flex: none; cursor: pointer; }
 .switch input { opacity: 0; width: 0; height: 0; position: absolute; }
 .switch span { position: absolute; inset: 0; border-radius: 11px; background: var(--border-strong); transition: background .15s; }

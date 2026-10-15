@@ -55,7 +55,7 @@ class Media:
 
 
 class LoginRequired(Exception):
-    """The site shows this only to members: log in under Settings > Accounts."""
+    """The site shows this only to members: log in under Manage Accounts."""
 
 
 def site_for(url):

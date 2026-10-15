@@ -450,7 +450,9 @@ def _get(url, params=None, stream=False, headers=None, method="GET", data=None, 
     raise RuntimeError("no answer from %s" % url)
 
 
-LOGIN = "log in first: Settings > Accounts"
+# Matched by its start: errors stored by older versions end differently.
+LOGIN_PREFIX = "log in first"
+LOGIN = LOGIN_PREFIX + ": Manage Accounts"
 
 
 def level(e):

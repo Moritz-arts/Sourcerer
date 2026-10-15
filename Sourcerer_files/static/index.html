@@ -57,6 +57,7 @@
     <span class="grow"></span>
     <button id="btn-add" title="New card (Ctrl+N)"><svg class="ic"><use href="#i-plus"/></svg> New card</button>
     <button id="btn-sync-all" class="primary" title="Sync all cards (F5)"><svg class="ic"><use href="#i-refresh"/></svg> Sync all</button>
+    <button id="btn-accounts" title="Log in to your sites and keep the logins working"><svg class="ic"><use href="#i-key"/></svg> Manage Accounts<span id="acc-count" class="count hidden"></span></button>
     <button id="btn-quit" class="icon hidden" aria-label="Quit" title="Quit Sourcerer"><svg class="ic"><use href="#i-power"/></svg></button>
     <button id="btn-settings" class="icon" aria-label="Settings" title="Settings (Ctrl+,)"><svg class="ic"><use href="#i-settings"/></svg><span id="update-dot" class="dot hidden"></span></button>
   </header>
@@ -128,9 +129,10 @@
       <div>
         <div class="section">Sources</div>
         <div id="src-list" class="srclist"></div>
-        <button type="button" id="btn-src-add" class="addlink"><svg class="ic"><use href="#i-plus"/></svg> Add another link</button>
         <p class="hint">Paste any page of a profile &ndash; its media tab, a single post &ndash; and
-           Sourcerer finds the profile behind it. Leave the fields of sites the artist is not on empty.</p>
+           Sourcerer finds the profile behind it. Leave the fields of sites the artist is not on empty.
+           Only sites you are logged in to are listed &ndash;
+           <a href="#" data-act="accounts">Manage Accounts</a> adds more.</p>
       </div>
 
       <div>
@@ -207,6 +209,23 @@
   </div>
 </dialog>
 
+<!-- Manage Accounts: one box per login, the only place logins are made. -->
+<dialog id="dlg-accounts" class="dlg accounts">
+  <div class="dlg-head">
+    <span>Manage Accounts</span><span class="grow"></span>
+    <button type="button" id="btn-acc-check" class="mini" title="Ask every site whether its login still works">Check all</button>
+    <button type="button" class="icon flat" data-close aria-label="Close"><svg class="ic"><use href="#i-x"/></svg></button>
+  </div>
+  <div class="dlg-body">
+    <div id="acc-grid" class="acc-grid"></div>
+    <p class="hint">A green dot: the login works. Red: it ran out &ndash; log in again.
+       Sourcerer keeps what proves a login on this computer, never your password, and checks every login at each start.</p>
+    <p id="acc-browser" class="hint hidden">Sourcerer open in the browser instead of its own window? Export the site's cookies with a
+       browser extension such as "Get cookies.txt LOCALLY" and use <b>Import&hellip;</b>.</p>
+    <input type="file" id="acc-file" accept=".txt,text/plain" class="hidden">
+  </div>
+</dialog>
+
 <dialog id="dlg-settings" class="dlg wide">
   <div class="dlg-head">
     <span>Settings</span><span class="grow"></span>
@@ -217,7 +236,6 @@
       <button data-pane="library" class="selected"><svg class="ic"><use href="#i-folder"/></svg> Library</button>
       <button data-pane="sync"><svg class="ic"><use href="#i-refresh"/></svg> Sync</button>
       <button data-pane="network"><svg class="ic"><use href="#i-world"/></svg> Sites &amp; network</button>
-      <button data-pane="accounts"><svg class="ic"><use href="#i-key"/></svg> Accounts</button>
       <button data-pane="appearance"><svg class="ic"><use href="#i-palette"/></svg> Appearance</button>
       <button data-pane="keys"><svg class="ic"><use href="#i-keyboard"/></svg> Keyboard &amp; mouse</button>
       <button data-pane="updates"><svg class="ic"><use href="#i-cloud-down"/></svg> Updates<span id="update-dot-2" class="dot hidden"></span></button>
@@ -293,20 +311,6 @@
         </div>
         <p class="hint">When a site says "too many requests", Sourcerer waits as long as the site asks
           before it tries again. Automatic syncs start at a slightly different minute each time.</p>
-      </section>
-
-      <section data-pane="accounts">
-        <h3>Accounts</h3>
-        <p class="hint big">Some sites show everything only to members, others nothing at all without
-          a login. Log in once: X, Patreon, Pixiv, forums and Mastodon open their own login page in a window
-          of Sourcerer's; Bluesky takes an app password, a booru the API key from your account settings.
-          Sourcerer keeps what proves the login on this computer &ndash; never your password, and nowhere
-          else &ndash; and checks every login at each start. On a forum, tick "Stay logged in".</p>
-        <div id="acc-list"></div>
-        <p class="hint">Sourcerer open in the browser instead of its own window? Export the site's cookies
-          with a browser extension such as "Get cookies.txt LOCALLY" and import the file with
-          <b>Import&hellip;</b>. Log out deletes what Sourcerer kept.</p>
-        <input type="file" id="acc-file" accept=".txt,text/plain" class="hidden">
       </section>
 
       <section data-pane="appearance">

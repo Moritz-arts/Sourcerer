@@ -1,5 +1,5 @@
 """X (Twitter). A profile's media timeline needs a logged-in account: log in
-under Settings > Accounts. Listing goes through gallery-dl (_gdl.py), which
+under Manage Accounts. Listing goes through gallery-dl (_gdl.py), which
 keeps up with X's ever-changing web API; the files -- pbs.twimg.com at
 name=orig, the highest-bitrate video -- need no login and are downloaded by
 Sourcerer itself.

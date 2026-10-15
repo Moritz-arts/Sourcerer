@@ -1,5 +1,5 @@
 """Patreon. Public posts need no login; a patron's posts need the login made
-under Settings > Accounts, whose session_id cookie net.py sends along.
+under Manage Accounts, whose session_id cookie net.py sends along.
 
 Everything comes from /api/, the JSON:API Patreon's own website uses. Its HTML
 pages sit behind a Cloudflare challenge that no plain HTTP client passes, so
