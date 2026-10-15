@@ -130,10 +130,11 @@ add the one that replaced it.
   TLS 1.2 kept for hosts that lack 1.3. — baraag.net (Mastodon) and
   VerticalScope's forums refused urllib3's handshake whatever the headers;
   this one passes, and Sourcerer still says who it is.
-- 2026-10-11 — Every site has a login in Settings › Accounts, each the way
+- ~~2026-10-11 — Every site has a login in Settings › Accounts, each the way
   the site offers: its login page in the window (cookies; Mastodon: OAuth
   with a read-only token), a Bluesky app password, a booru's API key. The
-  card dialog says under a link when its site wants a login that is missing.
+  card dialog says under a link when its site wants a login that is missing.~~
+  Moved to Manage Accounts on 2026-10-15 (below); the ways to log in stay.
 - 2026-10-11 — Boorus in Sourcerer's own code on their JSON APIs, not
   gallery-dl: three engines, small and stable; a source is a tag search.
 - 2026-10-12 — Protecting logged-in accounts comes before speed: a login's

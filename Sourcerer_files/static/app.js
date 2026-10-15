@@ -1101,12 +1101,13 @@ function accSlot(kind, d) {
     (s.window && !d.window ? ' title="Needs Sourcerer\'s own window"' : "") + ">Log in</button></div></form>";
 }
 
-// One box per account, then the blank box of each kind with none, in the card dialog's order.
+// One box per account, then the blank box of each kind with no login yet (a box that waits
+// for a login -- a card's link, a mistyped forum -- does not count), in the card dialog's order.
 function accBoxes(d) {
   var order = S.fields.map(function (f) { return f.label.toLowerCase(); });
-  var boxes = d.accounts.map(function (a) { return { kind: a.key.split(":")[0], html: accBox(a, d.window) }; });
+  var boxes = d.accounts.map(function (a) { return { kind: a.key.split(":")[0], html: accBox(a, d.window), on: a.logged_in }; });
   Object.keys(SLOT).forEach(function (kind) {
-    if (!boxes.some(function (b) { return b.kind === kind; })) boxes.push({ kind: kind, html: accSlot(kind, d) });
+    if (!boxes.some(function (b) { return b.kind === kind && b.on; })) boxes.push({ kind: kind, html: accSlot(kind, d) });
   });
   boxes.sort(function (x, y) { return order.indexOf(x.kind) - order.indexOf(y.kind); });
   return boxes.map(function (b) { return b.html; }).join("");
@@ -1152,7 +1153,7 @@ function drawAccounts() {
   if (S.accWaiting && !waiting) afterAccounts();
   S.accWaiting = waiting;
   clearTimeout(accTimer);
-  if (waiting && $("dlg-accounts").open) accTimer = setTimeout(loadAccounts, 1500);
+  if (waiting) accTimer = setTimeout(loadAccounts, 1500);      // also with the dialog closed: the window may finish later
 }
 
 // A booru's own words for its user name and key, under the select of the blank box.
@@ -1259,6 +1260,8 @@ $("acc-grid").addEventListener("submit", function (e) {
   var f = e.target, key = f.dataset.key, body = f.dataset.slot ? {} : { key: key };
   if (S.accBusy[key]) return;
   Array.prototype.forEach.call(f.elements, function (i) { if (i.name) body[i.name] = i.value; });
+  var where = f.dataset.slot && SLOT[f.dataset.slot].label ? f.elements[SLOT[f.dataset.slot].field] : null;
+  if (where && !where.value.trim()) return where.focus();
   // The grid may be redrawn meanwhile: the box is found again by its key.
   var show = function () {
     var box = document.querySelector('#acc-grid .accbox[data-key="' + key + '"]');
@@ -1382,8 +1385,10 @@ $$("[data-repair]").forEach(function (b) {
 // ---- the rest --------------------------------------------------------------
 
 $("dlg-accounts").addEventListener("close", function () {
-  clearTimeout(accTimer);
-  S.accFocus = ""; S.accHtml = ""; S.accWaiting = false;
+  // A box nobody logged in to is forgotten; one whose login window is still open is followed on.
+  var open = ((S.accData || {}).accounts || []).filter(function (a) { return a.pending === "waiting"; }).map(function (a) { return a.key; });
+  S.accFocus = ""; S.accHtml = ""; S.accKeys = S.accKeys.filter(function (k) { return open.indexOf(k) >= 0; });
+  if (S.accWaiting) loadAccounts(); else clearTimeout(accTimer);
   afterAccounts().then(function () {
     // Back from a login: the links that wanted one say what they get now.
     if ($("dlg-card").open && F) F.rows.forEach(function (r) { if (r.status === "login" || r.account) check(r, true); });

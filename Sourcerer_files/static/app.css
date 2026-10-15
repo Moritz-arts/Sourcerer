@@ -379,7 +379,6 @@ p.error:empty { display: none; }   /* p only: a status dot is .dot.error, and em
 .row .hint { margin-top: 2px; }
 .row-title { font-size: 13px; font-weight: 500; }
 .row > button { flex: none; min-width: 96px; justify-content: center; }
-.row.focus .row-title { color: var(--text-accent); }
 /* Manage Accounts: a box per login. form.accbox: .dlg form makes every form in a dialog a flex column. */
 .dlg.accounts { width: min(760px, 96vw); }
 .acc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; align-items: stretch; }

@@ -661,7 +661,7 @@ def _account_key(body):
 
 
 def _shown(key):
-    """A key Settings may list: one a site of Sourcerer's would use."""
+    """A key Manage Accounts may list: one a site of Sourcerer's would use."""
     from .sources import booru
     try:
         how = accounts.kind(key)
@@ -673,7 +673,7 @@ def _shown(key):
 
 @app.get("/api/accounts")
 def get_accounts():
-    """Every login, and those of the keys asked for (a booru picked in Settings,
+    """Every login, and those of the keys asked for (a booru typed in Manage Accounts,
     a link in the card dialog that is not saved yet)."""
     from .sources import booru
     keys = [k for k in _used_keys() + request.args.getlist("key") if k and _shown(k)]
