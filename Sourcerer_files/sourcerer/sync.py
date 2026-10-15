@@ -53,6 +53,7 @@ _lock = threading.Lock()
 _save = threading.Lock()     # deciding and saving happen one file at a time
 _queue = []                  # artist ids waiting
 _auto = set()                # of those, queued by the automatic sync
+_only = {}                   # artist id -> ids of the only sources a queued sync asks (Browse: download these)
 _used = {}                   # login site -> (artist id, when its last card was done with it)
 _current = None              # what the running sync is doing, for the window
 _worker = None
@@ -144,8 +145,10 @@ def _final_path(folder, media, ext, server_name, posted):
 
 # ---- queue ------------------------------------------------------------------
 
-def enqueue(artist_ids=None, auto=False):
-    """Queue artists (all when None). Returns how many were added.
+def enqueue(artist_ids=None, auto=False, only=None):
+    """Queue artists (all when None). Returns how many were added. only: the ids of the
+    sources to ask -- the rest of the card is left alone this time (Browse: download what
+    the filter shows).
 
     The longest unsynced first, in a random order among equals: not the same
     cards in the same order every day."""
@@ -159,6 +162,11 @@ def enqueue(artist_ids=None, auto=False):
         busy = _current["artist_id"] if _current else None
         added = [i for i in ids if i not in _queue and i != busy]
         _queue.extend(added)
+        for i in added:
+            if only:
+                _only[i] = set(only)
+            else:
+                _only.pop(i, None)
         if auto:
             _auto.update(added)
         else:                              # somebody asked: not the careful automatic kind any more
@@ -176,6 +184,7 @@ def cancel(artist_id):
         if artist_id in _queue:
             _queue.remove(artist_id)
             _auto.discard(artist_id)
+            _only.pop(artist_id, None)
             return True
         if _current and _current["artist_id"] == artist_id:
             _cancel.set()
@@ -193,10 +202,11 @@ def _work():
                 return
             artist_id = _queue.pop(0)
             auto = artist_id in _auto
+            only = _only.pop(artist_id, None)
             _auto.discard(artist_id)
             _cancel.clear()
         try:
-            _sync_artist(artist_id, auto)
+            _sync_artist(artist_id, auto, only)
         except Exception as e:                       # never leave a card stuck as running
             log.exception("sync failed")
             event("error", "Sync failed: %s" % net.reason(e))
@@ -525,7 +535,7 @@ def _held(artist_id, keys):
                         [(artist_id, k) for k in keys])
 
 
-def _sync_artist(artist_id, auto=False):
+def _sync_artist(artist_id, auto=False, only=None):
     global _current
     with db.connect() as con:
         artist = con.execute("SELECT * FROM artists WHERE id = ?", (artist_id,)).fetchone()
@@ -546,7 +556,8 @@ def _sync_artist(artist_id, auto=False):
     master = artist["master_source_id"] if artist["dedupe"] == "master" else None
     # The master first: its copies are then already there when the others come,
     # instead of replacing theirs one by one afterwards.
-    srcs = sorted((s for s in rows if sources.site_for(s["url"])), key=lambda s: s["id"] != master)
+    srcs = sorted((s for s in rows if sources.site_for(s["url"]) and (not only or s["id"] in only)),
+                  key=lambda s: s["id"] != master)
     cur = {"artist_id": artist_id, "name": artist["name"], "phase": "scan", "done": 0, "total": 0,
            "first": any(not s["complete"] for s in srcs), "new": 0, "duplicates": 0,
            "failed": 0, "existing": 0, "file": "", "size": 0, "found": 0}
