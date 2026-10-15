@@ -24,7 +24,7 @@ import shutil
 import threading
 import time
 
-from . import accounts, config, db, imaging, net, sources
+from . import accounts, config, db, imaging, net, sources, sync
 
 log = logging.getLogger(__name__)
 SHOWN = 4                    # pictures on a card
@@ -37,6 +37,14 @@ NAME = re.compile(r"^[0-9a-f]{16}\.jpg$")
 _wake = threading.Event()
 _lock = threading.Lock()
 _queue = []                  # card ids to look at now, whatever their age
+_read = {}                   # login site -> when previews last read it
+_gone = {}                   # card id -> how many times it was deleted: an id comes back after a delete
+version = 0                  # counts the changes to what cards show; the page reloads its cards when it moves
+
+
+def _changed():
+    global version
+    version += 1
 
 
 def folder(artist_id):
@@ -44,8 +52,16 @@ def folder(artist_id):
 
 
 def _order(posted):
-    """A post's time as text that sorts: 2026-10-14 12:00:00 (the zone is left out)."""
-    return (posted or "")[:19].replace("T", " ")
+    """A post's time as something that sorts, zone and all (a pixiv post is +09:00, a
+    Bluesky one Z); a post with no date sorts last and keeps the order the sites gave."""
+    text = (posted or "").strip()
+    for candidate in (text.replace("Z", "+00:00"), text[:19]):
+        try:
+            dt = datetime.datetime.fromisoformat(candidate)
+        except ValueError:
+            continue
+        return (1, (dt if dt.tzinfo else dt.replace(tzinfo=datetime.timezone.utc)).timestamp())
+    return (0, 0.0)
 
 
 def card_thumbs(con, artist_id):
@@ -64,12 +80,18 @@ def card_thumbs(con, artist_id):
                          "AND path IS NOT NULL AND width IS NOT NULL ORDER BY COALESCE(posted, created) DESC, "
                          "id DESC LIMIT ?))" % marks, [artist_id] + keys + [artist_id, SHOWN]):
         local[r["remote_key"]] = (_order(r["at"]), "/api/thumb/%d?v=%s" % (r["id"], (r["sha256"] or "")[:12]))
-    items = {}
+    items, lost = {}, False
     for r in kept:
-        src = local[r["remote_key"]][1] if r["remote_key"] in local else (
-            "/api/preview/%d/%s" % (artist_id, r["file"]) if r["file"] else None)
+        if r["remote_key"] in local:
+            src = local[r["remote_key"]][1]
+        elif r["file"] and (folder(artist_id) / r["file"]).is_file():
+            src = "/api/preview/%d/%s" % (artist_id, r["file"])
+        else:
+            src, lost = None, lost or bool(r["file"])      # the cache was cleared: look again soon
         if src:
             items[r["remote_key"]] = (_order(r["posted"]), src)
+    if lost:
+        con.execute("UPDATE artists SET previews_at = NULL WHERE id = ? AND previews_at IS NOT NULL", (artist_id,))
     for key, item in local.items():
         items.setdefault(key, item)
     # Equal times (undated posts) keep the order the sites gave: Python's sort is stable.
@@ -77,8 +99,20 @@ def card_thumbs(con, artist_id):
     return [{"src": src} for _at, src in ranked[:SHOWN]]
 
 
-def _candidates(rows):
-    """[(posted, Media)] from the first page of each source that can be asked now."""
+def _space(where):
+    """Another card on the same login site: a pause first, as sync takes (NEXT_CARD) --
+    not the next read at once."""
+    last = max(_read.get(where, -1e9), (sync._used.get(where) or (None, -1e9))[1])
+    wait = random.uniform(*sync.NEXT_CARD) - (time.monotonic() - last)
+    if wait > 0:
+        time.sleep(wait)
+
+
+def _candidates(artist, rows, forced):
+    """[(posted, Media)] from the first page of each source that can be asked now. A source
+    behind a login is where an account can be locked: it is read only when somebody just made
+    or changed the card, or automatic sync is on; not when a sync has downloaded its newest
+    posts lately (the card shows those); and spaced like sync's cards."""
     from .sources import LoginRequired
     out, reached = [], 0
     for row in rows:
@@ -93,6 +127,13 @@ def _candidates(rows):
             continue
         if need == "required" and not (key and accounts.logged_in(key)):
             continue
+        where = net.site_of(row["url"])
+        if key and accounts.logged_in(key):
+            hours = sync.MIN_HOURS.get(where) or sync.MIN_HOURS.get(site.KIND) or 0
+            synced = artist["last_sync"] and sync._hours_since(artist["last_sync"].replace(" ", "T") + "+00:00") < hours
+            if synced or not (forced or db.get_setting("auto_sync") == "1"):
+                continue
+            _space(where)
         listing = None
         try:
             listing = site.pages(row["url"])
@@ -103,13 +144,15 @@ def _candidates(rows):
             log.info("previews: %s: %s", row["url"], net.reason(e))
             continue
         finally:
+            _read[where] = time.monotonic()
             if listing is not None:
                 try:
                     listing.close()
                 except Exception:
                     pass
         reached += 1
-        out += [(m.posted, m) for m in page[:SHOWN * 2] if (m.thumb or (m.large and not m.video))]
+        usable = [m for m in page if m.thumb or (m.large and not m.video)]
+        out += [(m.posted, m) for m in usable[:SHOWN * 2]]
     return out, reached
 
 
@@ -131,15 +174,18 @@ def _store(artist_id, media):
     return name
 
 
-def refresh(artist_id):
-    """Look at the sources once and keep the newest pictures. False when no source answered."""
+def refresh(artist_id, forced=False):
+    """Look at the sources once and keep the newest pictures. False when no source answered.
+    forced: the card is new or was changed -- the one case that reads a login site on request."""
+    gone = _gone.get(artist_id, 0)
     with db.connect() as con:
-        if not con.execute("SELECT 1 FROM artists WHERE id = ?", (artist_id,)).fetchone():
+        artist = con.execute("SELECT * FROM artists WHERE id = ?", (artist_id,)).fetchone()
+        if not artist:
             return False
         rows = con.execute("SELECT * FROM sources WHERE artist_id = ? ORDER BY id", (artist_id,)).fetchall()
         saved = {r[0] for r in con.execute("SELECT remote_key FROM files WHERE artist_id = ? AND path IS NOT NULL "
                                            "AND width IS NOT NULL", (artist_id,))}
-    pool, reached = _candidates(rows)
+    pool, reached = _candidates(artist, rows, forced)
     chosen, seen, tries = [], set(), 0
     for posted, media in sorted(pool, key=lambda x: _order(x[0]), reverse=True):
         if len(chosen) >= SHOWN or tries >= MAX_TRIES:
@@ -160,26 +206,34 @@ def refresh(artist_id):
             chosen.append((media, posted, name))
     now = datetime.datetime.now(datetime.timezone.utc)
     stamp = now if reached else now - datetime.timedelta(hours=REFRESH_HOURS - RETRY_HOURS)
+    # A card with no source left shows nothing from the sites; one whose look found nothing
+    # keeps what it had.
+    replace = bool(chosen) or not rows
     with db.connect() as con:
-        if not con.execute("SELECT 1 FROM artists WHERE id = ?", (artist_id,)).fetchone():
+        if _gone.get(artist_id, 0) != gone or not con.execute("SELECT 1 FROM artists WHERE id = ?", (artist_id,)).fetchone():
             shutil.rmtree(folder(artist_id), ignore_errors=True)       # the card went meanwhile
             return False
-        if chosen:                                   # a look that found nothing keeps what was there
+        if replace:
             con.execute("DELETE FROM previews WHERE artist_id = ?", (artist_id,))
             con.executemany("INSERT INTO previews (artist_id, pos, remote_key, posted, file) VALUES (?, ?, ?, ?, ?)",
                             [(artist_id, i, m.remote_key, posted, name) for i, (m, posted, name) in enumerate(chosen)])
         con.execute("UPDATE artists SET previews_at = ? WHERE id = ?", (stamp.isoformat(), artist_id))
-    keep = {name for _m, _p, name in chosen if name} if chosen else None
-    if keep is not None and folder(artist_id).is_dir():
+    if replace and folder(artist_id).is_dir():
+        keep = {name for _m, _p, name in chosen if name}
         for f in folder(artist_id).iterdir():           # what no card shows any more
             if f.name not in keep:
                 f.unlink(missing_ok=True)
+    if replace:
+        _changed()
     return bool(reached)
 
 
 def forget(artist_id):
-    """The card is gone: its pictures go with it."""
+    """The card is gone: its pictures go with it -- and a look at it that is on its way
+    must not give them to the next card that gets this id."""
+    _gone[artist_id] = _gone.get(artist_id, 0) + 1
     shutil.rmtree(folder(artist_id), ignore_errors=True)
+    _changed()
 
 
 def soon(artist_id):
@@ -205,14 +259,14 @@ _tried = {}                  # card id -> when it was last looked at, so a faili
 
 
 def _next():
-    """The card to look at now: one somebody just made or changed, else the stalest."""
+    """(card, asked for) to look at now: one somebody just made or changed, else the stalest."""
     with _lock:
         if _queue:
-            return _queue.pop(0)
+            return _queue.pop(0), True
     for artist_id in _due():
         if time.monotonic() - _tried.get(artist_id, -1e9) > RETRY_HOURS * 3600:
-            return artist_id
-    return None
+            return artist_id, False
+    return None, False
 
 
 def _loop():
@@ -220,16 +274,16 @@ def _loop():
     while True:
         _wake.clear()
         try:
-            artist_id = _next()
+            artist_id, forced = _next()
         except Exception:
             log.exception("previews: next")
-            artist_id = None
+            artist_id, forced = None, False
         if artist_id is None:
             _wake.wait(300)
             continue
         _tried[artist_id] = time.monotonic()
         try:
-            refresh(artist_id)
+            refresh(artist_id, forced)
         except Exception:
             log.exception("previews: card %d", artist_id)
         _wake.wait(random.uniform(1.5, 3.5))       # a card at a time, not a burst at the start

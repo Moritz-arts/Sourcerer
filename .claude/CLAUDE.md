@@ -352,7 +352,13 @@ Do not create releases or tags yourself, and do not push to `main`.
   the library's copy (`card_thumbs` merges both, newest first), so a fresh
   download appears at once. Sites that rest and logins that ran out are skipped;
   a card is looked at again after `REFRESH_HOURS` only (`artists.previews_at`).
-  The page never asks a site for a card picture -- it only reads what is kept.
+  A source behind a login is where an account gets locked: it is read only for
+  a card somebody just made or changed, or while automatic sync is on; not
+  within `sync.MIN_HOURS` of the card's last sync (the card shows those
+  downloads); and spaced like sync's cards (`sync.NEXT_CARD`). Posts are
+  ordered by their UTC time, not their text (`previews._order`). The page
+  never asks a site for a card picture -- it only reads what is kept, and
+  `previews.version` in `/api/sync` makes it reload its cards when that moves.
 - **The gallery fetches only what a listing handed out.** The proxy
   (`/api/gallery/<gallery>/<n>/thumb|large`) takes an item number, never a
   URL: any page could otherwise make Sourcerer fetch with the user's
