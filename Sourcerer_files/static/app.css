@@ -300,6 +300,7 @@ main { flex: 1; overflow: auto; }
 .dlg::backdrop { background: rgba(0, 0, 0, .45); }
 .dlg form { display: flex; flex-direction: column; max-height: 92vh; min-height: 0; }
 .dlg-head { display: flex; align-items: center; padding: 10px 10px 10px 16px; border-bottom: .5px solid var(--border); font-weight: 500; font-size: 15px; }
+.dlg-head .mini + .mini { margin-left: 8px; }
 .dlg-body { padding: 16px; display: flex; flex-direction: column; gap: 18px; overflow: auto; }
 .dlg-foot { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-top: .5px solid var(--border); }
 .label { font-size: 12px; color: var(--text-secondary); display: block; margin-bottom: 4px; }

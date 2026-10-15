@@ -574,10 +574,14 @@ def open_path():
         path = str(sync.artist_folder(row))
     else:
         path = {"library": sync.library(), "logs": str(config.LOG_DIR),
-                "program": str(config.INSTALL), "userdata": str(config.USERDATA)}.get(target)
+                "program": str(config.INSTALL), "userdata": str(config.USERDATA),
+                "accounts": str(accounts.DIR)}.get(target)
         if not path:
             abort(400)
-    _open(path)
+    try:
+        _open(path)
+    except OSError:                       # no file manager (a bare Linux): say where the folder is
+        return jsonify(error="No file manager found. The folder is: %s" % path), 501
     return jsonify(ok=True)
 
 
