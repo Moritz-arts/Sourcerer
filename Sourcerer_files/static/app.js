@@ -317,7 +317,11 @@ function load() {
     $("btn-quit").classList.toggle("hidden", S.window);
     applySettings();
     render();
-    if (S.view === "browse") { renderBrowseList(); renderBrowseHead(); }
+    if (S.brArtist && !artistById(S.brArtist)) {          // deleted: All artists instead
+      S.brArtist = 0;
+      if (G && !G.all) browseClose();
+    }
+    if (S.view === "browse") { renderBrowseList(); renderBrowseHead(); if (!G) browseOpen(0); }
     showUpdate();
     showAccounts();
   });
@@ -462,16 +466,16 @@ document.addEventListener("keydown", function (e) {
   if (ctrl && k === "-") { e.preventDefault(); return setSize(+$("size").value - 20, true); }
   if (ctrl && k === "0") { e.preventDefault(); return setSize(DEFAULT_SIZE, true); }
   if (dialog) return;
-  if (S.view === "browse") {
-    if (ctrl && low === "n") { e.preventDefault(); return openCard(null); }
-    if ((ctrl && low === "f") || (k === "/" && !typing)) { e.preventDefault(); $("br-search").focus(); return $("br-search").select(); }
-    return;
-  }
   if (ctrl && low === "n") { e.preventDefault(); return openCard(null); }
-  if ((ctrl && low === "f") || (k === "/" && !typing)) { e.preventDefault(); $("search").focus(); return $("search").select(); }
+  if ((ctrl && low === "f") || (k === "/" && !typing)) {
+    var box = S.view === "browse" ? $("br-search") : $("search");
+    e.preventDefault(); box.focus(); return box.select();
+  }
   if (k === "F5" || (ctrl && low === "r")) { e.preventDefault(); return sync(null); }
   if (ctrl && k === ",") { e.preventDefault(); return openSettings(); }
   if (ctrl && low === "l") { e.preventDefault(); return toggleLog(); }
+  if (S.view === "browse") return;              // the card shortcuts below are the cards'
+
   if (typing || ctrl || e.altKey) return;
   if (/^(Arrow(Left|Right|Up|Down)|Home|End)$/.test(k)) { e.preventDefault(); return moveSelection(k); }
   var a = artistById(S.selected);
@@ -549,8 +553,11 @@ function setView(view) {
   $("browse").classList.toggle("hidden", !browse);
   $("view-cards").classList.toggle("selected", !browse);
   $("view-browse").classList.toggle("selected", browse);
-  if (browse) { renderBrowseList(); if (!G) browseOpen(S.brArtist); }
-  else browseClose();
+  // The gallery stays while the cards are shown (it asks nothing meanwhile); it comes back as it was.
+  if (browse) {
+    renderBrowseList(); renderBrowseHead();
+    if (!G || (G.all ? 0 : G.artist.id) !== S.brArtist) browseOpen(S.brArtist);      // not the one that was left open
+  }
 }
 
 // From a card: Browse, with this artist picked.
@@ -595,7 +602,7 @@ function renderBrowseHead() {
 function browseOpen(id) {
   closeMenu();
   var a = id ? artistById(id) : null;
-  if (id && !a) return;
+  if (id && !a) id = 0;                         // the artist is gone: All artists
   S.brArtist = id || 0;
   if (G && G.id) api("POST", "/api/gallery/close", { gallery: G.id }).catch(function () {});
   G = { artist: a, all: !id, id: null, items: [], busy: false, done: false, hidden: S.brHidden, view: -1, sources: null, downloading: {} };
@@ -606,6 +613,7 @@ function browseOpen(id) {
   $("gal-end").textContent = "Asking the sites…";
   closeView();
   renderBrowseList(); renderBrowseHead();
+  if (!id && !S.artists.length) { $("gal-end").textContent = "No cards yet: create a card first."; return; }
   var g = G;
   api("POST", "/api/gallery/open", { artist_id: id || 0 }).then(function (d) {
     if (g !== G) return api("POST", "/api/gallery/close", { gallery: d.gallery });
@@ -624,13 +632,24 @@ function moreGallery() {
   var g = G;
   if (!g || !g.id || g.busy || g.done) return;
   // Only hidden sources have more: nothing to show for the requests it would take.
-  if (g.sources && !g.sources.some(function (s) { return !g.hidden[s.label] && s.state === "more"; })) return;
+  if (g.sources && !g.sources.some(function (s) { return !g.hidden[s.label] && s.state === "more"; })) {
+    if (!g.items.length) {
+      var bad = g.sources.filter(function (s) { return s.error; })[0];
+      $("gal-end").textContent = !g.sources.length ? "No source here that Sourcerer can read."
+        : g.sources.every(function (s) { return g.hidden[s.label]; }) ? "Every site is switched off."
+        : bad ? "Could not read " + bad.label + ": " + bad.error : "Nothing found.";
+    }
+    return;
+  }
   g.busy = true;
   $("gal-end").textContent = "Asking the sites…";
+  var sent = offIds(g).join(",");
   // The first page is only what the window shows: it is there as soon as one source answered.
   api("POST", "/api/gallery/more", { gallery: g.id, n: g.items.length ? 60 : 24, off: offIds(g) }).then(function (d) {
     if (g !== G) return;
-    g.busy = false; g.done = d.done; g.sources = d.sources;
+    // A site switched on while this was on its way was left out of it: ask again, whatever it says.
+    var stale = offIds(g).join(",") !== sent;
+    g.busy = false; g.done = d.done && !stale; g.sources = d.sources;
     var start = g.items.length;
     g.items = g.items.concat(d.items);
     $("gal-grid").insertAdjacentHTML("beforeend", d.items.map(function (it, k) { return tileHtml(it, start + k); }).join(""));
@@ -638,11 +657,17 @@ function moreGallery() {
     galSources(d.sources);
     $("gal-end").textContent = !g.done ? "" : g.items.length ? plural(g.items.length, "picture") + " – that is all" : "Nothing found.";
     // The observer fires on a change only: while the end is still in sight, ask on.
-    if (!g.done && d.items.length) {
+    if (!g.done && (d.items.length || stale)) {
       var end = $("gal-end").getBoundingClientRect(), box = $("gal-body").getBoundingClientRect();
       if (end.top < box.bottom + 800) setTimeout(moreGallery, 50);
     }
-  }).catch(function (e) { g.busy = false; $("gal-end").textContent = e.message; });
+  }).catch(function (e) {
+    if (g !== G) return;
+    g.busy = false;
+    // Closed by the server after a long rest (or a restart): open it again where it was.
+    if (/was closed/.test(e.message)) return browseOpen(S.brArtist);
+    $("gal-end").textContent = e.message;
+  });
 }
 
 // Sourcerer's own fetch of an item, for one the page could not load itself;
@@ -757,7 +782,12 @@ $("gal-sources").addEventListener("click", function (e) {
   try { localStorage.setItem(BR_HIDDEN, JSON.stringify(G.hidden)); } catch (e2) {}
   chip.classList.toggle("off", !!G.hidden[label]);
   $$("#gal-grid .gal-tile").forEach(function (t) { if (t.dataset.src === label) t.classList.toggle("hidden", !!G.hidden[label]); });
-  if (!G.hidden[label]) { G.done = false; galWatch(); }
+  if (!G.hidden[label]) {
+    // A site that was off since the gallery opened has no pictures yet: they belong in date order,
+    // not at the end, so the gallery opens again.
+    if (!G.items.some(function (it) { return it.source === label; })) return browseOpen(S.brArtist);
+    G.done = false; galWatch();
+  }
   moreGallery();
 });
 $("gal-view").addEventListener("click", function (e) {
@@ -794,17 +824,18 @@ $("gal-size").addEventListener("input", function () { $("gal-grid").style.setPro
 // The large view: arrows step, Esc closes it (the keys of the card grid do not apply here).
 document.addEventListener("keydown", function (e) {
   if (S.view !== "browse" || document.querySelector("dialog[open]")) return;
-  var open = !$("gal-view").classList.contains("hidden");
+  var open = !$("gal-view").classList.contains("hidden"), t = e.target;
+  var typing = (t.tagName === "INPUT" && !/^(range|checkbox)$/.test(t.type)) || t.tagName === "SELECT" || t.tagName === "TEXTAREA";
   if (e.key === "Escape" && open) { e.preventDefault(); e.stopPropagation(); closeView(); }
-  else if (open && e.key === "ArrowLeft") { e.preventDefault(); step(-1); }
-  else if (open && e.key === "ArrowRight") { e.preventDefault(); step(1); }
+  else if (open && !typing && e.key === "ArrowLeft") { e.preventDefault(); step(-1); }
+  else if (open && !typing && e.key === "ArrowRight") { e.preventDefault(); step(1); }
 }, true);
 $("view-cards").addEventListener("click", function () { setView("cards"); });
 $("view-browse").addEventListener("click", function () { setView("browse"); });
 $("br-search").addEventListener("input", renderBrowseList);
 $("br-list").addEventListener("click", function (e) {
   var b = e.target.closest("[data-id]");
-  if (b) browseOpen(+b.dataset.id);
+  if (b && !(G && G.id && +b.dataset.id === S.brArtist)) browseOpen(+b.dataset.id);
 });
 // Download all: the card is synced, but only through the sources that are switched on.
 $("br-download").addEventListener("click", function () {

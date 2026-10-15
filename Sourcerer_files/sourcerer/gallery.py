@@ -34,11 +34,13 @@ import hashlib
 import io
 import logging
 import os
+import queue
+import random
 import threading
 import time
 import uuid
 
-from . import db, imaging, net, sources, sync
+from . import accounts, db, imaging, net, sources, sync
 
 log = logging.getLogger(__name__)
 MEMORY = 160 << 20           # bytes of fetched pictures kept, the oldest dropped first
@@ -56,8 +58,40 @@ _galleries = {}
 _cache = collections.OrderedDict()       # (gallery, item, size) -> (content type, bytes)
 _cached = [0]
 _flight = {}                             # (gallery, item, size) -> Event, while it is being fetched
-_pool = concurrent.futures.ThreadPoolExecutor(POOL, thread_name_prefix="gallery-source")
 _serial = set()                          # sites with a serial source being listed now
+_spaced = {}                             # login site -> (card id, when another card may ask it): All artists
+_work = queue.Queue()
+_workers = []
+CARD_GAP = (5, 12)           # seconds before All artists asks a login site for another card than the last one's
+
+
+class _Workers:
+    """POOL daemon threads that run the listings. (A ThreadPoolExecutor's threads are not daemons:
+    closing the window would wait for every fill still queued.)"""
+
+    def submit(self, fn):
+        future = concurrent.futures.Future()
+        with _lock:
+            if len(_workers) < POOL:
+                t = threading.Thread(target=self._run, daemon=True, name="gallery-source")
+                _workers.append(t)
+                t.start()
+        _work.put((future, fn))
+        return future
+
+    @staticmethod
+    def _run():
+        while True:
+            future, fn = _work.get()
+            if not future.set_running_or_notify_cancel():
+                continue
+            try:
+                future.set_result(fn())
+            except BaseException as e:
+                future.set_exception(e)
+
+
+_pool = _Workers()
 
 
 def _when(posted):
@@ -74,7 +108,13 @@ class _Source:
         self.row, self.site, self.artist = row, sources.site_for(row["url"]), artist
         self.label = self.site.LABEL if self.site else row["url"]
         self.where = net.site_of(row["url"])
-        self.serial = bool(self.site) and self.site.KIND in SERIAL
+        # One source at a time per site where a request goes alone anyway -- gallery-dl's (X, forums:
+        # it turns the rest away as busy) and every login's lane: they would only sit in a pool thread.
+        key = sources.account_key(row["url"]) if self.site else None
+        self.login = bool(key and accounts.logged_in(key))
+        self.serial = bool(self.site) and (self.site.KIND in SERIAL or self.login)
+        self.asked_at = 0.0                   # when it was last asked: the one asked longest ago goes next
+        self.spaced = False                   # All artists: a login site's next card waits (CARD_GAP)
         self.listing = None
         self.buffer = collections.deque()
         self.done, self.error = self.site is None, ""
@@ -98,13 +138,23 @@ class _Source:
                 with _lock:
                     if self.where in _serial:
                         return
+                    if self.login and self.spaced:
+                        last = _spaced.get(self.where)
+                        if last and last[0] != self.artist["id"] and time.monotonic() < last[1]:
+                            return             # another card was asked lately: not the next one at once
                     _serial.add(self.where)
+            self.asked_at = time.monotonic()
             self.future = _pool.submit(self._run)
 
     def _run(self):
         try:
+            if self.closed or self.off:           # queued behind others while the page moved on
+                return
             self.fill()
         finally:
+            if self.serial and self.login and self.spaced:
+                with _lock:
+                    _spaced[self.where] = (self.artist["id"], time.monotonic() + random.uniform(*CARD_GAP))
             if self.serial:
                 with _lock:
                     _serial.discard(self.where)
@@ -163,7 +213,7 @@ class _Gallery:
         with db.connect() as con:
             artists = {r["id"]: dict(r) for r in con.execute(
                 "SELECT * FROM artists" + ("" if self.all else " WHERE id = ?"), () if self.all else (artist_id,))}
-            if not artists:
+            if not artists and not self.all:
                 raise KeyError(artist_id)
             rows = con.execute("SELECT * FROM sources ORDER BY artist_id, id").fetchall() if self.all else \
                 con.execute("SELECT * FROM sources WHERE artist_id = ? ORDER BY id", (artist_id,)).fetchall()
@@ -171,6 +221,8 @@ class _Gallery:
         self.name = "All artists" if self.all else self.artist["name"]
         self.sources = [_Source(r, artists[r["artist_id"]]) for r in rows
                         if r["artist_id"] in artists and sources.site_for(r["url"])]
+        for s in self.sources:
+            s.spaced = self.all
 
     def _library(self, pairs):
         """What the library has of these posts, asked once per post: a downloaded one shows
@@ -194,7 +246,9 @@ class _Gallery:
                  "error": s.error} for s in self.sources]
 
     def _kick(self):
-        for s in self.sources:
+        # In the order they were last asked (never first): a site one source at a time serves its
+        # sources in turn, not the first one again and again.
+        for s in sorted(self.sources, key=lambda s: s.asked_at):
             if not s.buffer and not s.done and not s.off:
                 s.start_fill()
 
@@ -233,7 +287,8 @@ class _Gallery:
             self.items[number] = (s, m)
             out.append(number)
         self._library([(self.items[n][0].artist["id"], self.items[n][1].remote_key) for n in out])
-        for s in self.sources:                      # the next page before it is needed
+        self._kick()
+        for s in sorted(self.sources, key=lambda s: s.asked_at):     # the next page before it is needed
             if not s.done and not s.off and len(s.buffer) < AHEAD:
                 s.start_fill()
         return [self.item(n) for n in out]

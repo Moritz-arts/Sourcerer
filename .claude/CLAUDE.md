@@ -343,8 +343,13 @@ Do not create releases or tags yourself, and do not push to `main`.
   folder with *its* dedupe rules, in "All artists" too. The mockup's card grid
   stays the default view; Browse is the second one, never a replacement.
 - **The gallery asks its sources at the same time** (`gallery._Source`, on
-  `POOL` threads shared by all galleries, each source in its own polite lane;
-  a site gallery-dl reads -- `SERIAL`: X, forums -- one source at a time): the first page leaves once
+  `POOL` daemon threads shared by all galleries, each source in its own polite
+  lane; a site gallery-dl reads -- `SERIAL`: X, forums -- and every login's
+  site is asked one source at a time, the one asked longest ago first, or the
+  first cards would starve the rest and sit in pool threads; "All artists" also
+  spaces a login site's next *card* (`CARD_GAP`, much shorter than sync's
+  `NEXT_CARD`: somebody is looking), so its login sources trickle in; a fill that
+  was queued when its gallery closed or its site went off does not run): the first page leaves once
   something can be shown and `SLOW` seconds have gone for the rest, later pages
   wait `SLOW_LATER` -- a slow source (X through gallery-dl, a forum) comes with
   a later page instead of holding the fast ones up. A source whose waiting
