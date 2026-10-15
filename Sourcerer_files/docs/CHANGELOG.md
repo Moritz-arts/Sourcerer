@@ -5,6 +5,10 @@ automatically -- one line per change, newest first. A release is drafted by hand
 from the tag of whichever version is judged ready, and this is the text to paste
 into it.
 
+## v0.10 — 2026-10-15
+
+- Review fixes: the gallery no longer deadlocks on two X accounts, pixiv keeps unfinished works, a blocked artist no longer pauses X (#10)
+
 ## v0.9 — 2026-10-15
 
 - Manage Accounts: a box per login with a status dot beside Sync all, and the card dialog lists only logged-in sites (#9)
