@@ -17,7 +17,7 @@ import urllib.parse
 
 from flask import Flask, abort, jsonify, request, send_file, send_from_directory
 
-from . import accounts, config, db, gallery, imaging, net, sources, sync, updater
+from . import accounts, config, db, gallery, imaging, net, previews, sources, sync, updater
 
 log = logging.getLogger(__name__)
 app = Flask(__name__, static_folder=None)
@@ -67,12 +67,8 @@ def _artists():
                 s.update(sources.describe(s["url"]), master=s["id"] == a["master_source_id"])
                 s["status"] = _status(s)
                 a["sources"].append(s)
-            # ?v= the file's own hash: a row id can come back after a delete,
-            # and the browser must not show the old picture for it.
-            a["thumbs"] = [{"id": r[0], "v": (r[1] or "")[:12]} for r in con.execute(
-                "SELECT id, sha256 FROM files WHERE artist_id = ? AND path IS NOT NULL "
-                "AND width IS NOT NULL ORDER BY COALESCE(posted, created) DESC, id DESC LIMIT 4",
-                (a["id"],))]
+            # The newest posts of the card's sources -- with or without a download (previews.py).
+            a["thumbs"] = previews.card_thumbs(con, a["id"])
             a["path"] = str(sync.artist_folder(a))
             a["folder"] = a["folder"] or ""
     return artists
@@ -311,6 +307,7 @@ def create_artist():
         artist_id = con.execute("INSERT INTO artists (name) VALUES (?)", (data["name"],)).lastrowid
         _save(con, artist_id, data)
     _background(sync.check_card, artist_id)
+    previews.soon(artist_id)
     if body.get("sync_now"):
         sync.enqueue([artist_id])
     return jsonify(id=artist_id)
@@ -331,6 +328,7 @@ def update_artist(artist_id):
         _save(con, artist_id, data)
     sync.name_avatar(artist_id)                  # the picture's file is named after the artist
     _background(sync.check_card, artist_id)
+    previews.soon(artist_id)                     # another source may have newer pictures
     if body.get("sync_now"):
         sync.enqueue([artist_id])
     return jsonify(ok=True)
@@ -370,6 +368,7 @@ def delete_artist(artist_id):
         con.execute("DELETE FROM artists WHERE id = ?", (artist_id,))
     if row and row["avatar"]:
         (config.AVATARS / row["avatar"]).unlink(missing_ok=True)
+    previews.forget(artist_id)
     return jsonify(ok=True)
 
 
@@ -418,6 +417,17 @@ def thumb(file_id):
         abort(404)
     resp = app.response_class(data, mimetype="image/jpeg")
     resp.cache_control.max_age = 7 * 86400       # the page asks with ?v=<the file's hash>
+    return resp
+
+
+@app.get("/api/preview/<int:artist_id>/<name>")
+def preview(artist_id, name):
+    """A card's kept picture of a post that is not downloaded (previews.py). The name is a
+    hash made here: nothing else is served from that folder."""
+    if not previews.NAME.match(name) or not (previews.folder(artist_id) / name).is_file():
+        abort(404)
+    resp = send_from_directory(previews.folder(artist_id), name, mimetype="image/jpeg")
+    resp.cache_control.max_age = 30 * 86400       # the name is the post's own: it never changes
     return resp
 
 
@@ -639,13 +649,6 @@ def _forums():
     return out
 
 
-def _used_keys():
-    """The logins the cards' sources would use."""
-    with db.connect() as con:
-        urls = [r[0] for r in con.execute("SELECT url FROM sources ORDER BY id")]
-    return [sources.account_key(u) for u in urls]
-
-
 def _account_key(body):
     """(key, the forum's base URL or None) of the account a request names:
     by key, or a forum, Mastodon server or booru typed in by hand."""
@@ -686,23 +689,24 @@ def _shown(key):
 
 @app.get("/api/accounts")
 def get_accounts():
-    """Every login, and those of the keys asked for (a booru typed in Manage Accounts,
-    a link in the card dialog that is not saved yet)."""
+    """The logins there are -- saved ones, and one being made or given up on (a window
+    open, a window closed too early) -- and what "Add account" offers. A site without a
+    login has no row; it is added from the list of types."""
     from .sources import booru
-    keys = [k for k in _used_keys() + request.args.getlist("key") if k and _shown(k)]
-    rows = [a for a in accounts.accounts(keys) if _shown(a["key"])]
+    rows = [a for a in accounts.accounts() if _shown(a["key"]) and (a["logged_in"] or a["pending"])]
     for a in rows:
         if a["kind"] == "api_key":
             a.update(booru.login_help(a["key"]))
-    boorus = [dict(b, **booru.login_help("booru:" + b["host"])) for b in booru.LOGIN_SITES]
-    for a in rows:
         host = a["key"].split(":", 1)[1] if ":" in a["key"] else (
             accounts.SITES[a["key"]][2][0] if a["key"] in accounts.SITES else "bsky.social")
         if a["key"].startswith("booru:"):
             host = booru.BOORUS.get(host, (0, 0, 0, 0, None))[4] or host       # paused under its API host
         rest = net.paused(host)
         a["rest"] = {"until": rest[0], "why": rest[1]} if rest else None
-    return jsonify(accounts=rows, window=WINDOW is not None, boorus=boorus)
+    boorus = [dict(b, **booru.login_help("booru:" + b["host"])) for b in booru.LOGIN_SITES]
+    types = [{"type": t, "label": label, "kind": how, "many": t in ("mastodon", "xenforo", "booru")}
+             for t, label, how in accounts.TYPES]
+    return jsonify(accounts=rows, types=types, window=WINDOW is not None, boorus=boorus)
 
 
 @app.post("/api/accounts/login")

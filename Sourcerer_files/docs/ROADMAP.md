@@ -163,6 +163,18 @@ add the one that replaced it.
   once its account is set up, and the accounts page should be nothing but the
   boxes.
 
+- 2026-10-15 — **Manage your accounts** lists only logins that exist; a site
+  is added with *Add account* at the end, by choosing its type (and, for a
+  booru, the booru -- no default, so no Gelbooru row appears on its own).
+  **The gallery** asks its sources at the same time and a page leaves after a
+  few seconds without the slow ones; the next page is fetched one page ahead;
+  small pictures from a CDN load four at a time; a download goes ahead of
+  the queue. **Cards** show the 4 newest posts of their sources, found on the
+  sites and kept as small copies in `Userdata/Previews` (a cache), so a new
+  card is not empty until its first sync. — The user: duplicate boxes and a
+  pre-selected Gelbooru confused; the gallery and its download were slow;
+  cards should show the newest pictures without downloading them first.
+
 ## Done
 
 - [x] Repository workshop: CLAUDE.md, docs, version workflow
@@ -201,15 +213,19 @@ add the one that replaced it.
 - [x] Logins for every site (Bluesky, Mastodon, boorus added), checked at
       every start; the card dialog warns about a missing login
 - [x] Boorus: Danbooru, e621, Gelbooru, Rule 34, yande.re, Konachan and more
-- [x] Manage Accounts: one row per login, one under the other, with a
-      green / orange (the site rests) / red (ran out) dot, "Check all",
-      a red badge on the toolbar button; the card dialog lists only logged-in sites
+- [x] Manage your accounts: one row per login that exists, one under the other,
+      with a green / orange (the site rests) / red (ran out) dot, "Check all",
+      a red badge on the toolbar button; *Add account* at the end chooses the type
+      (and a booru) -- nothing pre-selected; the card dialog lists only logged-in sites
 - [x] Manage Accounts: a *Login files* button opens the folder the logins are kept in
       (transparency; copy it to back the logins up, put it back to restore them)
 - [x] Account safety: a login's slow lane with random gaps and breaks,
       daily budgets, site pauses, randomised automatic syncs and login
       checks, X's limits and locks respected, one gallery-dl per site
 - [x] Gallery: all sources of a card in one stream, large view, download
+- [x] Gallery faster: sources asked at the same time, the next page fetched ahead,
+      small pictures through their own lane, a download ahead of the queue
+- [x] Cards show the 4 newest posts of their sources without any download
 
 ## Next
 

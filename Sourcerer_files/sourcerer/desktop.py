@@ -21,7 +21,7 @@ import webbrowser
 
 from werkzeug.serving import make_server
 
-from . import config, db, net, server, sync
+from . import config, db, net, previews, server, sync
 
 log = logging.getLogger("sourcerer")
 RUNNING = config.USERDATA / "running.json"
@@ -113,6 +113,7 @@ def main(argv=None):
     _after_update()
     net.configure(per_host=db.setting_int("per_host", 1, 8), pace_ms=db.setting_int("pace_ms", 0, 5000))
     sync.scheduler()
+    previews.start()
     httpd = make_server("127.0.0.1", args.port, server.app, threaded=True)
     url = "http://127.0.0.1:%d/" % httpd.server_port
     threading.Thread(target=httpd.serve_forever, daemon=True, name="server").start()

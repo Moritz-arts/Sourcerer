@@ -405,6 +405,9 @@ p.error:empty { display: none; }   /* p only: a status dot is .dot.error, and em
 .acc-btns:empty { display: none; }
 .acc-btns button { min-width: 84px; justify-content: center; }
 .accbox p.error { flex: 1 1 100%; margin: 0; }
+.acc-text select { width: 100%; margin-top: 6px; }
+.accbox.adding { border-style: dashed; }
+.accadd { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; }
 .switch { position: relative; width: 38px; height: 22px; flex: none; cursor: pointer; }
 .switch input { opacity: 0; width: 0; height: 0; position: absolute; }
 .switch span { position: absolute; inset: 0; border-radius: 11px; background: var(--border-strong); transition: background .15s; }

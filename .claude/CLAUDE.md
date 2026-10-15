@@ -235,14 +235,18 @@ Do not create releases or tags yourself, and do not push to `main`.
 
 ### Program
 
-- **Logins are made in Manage Accounts (`#dlg-accounts`) and nowhere else**:
-  one row per login, one under the other (never side by side): dot and
-  name, the fields in the middle, the buttons at the right; no "add another"
-  line -- Mastodon, XenForo and Booru show one blank row (`SLOT` in `app.js`)
-  only while no login of their kind exists. The dot: green works, orange
-  works but the site rests (`rest` in `/api/accounts`, from `net.paused`), red
-  ran out, hollow not logged in. Settings has no Accounts pane. The
-  toolbar button shows `S.logins` (the ones that ran out) as a red count.
+- **Logins are made in "Manage your accounts" (`#dlg-accounts`) and nowhere
+  else**: one row per login that exists (saved, or being made in a window), one
+  under the other (never side by side): dot and name, the fields in the middle,
+  the buttons at the right. A site without a login has **no row**: *Add account*
+  at the end opens a row with the type to choose (`accounts.TYPES`, only sites
+  Sourcerer can download from; Bluesky, Pixiv, X and Patreon are one login each
+  and leave the list once added). Nothing is pre-chosen -- not the type, not the
+  booru (it is chosen from a list before its fields appear); only a card's link
+  that names its site fills it in. The dot: green works, orange works but the
+  site rests (`rest` in `/api/accounts`, from `net.paused`), red ran out, hollow
+  not logged in. Settings has no Accounts pane. The toolbar button shows
+  `S.logins` (the ones that ran out) as a red count.
 - **The card dialog lists a site only when a login of it is saved**
   (`fields[].logged_in` in `/api/state`, an expired one counts) -- plus
   every link already on the card. Hiding a row must never drop a saved
@@ -328,6 +332,27 @@ Do not create releases or tags yourself, and do not push to `main`.
 - **A refused Mastodon token is sent once** (`mastodon._dead`): net counts a
   login's 401s, three rest the whole server, and the visitor fallback made
   every request send the dead token first. A new login is another token.
+- **The gallery asks its sources at the same time** (`gallery._Source`, one
+  thread per source, each in its own polite lane): the first page leaves once
+  something can be shown and `SLOW` seconds have gone for the rest, later pages
+  wait `SLOW_LATER` -- a slow source (X through gallery-dl, a forum) comes with
+  a later page instead of holding the fast ones up. A source whose waiting
+  items run below `AHEAD` gets its next page in the background, one page ahead
+  and no further, only while the gallery is open. A download asked for in the
+  gallery runs inside `net.interactive()`: ahead of what waits in the site's
+  lane and without the login lane's reading break (the gaps between requests
+  stay). Small pictures from a host with no login use `net.PREVIEW`'s own lane
+  (4 at once, 0.08 s apart); originals and anything with a login keep
+  `HOSTS` and the login lane.
+- **The card shows the 4 newest posts of its sources, downloaded or not**
+  (`previews.py`). One card at a time in the background (`previews._loop`),
+  the first page of each source through the same lanes as a sync, a small JPEG
+  of each in `Userdata/Previews/<artist>/` (a cache: safe to delete, goes with
+  the card) and the rows in the `previews` table. A post that is downloaded shows
+  the library's copy (`card_thumbs` merges both, newest first), so a fresh
+  download appears at once. Sites that rest and logins that ran out are skipped;
+  a card is looked at again after `REFRESH_HOURS` only (`artists.previews_at`).
+  The page never asks a site for a card picture -- it only reads what is kept.
 - **The gallery fetches only what a listing handed out.** The proxy
   (`/api/gallery/<gallery>/<n>/thumb|large`) takes an item number, never a
   URL: any page could otherwise make Sourcerer fetch with the user's
@@ -337,7 +362,7 @@ Do not create releases or tags yourself, and do not push to `main`.
 - **The browser opens six connections to Sourcerer, no more.** Proxied
   pictures wait in a site's polite lane; fifty asked for at once held back
   the large view, the next page and the state poll for a minute. `app.js`
-  loads them two at a time (`galQueue`), near the screen only; the large
+  loads them four at a time (`GAL_AT_ONCE`), near the screen only; the large
   view shows the grid's picture until its own arrives.
 - **Pikura is GPL-3.0.** Its gallery was studied for ideas (pixiv's small
   previews with a Referer); none of its code may be copied here.
@@ -414,7 +439,7 @@ Do not create releases or tags yourself, and do not push to `main`.
   `archive` table keeps what deleted cards had, and a file under its own name
   in the card's folder (`_local_names`, `Media.local`) is taken over.
 - **Never key a cached picture by row id alone.** SQLite hands out a deleted
-  row's id again. Card pictures are made in memory from the downloads
+  row's id again. Card pictures of downloads are made in memory from them
   (`imaging.preview`, `?v=<sha>`); avatars are `Avatars/<artist>.jpg`.
 - **A pasted link is normalised before it is stored.** `sources.normalize`
   turns any page of a profile (`/media`, a post) into the profile; dedupe

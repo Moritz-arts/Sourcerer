@@ -54,8 +54,13 @@ SITES = {
     "pixiv": ("Pixiv", "https://accounts.pixiv.net/login", ("pixiv.net",),
               lambda c: bool(re.match(r"\d+_", c.get("PHPSESSID", "")))),
 }
-# Manage Accounts' order: the big sites by name, then one row per server, forum and booru.
-ORDER = ["bluesky", "mastodon", "pixiv", "x", "patreon", "xenforo", "booru"]
+# What "Add account" offers, in the order the rows are shown: (type, label, how it logs in).
+# Bluesky, Pixiv, X and Patreon are one login each; a Mastodon server, a forum or a booru is
+# as many as the user has. A site is listed here when Sourcerer can download from it.
+TYPES = [("bluesky", "Bluesky", "password"), ("mastodon", "Mastodon", "oauth"),
+         ("pixiv", "Pixiv", "window"), ("x", "X (Twitter)", "window"), ("patreon", "Patreon", "window"),
+         ("xenforo", "XenForo forum", "window"), ("booru", "Booru", "api_key")]
+ORDER = [t[0] for t in TYPES]
 GROUPS = {"mastodon": "Mastodon", "xenforo": "XenForo", "booru": "Booru"}
 # XenForo forums are one account each, keyed "xenforo:<host>". The cookie
 # prefix is the forum's choice (xf_ by default); <prefix>user is set by a
@@ -241,6 +246,7 @@ def problems(rows=None):
 
 def logout(key):
     _path(key).unlink(missing_ok=True)
+    _pending.pop(key, None)             # also a login that failed or was given up on: its row goes
     log.info("%s: logged out", key)
     _changed(key, "logout")
 
@@ -318,10 +324,10 @@ def secrets(key):
     return load(key) if logged_in(key) else None
 
 
-def accounts(keys=()):
-    """Every account Manage Accounts shows: the fixed sites, then each server, forum
-    and booru a card uses (keys) or that has a login saved."""
-    have = [k for k in keys if k]
+def accounts():
+    """Every account there can be: the fixed sites, then each server, forum and booru
+    with a login saved. The caller keeps those that are logged in or being logged in."""
+    have = []
     if DIR.is_dir():
         for p in DIR.glob("*.json"):
             data = load(p.stem) or {}

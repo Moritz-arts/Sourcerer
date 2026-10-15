@@ -24,6 +24,7 @@ page refused):
     for as long as it asks or for hours, and the pause outlives a restart;
   - a day's budget per site (BUDGETS): what is left waits for tomorrow.
 """
+import contextlib
 import datetime
 import email.utils
 import hashlib
@@ -49,7 +50,7 @@ RETRIES = 4
 
 _local = threading.local()
 _lock = threading.Lock()
-_hosts = {}                 # (host, carries a login) -> its limiter's state
+_hosts = {}                 # (host, carries a login, small pictures) -> its limiter's state
 _limits = {"per_host": 2, "pace": 0.25}
 CAP = 300                   # the longest Retry-After waited out; a longer one pauses the site
 
@@ -68,6 +69,13 @@ HOSTS = {"www.pixiv.net": (1, 1.5), "i.pximg.net": (1, 0.5), "www.patreon.com": 
 # Not retried on a 429 or a bot check. pixiv's terms forbid "large numbers of
 # actions within a short period"; tools that kept retrying there had accounts restricted.
 STOP_HOSTS = {"www.pixiv.net"}
+
+# The gallery's small pictures, from a host that carries no login: a browser opens six
+# connections to a CDN to show a page of them, so four at a time, 0.08 s apart, is less
+# than that -- and a grid of sixty no longer waits one picture per HOSTS' pace (0.5 s on
+# pixiv's image host: half a minute for a page). Originals and anything with a login keep
+# the lanes above.
+PREVIEW = (4, 0.08)
 
 LOGIN_PACE = 2.0            # seconds at least between two requests carrying a login
 JITTER = (1.0, 1.6)         # every gap times this, drawn anew: longer, never shorter
@@ -305,8 +313,12 @@ class _Polite:
     one at a time and LOGIN_PACE apart for requests carrying a login, timed
     from the end of the last one, with a reading break now and then."""
 
-    def __init__(self, url, login=False, first=False):
-        self.url, self.login, self.first = url, login, first
+    def __init__(self, url, login=False, first=False, preview=False):
+        # first: somebody is waiting for this one -- a gallery's large view, or a download they
+        # asked for (interactive()). It goes ahead of what can wait and takes no reading break.
+        self.url, self.login = url, login
+        self.first = first or bool(getattr(_local, "interactive", 0))
+        self.preview = preview and not login
         self.host = urllib.parse.urlparse(url).hostname or ""
 
     def __enter__(self):
@@ -316,9 +328,12 @@ class _Polite:
             limit, pace = min(_limits["per_host"], own[0]), max(_limits["pace"], own[1])
             if self.login:                       # Settings can make this gentler, never faster
                 limit, pace = 1, max(pace, LOGIN_PACE)
-            entry = _hosts.get((self.host, self.login))
+            elif self.preview:
+                limit, pace = PREVIEW
+            lane = (self.host, self.login, self.preview)
+            entry = _hosts.get(lane)
             if entry is None or entry["limit"] != limit:
-                entry = _hosts[(self.host, self.login)] = {
+                entry = _hosts[lane] = {
                     "sem": threading.BoundedSemaphore(limit), "limit": limit, "start": 0.0, "end": 0.0,
                     "count": 0, "break": random.randint(*READ_EVERY), "first": 0}
             self.entry = entry
@@ -341,7 +356,7 @@ class _Polite:
                 at = (entry["end"] if self.login else entry["start"]) + pace * random.uniform(*JITTER)
                 if self.login:
                     entry["count"] += 1
-                    if entry["count"] >= entry["break"]:
+                    if entry["count"] >= entry["break"] and not self.first:
                         entry["count"], entry["break"] = 0, random.randint(*READ_EVERY)
                         at += random.uniform(*READ_BREAK)
                 now = time.monotonic()
@@ -357,6 +372,18 @@ class _Polite:
     def __exit__(self, *exc):
         self.entry["end"] = time.monotonic()
         self.entry["sem"].release()
+
+
+@contextlib.contextmanager
+def interactive():
+    """Requests made while somebody waits for the answer (a download asked for in the
+    gallery): ahead of those that can wait in a site's lane, and without the reading break
+    a login lane takes now and then. The gaps between requests stay: they are the site's."""
+    _local.interactive = getattr(_local, "interactive", 0) + 1
+    try:
+        yield
+    finally:
+        _local.interactive -= 1
 
 
 def _own(host):
@@ -593,7 +620,7 @@ def fetch_picture(url, headers=None, limit=40 << 20, first=False):
     """A picture or video for the gallery, as (content type, bytes): asked for
     once, no retries -- a preview is not worth asking a site twice -- and only
     a picture or a video is accepted."""
-    with _Polite(url, _carries_login(url, headers), first):
+    with _Polite(url, _carries_login(url, headers), first, preview=not first):
         resp = _get(url, stream=True, headers=headers, tries=1)
         try:
             ctype = (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()

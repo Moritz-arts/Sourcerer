@@ -12,6 +12,7 @@ USERDATA = ROOT / "Userdata"
 DB_PATH = USERDATA / "sourcerer.db"
 LOG_DIR = USERDATA / "Logs"
 AVATARS = USERDATA / "Avatars"
+PREVIEWS = USERDATA / "Previews"     # the pictures cards show before anything is downloaded (a cache)
 # An update is unpacked here: inside Userdata, which the update carries
 # across, so the install folder never shows a stray staging folder.
 UPDATE_DIR = USERDATA / "_update"
