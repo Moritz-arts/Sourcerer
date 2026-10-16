@@ -415,18 +415,26 @@ _VIDEO = (".mp4", ".webm", ".m4v", ".mov")
 
 
 def _previews(host, engine, p, src):
-    """The engine's own preview (grid) and sample (viewer) sizes; a video plays from its file."""
+    """The engine's own grid and viewer sizes; a video plays from its file. The grid never gets the
+    150 px preview where the engine has a sample (Gelbooru, Moebooru, e621): upscaled into a tile it was
+    the pixelated one. Where the sample is the viewer's picture too, it is fetched once."""
     full = lambda u: urllib.parse.urljoin("https://%s/" % host, u) if u else ""
     video = src.lower().split("?")[0].endswith(_VIDEO)
     if engine == "danbooru":
         sizes = {v.get("type"): v.get("url") for v in (p.get("media_asset") or {}).get("variants") or []}
-        thumb, large = sizes.get("360x360") or sizes.get("180x180"), sizes.get("sample") or sizes.get("720x720")
+        thumb, large = sizes.get("720x720") or sizes.get("360x360") or sizes.get("180x180"), \
+            sizes.get("sample") or sizes.get("720x720")
         w, h = p.get("image_width"), p.get("image_height")
     elif engine == "e621":
-        thumb, large = (p.get("preview") or {}).get("url"), (p.get("sample") or {}).get("url")
-        w, h = (p.get("file") or {}).get("width"), (p.get("file") or {}).get("height")
+        large = (p.get("sample") or {}).get("url")
+        # No sample: the file is small enough not to need one (an e621 sample starts at 850 px).
+        file = p.get("file") or {}
+        small = file.get("url") if (file.get("size") or 1 << 30) < 700_000 and file.get("ext") in ("jpg", "png", "webp") else None
+        thumb = large or small or (p.get("preview") or {}).get("url")
+        w, h = file.get("width"), file.get("height")
     else:
-        thumb, large = p.get("preview_url"), p.get("sample_url")
+        large = p.get("sample_url")
+        thumb = large or p.get("preview_url")
         w, h = p.get("width"), p.get("height")
     return {"thumb": full(thumb), "large": src if video else full(large) or src, "video": video,
             "width": int(w or 0), "height": int(h or 0)}

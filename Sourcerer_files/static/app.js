@@ -147,6 +147,9 @@ function setSize(px, save) {
 
 function artistById(id) { return S.artists.filter(function (a) { return a.id === id; })[0]; }
 
+// When something last happened on a card: a download, else a sync, else its making.
+function activityOf(a) { return a.last_activity || a.last_sync || a.created || ""; }
+
 function visibleArtists() {
   var q = $("search").value.trim().toLowerCase();
   var list = S.artists.filter(function (a) {
@@ -157,7 +160,7 @@ function visibleArtists() {
   list.sort(function (a, b) {
     if (by === "files" && a.file_count !== b.file_count) return b.file_count - a.file_count;
     if (by === "activity") {
-      var ta = a.last_activity || a.last_sync || a.created || "", tb = b.last_activity || b.last_sync || b.created || "";
+      var ta = activityOf(a), tb = activityOf(b);
       if (ta !== tb) return ta < tb ? 1 : -1;
     }
     return a.name.localeCompare(b.name);
@@ -417,6 +420,7 @@ function openMenu(a, x, y) {
   var m = $("menu");
   S.menuFor = a.id;
   select(a.id);
+  m.querySelector('[data-menu="gallery"]').classList.toggle("hidden", S.view === "browse");
   m.classList.remove("hidden");
   m.style.top = Math.min(y, innerHeight - m.offsetHeight - 8) + "px";
   m.style.left = Math.min(x, innerWidth - m.offsetWidth - 8) + "px";
@@ -567,7 +571,7 @@ var galNear = new IntersectionObserver(function (entries) {
     if (e.isIntersecting) { galNear.unobserve(e.target); e.target.dataset.q = "1"; galQueue.push(e.target); }
   });
   galPump();
-}, { root: $("gal-body"), rootMargin: "400px" });
+}, { root: $("gal-body"), rootMargin: "800px" });
 
 // An image is queued once (data-q) and counts as loading only while it is in
 // galFlight: a second entry for one that already started, or a picture of a
@@ -598,7 +602,13 @@ function galWatch() {
 
 var BR_HIDDEN = "sourcerer.browse.hidden";
 var BR_FIT = "sourcerer.browse.fit";
-S.view = "cards"; S.brArtist = 0; S.brFit = "square";
+var BR_SORT = "sourcerer.browse.sort", BR_COUNT = "sourcerer.browse.count";
+S.view = "cards"; S.brArtist = 0; S.brFit = "square"; S.brSort = "name"; S.brCount = "sources";
+try {
+  S.brSort = localStorage.getItem(BR_SORT) === "activity" ? "activity" : "name";
+  S.brCount = { files: "files", auto: "auto" }[localStorage.getItem(BR_COUNT)] || "sources";
+} catch (e) {}
+$("br-sort").value = S.brSort; $("br-count").value = S.brCount;
 try { S.brHidden = JSON.parse(localStorage.getItem(BR_HIDDEN) || "{}"); } catch (e) { S.brHidden = {}; }
 try { S.brFit = localStorage.getItem(BR_FIT) === "full" ? "full" : "square"; } catch (e) {}
 
@@ -633,18 +643,28 @@ function browseClose() {
   closeView();
 }
 
-// The artists, "All artists" first; the one open is marked.
+// The artists, "All artists" first; the one open is marked. Alphabetic or the latest activity first,
+// and the number beside a name is what the second choice says: the sources Sourcerer tracks, the images
+// in the library, or whether the card downloads by itself (the cloud, dimmed when it does not).
 function renderBrowseList() {
   var q = $("br-search").value.trim().toLowerCase();
-  var list = S.artists.slice().sort(function (x, y) { return x.name.localeCompare(y.name); })
-    .filter(function (a) { return !q || a.name.toLowerCase().indexOf(q) >= 0; });
+  var list = S.artists.filter(function (a) { return !q || a.name.toLowerCase().indexOf(q) >= 0; })
+    .sort(function (x, y) {
+      if (S.brSort === "activity") { var tx = activityOf(x), ty = activityOf(y); if (tx !== ty) return tx < ty ? 1 : -1; }
+      return x.name.localeCompare(y.name);
+    });
+  function count(a) {
+    if (S.brCount === "files") return a.file_count || "";
+    if (S.brCount === "auto") return '<span title="Auto-download ' + (a.auto_download ? "on" : "off") + '">' +
+      icon("cloud-down", a.auto_download ? "" : "off") + "</span>";
+    return a.sources.filter(function (s) { return s.supported; }).length || "";
+  }
   $("br-list").innerHTML = (q ? "" : '<button type="button" class="br-item all' + (!S.brArtist ? " selected" : "") +
     '" data-id="0">' + icon("photo") + '<span class="br-name">All artists</span></button>') +
     list.map(function (a) {
-      var n = a.sources.filter(function (s) { return s.supported; }).length;
       return '<button type="button" class="br-item' + (S.brArtist === a.id ? " selected" : "") + '" data-id="' + a.id + '">' +
         avatarHtml(a) + '<span class="br-name" title="' + esc(a.name) + '">' + esc(a.name) + "</span>" +
-        '<span class="br-n">' + (n || "") + "</span></button>";
+        '<span class="br-n">' + count(a) + "</span></button>";
     }).join("");
 }
 
@@ -779,6 +799,12 @@ function proxyOf(it, size) {
   return "/api/gallery/" + G.id + "/" + it.id + "/" + size;
 }
 
+// A site's mark instead of its name; "" for a site without one (the caller writes the name then).
+var SITE_LOGOS = { Bluesky: "bluesky", Mastodon: "mastodon", Pixiv: "pixiv", Patreon: "patreon", X: "x", XenForo: "xenforo", Booru: "booru" };
+function siteLogo(label) {
+  return SITE_LOGOS[label] ? '<svg class="ic logo" role="img" aria-label="' + esc(label) + '"><use href="#l-' + SITE_LOGOS[label] + '"/></svg>' : "";
+}
+
 function tileHtml(it, i) {
   var proxied = /^\/api\/gallery\//.test(it.thumb || "");
   var picture = it.thumb
@@ -789,7 +815,7 @@ function tileHtml(it, i) {
     (it.w && it.h ? '" data-ar="' + galRatio(it.w, it.h) : "") +
     '" data-src="' + esc(it.source) + '" title="' + esc(who + (it.posted ? " · " + it.posted.slice(0, 10) : "")) + '">' +
     picture + (it.video && it.thumb ? '<span class="gal-play">' + icon("play") + "</span>" : "") +
-    '<span class="gal-tag">' + esc(who) + "</span>" +
+    '<span class="gal-tag">' + (G.all ? esc(it.artist) + " " : "") + (siteLogo(it.source) || esc(it.source)) + "</span>" +
     (it.saved ? '<span class="gal-saved" title="Downloaded">' + icon("check") + "</span>" : "") + "</button>";
 }
 
@@ -808,9 +834,10 @@ function galSources(list) {
       : busy ? label + ": asking the site…" : "Hide " + label + (G.all ? " (" + plural(of.length, "source") + ")" : "") +
         (news ? " · " + plural(news, "new post") : "");
     // A spinner while the site is asked, green when it answered, orange when it did not.
-    return '<button type="button" class="chip' + (off ? " off" : "") + '" data-galsrc="' + esc(label) +
-      '" title="' + esc(tip) + '">' + (busy ? '<i class="spin sm"></i>' : '<i class="dot ' + (bad.length ? "warn" : ready ? "ok" : "blank") + '"></i>') +
-      esc(label) + "</button>";
+    var state = busy ? '<i class="spin"></i>' : '<i class="dot ' + (bad.length ? "warn" : ready ? "ok" : "blank") + '"></i>';
+    var mark = siteLogo(label);
+    return '<button type="button" class="chip' + (mark ? " logo" : "") + (off ? " off" : "") + '" data-galsrc="' + esc(label) +
+      '" title="' + esc(tip) + '">' + (mark ? '<span class="mark">' + mark + state + "</span>" : state + esc(label)) + "</button>";
   }).join("");
 }
 
@@ -834,6 +861,7 @@ function viewItem(i) {
     img.onload = function () {
       if (!img.isConnected) return;                // the view moved on: not this item's stand-in any more
       var ph = $("gal-stage").querySelector(".gal-ph"); if (ph) ph.remove(); img.classList.remove("gal-big");
+      galPrefetch(i);
     };
     img.onerror = function () {
       if (!img.isConnected) return;
@@ -849,6 +877,24 @@ function viewItem(i) {
   $("gal-view").classList.remove("hidden");
   // Near the end of what is listed: the next page, before it is needed.
   if (i > G.items.length - 8) moreGallery();
+}
+
+// The next two pictures are fetched while this one is looked at, once it has arrived (not before: it
+// comes first): stepping on finds them in the browser's cache -- or in Sourcerer's memory, for a site
+// whose pictures go through it. A gallery that closed meanwhile simply fails them.
+var galPre = [];
+function galPrefetch(i) {
+  galPre = [];                                    // held until the next call so the browser does not drop them
+  for (var n = i + 1, left = 2; G && G.items[n] && left; n++) {
+    var it = G.items[n];
+    if (G.hidden[it.source]) continue;            // step() skips those too
+    left--;
+    if (it.video || !it.large) continue;
+    var im = new Image();
+    im.referrerPolicy = "no-referrer";
+    im.src = it.large;
+    galPre.push(im);
+  }
 }
 
 function step(by) {
@@ -872,6 +918,7 @@ $("gal-grid").addEventListener("click", function (e) {
 // once more through Sourcerer, then a placeholder instead of a broken image.
 $("gal-grid").addEventListener("error", function (e) {
   if (e.target.tagName !== "IMG") return;
+  if (e.target.classList.contains("sharp")) { e.target.remove(); return; }       // the small picture stays
   var tile = e.target.closest(".gal-tile"), it = G && G.items[+tile.dataset.i];
   var via = it && proxyOf(it, "thumb");
   if (via && !e.target.dataset.lazy) {
@@ -942,7 +989,32 @@ function galRatio(w, h) {
   return Math.round(Math.max(GAL_RATIO[0], Math.min(GAL_RATIO[1], r)) * 1000) / 1000;
 }
 
+// Full mode spreads a wide picture over a whole row, and the size slider enlarges every tile: the grid's
+// small picture stretched that far is the pixelated one. Where the site has a screen-sized rendition
+// (item.mid: cheap, unlike an original) it is laid over the small one once the tile needs it, through
+// the same queue as the grid's pictures, and only for tiles near the screen (galNear).
+var galSharpTimer = 0;
+function galSharpenSoon() { clearTimeout(galSharpTimer); galSharpTimer = setTimeout(galSharpen, 250); }
+function galSharpen() {
+  if (!G) return;
+  var dpr = window.devicePixelRatio || 1;
+  Array.prototype.forEach.call($("gal-grid").children, function (tile) {
+    var img = tile.firstElementChild, it = G.items[+tile.dataset.i];
+    if (!it || !it.mid || tile.dataset.sharp || tile.classList.contains("hidden")) return;
+    if (!img || img.tagName !== "IMG" || !img.complete || !img.naturalWidth) return;          // its own picture first
+    if (tile.clientWidth * dpr <= img.naturalWidth * 1.2 || (it.w && it.w <= img.naturalWidth * 1.05)) return;
+    tile.dataset.sharp = "1";
+    var big = document.createElement("img");
+    big.className = "sharp"; big.alt = ""; big.decoding = "async"; big.referrerPolicy = "no-referrer";
+    big.dataset.lazy = it.mid;
+    big.addEventListener("load", function () { big.classList.add("in"); });
+    img.after(big);
+    galNear.observe(big);
+  });
+}
+
 function galLayout() {
+  galSharpenSoon();
   var grid = $("gal-grid"), full = S.brFit === "full";
   grid.classList.toggle("justified", full);
   var width = Math.floor(grid.clientWidth);
@@ -974,9 +1046,11 @@ new ResizeObserver(function () { if (S.brFit === "full") galLayoutSoon(60); }).o
 // A picture that arrived tells its true shape; the rows follow a moment later, not once per picture.
 $("gal-grid").addEventListener("load", function (e) {
   var img = e.target, tile = img.tagName === "IMG" && img.closest(".gal-tile");
+  if (tile && !img.classList.contains("sharp")) galSharpenSoon();
   if (!tile || tile.dataset.ar || !img.naturalWidth) return;
   tile.dataset.ar = galRatio(img.naturalWidth, img.naturalHeight);
   if (S.brFit === "full") galLayoutSoon(150);
+  else galSharpenSoon();
 }, true);
 
 function galFit(fit, save) {
@@ -1007,6 +1081,24 @@ document.addEventListener("keydown", function (e) {
 $("view-cards").addEventListener("click", function () { setView("cards"); });
 $("view-browse").addEventListener("click", function () { setView("browse"); });
 $("br-search").addEventListener("input", renderBrowseList);
+$("br-add").addEventListener("click", function () { openCard(null); });
+$("br-sort").addEventListener("change", function () {
+  S.brSort = this.value === "activity" ? "activity" : "name";
+  try { localStorage.setItem(BR_SORT, S.brSort); } catch (e) {}
+  renderBrowseList();
+});
+$("br-count").addEventListener("change", function () {
+  S.brCount = { files: "files", auto: "auto" }[this.value] || "sources";
+  try { localStorage.setItem(BR_COUNT, S.brCount); } catch (e) {}
+  renderBrowseList();
+});
+// Right-click on an artist: the card's menu (Delete among it), as on the cards.
+$("br-list").addEventListener("contextmenu", function (e) {
+  var b = e.target.closest("[data-id]"), a = b && artistById(+b.dataset.id);
+  if (!a) return;
+  e.preventDefault();
+  openMenu(a, e.clientX, e.clientY);
+});
 $("br-list").addEventListener("click", function (e) {
   var b = e.target.closest("[data-id]");
   if (b && !(G && G.id && +b.dataset.id === S.brArtist)) browseOpen(+b.dataset.id);

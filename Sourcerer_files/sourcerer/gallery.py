@@ -393,6 +393,10 @@ class _Gallery:
             d.update(thumb=proxy + "thumb", large=proxy + "large")
         else:
             d.update(thumb=m.thumb, large=m.large or m.thumb)
+        # A screen-sized rendition that is not the original file nor the grid's picture: what a tile that
+        # the grid's small one cannot fill sharply (Full mode's wide pictures) is sharpened with.
+        if not mine and m.large and m.large not in (m.url, m.thumb) and not m.video:
+            d["mid"] = proxy + "mid" if m.preview_headers is not None else m.large
         if mine:
             d["saved"] = True
             if mine["path"]:                         # the library's copy: no request at all
@@ -477,19 +481,23 @@ def _forget(gallery_id):
             _cached[0] -= len(_cache.pop(key)[1])
 
 
-def picture(gallery_id, number, size):
-    """(content type, bytes) of an item's grid picture or large view, fetched
-    with the headers its site wants and kept in memory only."""
-    g = _get(gallery_id)
-    s, m = g.items[number]
-    key = (gallery_id, number, size)
+def _kept(gallery_id, key, data):
+    """Keep fetched bytes in memory (the oldest dropped first); nothing of a gallery that closed meanwhile."""
     with _lock:
-        hit = _cache.get(key)
-        if hit:
-            _cache.move_to_end(key)
-            return hit
-    # One fetch per picture: a second request for it (stepping away and back in the
-    # large view) waits for the first instead of asking the site -- with a login -- again.
+        if gallery_id not in _galleries:
+            return
+        old = _cache.pop(key, None)
+        if old:
+            _cached[0] -= len(old[1])
+        _cache[key] = data
+        _cached[0] += len(data[1])
+        while _cached[0] > MEMORY and len(_cache) > 1:
+            _cached[0] -= len(_cache.popitem(last=False)[1][1])
+
+
+def _once(gallery_id, key, make):
+    """make() once per key, kept: a second asker waits for the first instead of asking the site --
+    with a login -- again (the grid's picture, then the same one in the large view, stepping away and back)."""
     while True:
         with _lock:
             hit = _cache.get(key)
@@ -502,22 +510,40 @@ def picture(gallery_id, number, size):
                 break
         flight.wait(120)
     try:
-        url = (m.thumb if size == "thumb" else "") or m.large or m.thumb or m.url
-        ctype, data = net.fetch_picture(url, headers=m.preview_headers or None, first=size == "large")
-        if size == "thumb" and not m.thumb and ctype.startswith("image/"):
-            # A forum gives no small picture: one is made here, in memory.
-            data, ctype = imaging.preview(io.BytesIO(data), 400), "image/jpeg"
-        with _lock:
-            if gallery_id not in _galleries:        # closed while it was on its way: keep nothing
-                return ctype, data
-            _cache[key] = (ctype, data)
-            _cached[0] += len(data)
-            while _cached[0] > MEMORY and len(_cache) > 1:
-                _cached[0] -= len(_cache.popitem(last=False)[1][1])
+        data = make()
+        _kept(gallery_id, key, data)
     finally:
         with _lock:
             _flight.pop(key).set()
-    return ctype, data
+    return data
+
+
+def picture(gallery_id, number, size):
+    """(content type, bytes) of an item's grid picture, its screen-sized "mid" or its large view, fetched
+    with the headers its site wants and kept in memory only. Kept by address, not by size: a site whose
+    grid picture is the viewer's picture (a booru's sample) is asked once."""
+    g = _get(gallery_id)
+    s, m = g.items[number]
+    thumb = size == "thumb"
+    url = (m.thumb if thumb else "") or m.large or m.thumb or m.url
+
+    def fetch(address):
+        return _once(gallery_id, (gallery_id, number, address, ""),
+                     lambda: net.fetch_picture(address, headers=m.preview_headers or None, first=size == "large"))
+
+    try:
+        data = fetch(url)
+    except Exception:
+        # A grid picture that is not there (a rendition the site does not make): the viewer's one will do.
+        fallback = m.large or m.url
+        if not thumb or not m.thumb or not fallback or fallback == url:
+            raise
+        data = fetch(fallback)
+    if thumb and not m.thumb and data[0].startswith("image/"):
+        # A forum gives no small picture: one is made here, in memory, from the original the viewer will want too.
+        return _once(gallery_id, (gallery_id, number, url, "small"),
+                     lambda: ("image/jpeg", imaging.preview(io.BytesIO(data[1]), 400)))
+    return data
 
 
 def download(gallery_id, number):
@@ -530,7 +556,7 @@ def download(gallery_id, number):
     with db.connect() as con:
         src = con.execute("SELECT * FROM sources WHERE id = ?", (s.row["id"],)).fetchone()
     with _lock:
-        seen = _cache.get((gallery_id, number, "large"))
+        seen = _cache.get((gallery_id, number, m.large, ""))
     if seen and m.large and m.large == m.url and m.filename and not m.fetch:
         m = _from_memory(m, *seen)             # the large view already fetched the original: no second request
     # Somebody is waiting for this one: ahead of what waits in the site's lane, no reading break.

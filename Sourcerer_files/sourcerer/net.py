@@ -1,7 +1,8 @@
 """HTTP: JSON requests and streamed downloads, polite to every site.
 
 Speed comes from reusing connections (one requests.Session per thread, so a
-new file costs no new TLS handshake) and from downloading several files at
+new file costs no new TLS handshake; the gallery's pictures, each asked for on a thread of
+its own, share one session, _picture_session) and from downloading several files at
 once. Politeness comes from two limits per site: how many requests run at
 once, and a pause between two of them -- Settings' values, or a site's own
 stricter ones (HOSTS). A 429 or 5xx is waited out, honouring Retry-After,
@@ -28,6 +29,7 @@ import contextlib
 import datetime
 import email.utils
 import hashlib
+import http.cookiejar
 import json
 import logging
 import mimetypes
@@ -291,6 +293,28 @@ def _session():
     return s
 
 
+_shared = None
+_shared_lock = threading.Lock()
+
+
+def _picture_session():
+    """One session for every gallery picture, kept for good. A request of the page runs on a
+    thread of its own, so _session() would build a fresh one -- a new TLS context and a new
+    handshake -- for each of sixty thumbnails, and that was most of the wait. It takes no
+    cookies: what a login needs goes per request (_get), and nothing leaks between hosts."""
+    global _shared
+    with _shared_lock:
+        if _shared is None:
+            s = _shared = requests.Session()
+            s.headers["User-Agent"] = config.USER_AGENT
+            s.cookies.set_policy(http.cookiejar.DefaultCookiePolicy(allowed_domains=[]))
+            s.mount("https://", _Tls13(pool_connections=32, pool_maxsize=16))
+        for netloc in list(_OLD_TLS):
+            if "https://%s/" % netloc not in _shared.adapters:
+                _shared.mount("https://%s/" % netloc, HTTPAdapter(pool_connections=4, pool_maxsize=16))
+        return _shared
+
+
 def _lacks_tls13(e, session):
     """Whether a failed handshake shows that its server -- the request's own or
     a redirect's -- speaks no TLS 1.3. Judged by what this attempt used: a
@@ -426,7 +450,8 @@ def _retry_after(resp):
     return None
 
 
-def _get(url, params=None, stream=False, headers=None, method="GET", data=None, json=None, tries=None):
+def _get(url, params=None, stream=False, headers=None, method="GET", data=None, json=None, tries=None,
+         pooled=False):
     """A response, retrying what passes with time. The caller holds _Polite(url).
 
     A site the user logged in to gets what proves the login (accounts.py) --
@@ -445,7 +470,7 @@ def _get(url, params=None, stream=False, headers=None, method="GET", data=None, 
     tries = tries or (RETRIES if method == "GET" else 1)
     attempt = handshakes = 0
     while attempt < tries:
-        session = _session()
+        session = _picture_session() if pooled else _session()
         if login:
             spend(url)
         try:
@@ -624,7 +649,7 @@ def fetch_picture(url, headers=None, limit=40 << 20, first=False):
     once, no retries -- a preview is not worth asking a site twice -- and only
     a picture or a video is accepted."""
     with _Polite(url, _carries_login(url, headers), first, preview=not first):
-        resp = _get(url, stream=True, headers=headers, tries=1)
+        resp = _get(url, stream=True, headers=headers, tries=1, pooled=True)
         try:
             ctype = (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
             if not ctype.startswith(("image/", "video/")):
