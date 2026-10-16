@@ -147,7 +147,8 @@ input[type=range] { accent-color: var(--fill-accent); cursor: pointer; }
 .br-head .seg { margin-left: 0; }
 .br-head .seg button { padding: 3px 10px; font-size: 12px; }
 #br-edit { padding: 3px 5px; }
-.gal-body { flex: 1; min-height: 0; overflow: auto; padding: 12px; }
+/* A scrollbar that comes and goes would change the width Full mode lays its rows out for, and again ... */
+.gal-body { flex: 1; min-height: 0; overflow: auto; overflow-y: scroll; padding: 12px; }
 .gal-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--gal, 200px), 1fr)); gap: 8px; }
 .gal-grid.justified { display: flex; flex-wrap: wrap; align-content: flex-start; }
 .gal-grid.justified .gal-tile { aspect-ratio: auto; flex: none; }

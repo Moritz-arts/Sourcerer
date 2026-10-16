@@ -170,9 +170,34 @@ function render() {
   $("empty").classList.toggle("hidden", S.artists.length > 0);
   $("nomatch").classList.toggle("hidden", !S.artists.length || list.length > 0);
   $("cards").classList.toggle("hidden", !S.artists.length);
-  $("cards").innerHTML = list.map(cardHtml).join("") +
-    '<button class="add-tile" data-act="add" title="New card (Ctrl+N)">' + icon("plus") + "New card</button>";
+  patchCards(list.map(cardHtml).join("") +
+    '<button class="add-tile" data-act="add" title="New card (Ctrl+N)">' + icon("plus") + "New card</button>");
   renderActivity();
+}
+
+// The cards are rebuilt every poll while a sync runs. Replacing all of them would swallow a click that
+// began before the rebuild (a switch, a button): only a card whose markup changed is replaced, and a
+// running one has its progress parts replaced, nothing else.
+function patchCards(html) {
+  var grid = $("cards"), next = document.createElement("div");
+  next.innerHTML = html;
+  var now = Array.prototype.slice.call(grid.children), want = Array.prototype.slice.call(next.children);
+  var same = now.length === want.length && want.every(function (n, i) { return n.tagName === now[i].tagName && n.dataset.id === now[i].dataset.id; });
+  if (!same) { grid.innerHTML = html; return; }
+  want.forEach(function (n, i) {
+    var o = now[i];
+    if (o.outerHTML === n.outerHTML) return;
+    var live = [".progress-text", ".bar", ".card-status"];
+    if (o.classList.contains("busy") && n.classList.contains("busy") && live.every(function (q) { return o.querySelector(q) && n.querySelector(q); })) {
+      var a = o.cloneNode(true), b = n.cloneNode(true);
+      live.forEach(function (q) { a.querySelector(q).remove(); b.querySelector(q).remove(); });
+      if (a.outerHTML === b.outerHTML) {
+        live.forEach(function (q) { var x = o.querySelector(q), y = n.querySelector(q); if (x.outerHTML !== y.outerHTML) x.replaceWith(y); });
+        return;
+      }
+    }
+    o.replaceWith(n);
+  });
 }
 
 // One link per source, its dot saying how it fares; a click opens it in the browser.
@@ -211,8 +236,8 @@ function cardHtml(a) {
     }
     return html + '<div class="progress-text">' + esc(text) + "</div>" +
       '<div class="bar' + (cur.phase === "scan" ? " indeterminate" : "") + '"><div style="width:' + pct + '%"></div></div>' +
-      (cur.phase === "scan" ? "" : '<div class="card-status"><span>' + esc(plural(cur.new, "new file") +
-        (cur.duplicates ? " · " + plural(cur.duplicates, "duplicate") + " skipped" : "")) + "</span></div>") +
+      '<div class="card-status">' + (cur.phase === "scan" ? "" : "<span>" + esc(plural(cur.new, "new file") +
+        (cur.duplicates ? " · " + plural(cur.duplicates, "duplicate") + " skipped" : "")) + "</span>") + "</div>" +
       '<div class="card-foot">' + autoHtml(a) + '<span class="acts"><button class="mini" data-act="cancel">Cancel</button></span></div></div>';
   }
   var supported = a.sources.some(function (s) { return s.supported; });
@@ -499,7 +524,7 @@ document.addEventListener("keydown", function (e) {
     var box = S.view === "browse" ? $("br-search") : $("search");
     e.preventDefault(); box.focus(); return box.select();
   }
-  if (k === "F5" || (ctrl && low === "r")) { e.preventDefault(); return sync(null, e.shiftKey); }
+  if (k === "F5" || (ctrl && low === "r")) { e.preventDefault(); return sync(null, k === "F5" && e.shiftKey); }
   if (ctrl && k === ",") { e.preventDefault(); return openSettings(); }
   if (ctrl && low === "l") { e.preventDefault(); return toggleLog(); }
   if (S.view === "browse") return;              // the card shortcuts below are the cards'
@@ -588,6 +613,7 @@ function setView(view) {
   if (browse) {
     renderBrowseList(); renderBrowseHead();
     if (!G || (G.all ? 0 : G.artist.id) !== S.brArtist) browseOpen(S.brArtist);      // not the one that was left open
+    else if (galLoading(G)) galPoll(G);
   }
 }
 
@@ -634,25 +660,37 @@ function renderBrowseHead() {
 
 // The spinner while a site is still being asked, and the count of new posts a check found
 // (they join when the gallery is opened again, so the pictures keep their places meanwhile).
+// Still waiting for a site the filter has not switched off.
+function galLoading(g) {
+  return !!(g && g.loading && (!g.sources || g.sources.some(function (s) { return s.loading && !g.hidden[s.label]; })));
+}
+
 function galHead() {
-  var loading = !!(G && G.loading), n = G && G.newPosts || 0;
+  var loading = galLoading(G), n = G && G.newPosts || 0;
   $("gal-spin").classList.toggle("hidden", !loading);
   $("gal-new").classList.toggle("hidden", !n);
   $("gal-new").textContent = n ? plural(n, "new post") + " · show" : "";
 }
 
 // The state of the sources while the page waits for them: a spinner per site, green once asked.
+// It asks nobody and only runs while Browse is shown; it slows down the longer a site takes.
 function galPoll(g) {
   if (g.polling) return;
   g.polling = true;
+  var n = 0;
   (function tick() {
-    if (g !== G || !g.id) return;
+    if (g !== G || !g.id || S.view !== "browse") { g.polling = false; return; }      // setView starts it again
     api("POST", "/api/gallery/state", { gallery: g.id }).then(function (d) {
       if (g !== G) return;
       g.sources = d.sources; g.loading = d.loading; g.newPosts = d.new_posts;
       galSources(d.sources); galHead();
-      if (d.loading) setTimeout(tick, 600); else g.polling = false;
-    }).catch(function () { g.polling = false; });
+      if (galLoading(g)) setTimeout(tick, Math.min(3000, 600 + 100 * n++)); else g.polling = false;
+    }).catch(function (e) {
+      g.polling = false;
+      // Closed by the server (a long rest, a restart): open it again where it was.
+      if (g === G && /was closed/.test(e.message)) browseOpen(S.brArtist);
+      else if (g === G) { g.loading = false; galHead(); galSources(g.sources || []); }
+    });
   })();
 }
 
@@ -671,7 +709,7 @@ function browseOpen(id) {
   $("gal-end").textContent = "Asking the sites…";
   closeView();
   renderBrowseList(); renderBrowseHead();
-  if (!id && !S.artists.length) { $("gal-end").textContent = "No cards yet: create a card first."; return; }
+  if (!id && !S.artists.length) { G.loading = false; galHead(); $("gal-end").textContent = "No cards yet: create a card first."; return; }
   var g = G;
   var hidden = Object.keys(S.brHidden).filter(function (k) { return S.brHidden[k]; });
   api("POST", "/api/gallery/open", { artist_id: id || 0, hidden: hidden }).then(function (d) {
@@ -681,7 +719,7 @@ function browseOpen(id) {
     galSources(d.sources); galHead();
     moreGallery();
     if (g.loading) galPoll(g);
-  }).catch(function (e) { $("gal-end").textContent = e.message; });
+  }).catch(function (e) { if (g === G) { g.loading = false; galHead(); } $("gal-end").textContent = e.message; });
 }
 
 // The ids of the sources whose site the filter has switched off.
@@ -879,7 +917,7 @@ $("gal-view").addEventListener("click", function (e) {
       delete g.downloading[it.id];
       g.items[i] = d.item;
       var tile = document.querySelector('#gal-grid .gal-tile[data-i="' + i + '"]');
-      if (tile) { tile.outerHTML = tileHtml(d.item, i); galWatch(); }
+      if (tile) { tile.outerHTML = tileHtml(d.item, i); galWatch(); galLayout(); }
       if (g.view === i) viewItem(i);
       toast(d.kept ? "Saved in " + d.item.artist + "'s folder" : "Not saved: the same picture is already in the folder");
       load();
@@ -912,10 +950,11 @@ function galLayout() {
   var cols = Math.max(1, Math.round((width + GAL_GAP) / (+$("gal-size").value + GAL_GAP)));
   var target = (width - GAL_GAP * (cols - 1)) / cols;                    // a row is about as high as a cell is wide
   var row = [], sum = 0;
+  function shape(t) { return parseFloat(t.dataset.ar || "1"); }        // not written back: a loaded picture says its own
   function place(last) {
     var avail = width - GAL_GAP * (row.length - 1), scale = avail / (sum * target);
     if (last) scale = Math.min(scale, GAL_LAST);                          // the last row does not stretch to fill
-    var h = target * scale, w = row.map(function (t) { return Math.floor(parseFloat(t.dataset.ar) * h); });
+    var h = target * scale, w = row.map(function (t) { return Math.floor(shape(t) * h); });
     var spare = last ? 0 : Math.max(0, avail - w.reduce(function (a, b) { return a + b; }, 0));
     row.forEach(function (t, i) {                                         // the leftover pixels go to the first tiles
       t.style.width = (w[i] + (i < spare ? 1 : 0)) + "px"; t.style.height = Math.floor(h) + "px";
@@ -924,8 +963,7 @@ function galLayout() {
   }
   Array.prototype.forEach.call(grid.children, function (t) {
     if (t.classList.contains("hidden")) return;
-    t.dataset.ar = t.dataset.ar || "1";
-    row.push(t); sum += parseFloat(t.dataset.ar);
+    row.push(t); sum += shape(t);
     if (sum * target + GAL_GAP * (row.length - 1) >= width) place(false);
   });
   if (row.length) place(true);
@@ -1231,9 +1269,13 @@ $("form-card").addEventListener("submit", function (e) {
     };
     return F.id ? api("PUT", "/api/artists/" + F.id, body) : api("POST", "/api/artists", body);
   }).then(function (d) {
+    var edited = F.id;
     $("dlg-card").close(); lastKey = "";
     if (d.id) S.selected = d.id;
-    load();
+    // Browse of the card that was edited (or of every card) shows its new sources.
+    load().then(function () {
+      if (S.view === "browse" && G && (G.all || (edited && G.artist && G.artist.id === edited))) browseOpen(S.brArtist);
+    });
     // The dots and the profile picture arrive a moment later, from the background.
     setTimeout(load, 2500);
   }).catch(function (err) { $("card-error").textContent = err.message; });
