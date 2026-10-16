@@ -48,6 +48,44 @@ goes under *Traps* below; a new folder goes into the folder map; a finished
 milestone or a decision goes into the roadmap. If it is only in a chat, it is
 lost.
 
+## Sourcerer.exe — the standalone Windows build
+
+A second download beside Sourcerer.zip, for people without Python
+(`Sourcerer-Windows.zip`): PyInstaller, built by `.github/workflows/build-exe.yml` on a
+Windows runner (`.github/exe/build.py`; `.github/exe/smoke.py` starts the result like a user
+before anything is attached) -- on a release, on each new version for `beta`, and as a test on
+pull requests. It is **not** a replacement: the repository stays the program, and Sourcerer.zip
+(launchers, system Python, in-app updater) stays the main download. Nothing exe-only is added to
+the root; the build files live in `.github/exe/`, outside every archive.
+
+How the code knows (`config.FROZEN`): the bundle is `Sourcerer.exe` + `Sourcerer_files/`
+(PyInstaller's `--contents-directory`), so `config.ROOT` (= `sys._MEIPASS`), `STATIC`,
+`VERSION` and `Userdata/` keep their meaning, and Userdata moves between the two downloads.
+Differences, all behind `config.FROZEN`: no launch.py, so `desktop.main` finds a running
+Sourcerer itself and `SOURCERER_DETACHED` is set in `app.py`; no venv, so gallery-dl is the exe
+started with `--gallery-dl` (dispatched first thing in `app.py`) and is upgraded only by a new
+build (`_gdl.upgrade` refuses, the weekly upgrade is skipped); no helper, so **updates are by
+hand** (`updater.check` returns `manual`, the page shows *Download*, install/reinstall refuse,
+the *venv* and *reinstall* repairs and gallery-dl's row are hidden) and *Restart* starts the
+exe with `--restart`, which waits until the old one stopped answering. The look for the exe's
+asset is `updater.ASSET`.
+
+Traps:
+- **gallery-dl loads its extractors by name**, which PyInstaller's scan does not see:
+  `--collect-submodules gallery_dl` and `--copy-metadata gallery-dl` (its `version()`) are in
+  `build.py`; `smoke.py` runs `--list-extractors` to catch a missing module.
+- **A new package with data files or dynamic imports needs a line in `build.py`** (like
+  pywebview's .NET bridge on Windows); a source start never shows the gap, only `smoke.py`.
+- **`--noconsole` means `sys.stdout is None`**: `app.py` points both at `Userdata/Logs/console.log`
+  first. The `--gallery-dl` run has real pipes (`_gdl._start`) and must keep them.
+- **Windows warns about, and some scanners remove, an unsigned PyInstaller exe.** The README says
+  so and points to Sourcerer.zip. Signing is a decision for the user.
+- **The in-app updater is the missing piece**: the swap helper is a Python script run by the
+  system's Python, which an exe user lacks. It needs a different helper (PowerShell or a second
+  small exe) -- do not copy HELPER blindly: it also deletes by name and keeps `venv/`.
+- **Only the Windows build is exercised in CI**; the Linux build used while developing proves
+  paths and the frozen start, not WebView2.
+
 ## Layout
 
 `Sourcerer_files/docs/FOLDER_MAP.md` describes it in full. Read it before
@@ -659,9 +697,9 @@ plain DOM code in `static/app.js`, no framework and no build step.
 There is no test suite yet. Run at least:
 
 ```bash
-python3 -m py_compile .github/*.py Sourcerer_files/*.py Sourcerer_files/sourcerer/*.py Sourcerer_files/sourcerer/sources/*.py
+python3 -m py_compile .github/*.py .github/exe/*.py Sourcerer_files/*.py Sourcerer_files/sourcerer/*.py Sourcerer_files/sourcerer/sources/*.py
 node --check Sourcerer_files/static/app.js
-python3 -c "import yaml; [yaml.safe_load(open(f)) for f in ('.github/workflows/version-bump.yml', '.github/workflows/release-zip.yml')]"
+python3 -c "import yaml; [yaml.safe_load(open(f)) for f in ('.github/workflows/version-bump.yml', '.github/workflows/release-zip.yml', '.github/workflows/build-exe.yml')]"
 sh -n start-linux.sh && sh -n start-macos.command
 sh ./start-linux.sh --no-open --port 8765   # the whole start; then use the page
 ```

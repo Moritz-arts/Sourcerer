@@ -34,6 +34,8 @@ API = "https://api.github.com/repos/%s" % config.REPO
 STAGE_REL = "Userdata/_update/new"             # relative to Sourcerer_files
 REQUIRED = ("Sourcerer_files/VERSION", "Sourcerer_files/launch.py",
             "Sourcerer_files/app.py", "start-windows.bat")
+# The standalone exe is updated by hand (see install): its own download, its own name.
+ASSET = "Sourcerer-Windows.zip" if config.FROZEN else "Sourcerer.zip"
 
 
 def version_tuple(v):
@@ -53,14 +55,16 @@ def check(channel):
         version = m.group(1) if m else ""
     else:
         version = (rel.get("tag_name") or "").lstrip("vV")
-    asset = next((a for a in rel.get("assets") or [] if a.get("name") == "Sourcerer.zip"), None)
+    asset = next((a for a in rel.get("assets") or [] if a.get("name") == ASSET), None)
     return {"channel": channel, "current": config.VERSION, "version": version,
             "available": bool(asset and version_tuple(version) > version_tuple(config.VERSION)),
             "url": asset["browser_download_url"] if asset else "",
-            "notes": rel.get("body") or "", "page": rel.get("html_url") or ""}
+            "notes": rel.get("body") or "", "page": rel.get("html_url") or "", "manual": config.FROZEN}
 
 
 def install(channel):
+    if config.FROZEN:
+        raise RuntimeError("The standalone Sourcerer is updated by hand: download %s." % ASSET)
     info = check(channel)
     if not info["url"]:
         raise RuntimeError("This channel has no Sourcerer.zip to install.")
@@ -73,6 +77,8 @@ def install(channel):
 
 def reinstall():
     """The installed version again, from its tag -- a repair for damaged files."""
+    if config.FROZEN:
+        raise RuntimeError("The standalone Sourcerer cannot reinstall itself: download %s." % ASSET)
     url = "https://codeload.github.com/%s/zip/refs/tags/v%s" % (config.REPO, config.VERSION)
     _stage(url, config.VERSION)
     _launch_helper(swap=True)
@@ -80,6 +86,17 @@ def reinstall():
 
 def restart():
     """Start Sourcerer again once this one has closed."""
+    if config.FROZEN:
+        # The new one waits (--restart) until this one no longer answers; started at once it
+        # would find this one running and leave. No shell, no helper script: the exe is enough.
+        kwargs = {"cwd": str(config.INSTALL), "stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL,
+                  "stderr": subprocess.DEVNULL, "close_fds": True}
+        if os.name == "nt":
+            kwargs["creationflags"] = 0x00000008 | 0x00000200       # detached, own process group
+        else:
+            kwargs["start_new_session"] = True
+        subprocess.Popen([sys.executable, "--restart"], **kwargs)
+        return
     _launch_helper(swap=False)
 
 

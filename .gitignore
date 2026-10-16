@@ -23,3 +23,6 @@ Sourcerer_files.bak/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Output of .github/exe/build.py
+/build-exe/

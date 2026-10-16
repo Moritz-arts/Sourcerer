@@ -1,8 +1,13 @@
 """Paths, the version and the settings' defaults. Everything imports this; it imports nothing of ours."""
 import pathlib
+import sys
 
-ROOT = pathlib.Path(__file__).resolve().parent.parent          # Sourcerer_files/
-INSTALL = ROOT.parent                                           # the folder with the launchers
+# True in the standalone Windows build (PyInstaller): Python is inside Sourcerer.exe, there is no
+# venv, no launch.py and no pip. The bundle's folder is named Sourcerer_files too, so ROOT, USERDATA
+# and STATIC mean the same there as in the repository.
+FROZEN = bool(getattr(sys, "frozen", False))
+ROOT = pathlib.Path(getattr(sys, "_MEIPASS", "") or pathlib.Path(__file__).resolve().parent.parent)  # Sourcerer_files/
+INSTALL = ROOT.parent                                           # the folder with the launchers (or Sourcerer.exe)
 VERSION = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
 STATIC = ROOT / "static"
 REPO = "Moritz-arts/Sourcerer"

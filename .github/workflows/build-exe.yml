@@ -1,0 +1,94 @@
+# Sourcerer-Windows.zip: Sourcerer.exe with Python inside, for people without one.
+#
+# Built with PyInstaller on a Windows runner (.github/exe/build.py), then started
+# the way a user starts it (.github/exe/smoke.py) before anything is published.
+# It is the *second* download beside Sourcerer.zip, not a replacement: that one
+# stays the program itself (the launchers, a system Python, the in-app updater).
+#
+# Three ways in:
+#   - a release is published   -> Sourcerer-Windows.zip is attached to it, next to Sourcerer.zip
+#   - a new version on main    -> called by version-bump.yml, replaces the one on the 'beta' prerelease
+#   - a pull request           -> built and tested, kept as a workflow artifact only
+# Run it by hand (Actions > Build Sourcerer.exe > Run workflow) to rebuild the file
+# for an existing release tag.
+name: Build Sourcerer.exe
+
+on:
+  pull_request:
+    paths:
+      - ".github/exe/**"
+      - ".github/workflows/build-exe.yml"
+      - "Sourcerer_files/**"
+  release:
+    types: [published]
+  workflow_call:
+    inputs:
+      ref:
+        description: Tag to build, e.g. v0.18
+        type: string
+        required: true
+      release:
+        description: Release to attach Sourcerer-Windows.zip to, e.g. beta
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag of the release to (re)build Sourcerer-Windows.zip for, e.g. v0.18
+        required: true
+
+jobs:
+  exe:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: build-exe-${{ inputs.release || inputs.tag || github.event.release.tag_name || github.ref }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    env:
+      # Through the environment, never interpolated into a script. Empty on a pull request.
+      RELEASE: ${{ inputs.release || inputs.tag || github.event.release.tag_name }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || inputs.tag || github.event.release.tag_name || github.sha }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: Sourcerer_files/requirements.txt
+
+      - name: Install the packages Sourcerer needs, and PyInstaller
+        run: |
+          python -m pip install -r Sourcerer_files/requirements.txt pyinstaller
+
+      - name: Build Sourcerer-Windows.zip
+        run: python .github/exe/build.py build-exe
+
+      - name: Start it the way a user does
+        run: python .github/exe/smoke.py build-exe/Sourcerer-Windows.zip --window
+
+      - name: Keep it as a workflow artifact (pull requests)
+        if: ${{ env.RELEASE == '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sourcerer-Windows
+          path: build-exe/Sourcerer-Windows.zip
+
+      - name: Attach it to the release
+        if: ${{ env.RELEASE != '' }}
+        shell: bash
+        run: |
+          # Two versions close together: the build of the older one may finish last.
+          # beta holds the newest only, so a build whose commit is no longer beta's is dropped.
+          if [ "$RELEASE" = beta ]; then
+            head=$(git ls-remote origin refs/tags/beta | cut -f1)
+            if [ "$head" != "$(git rev-parse HEAD)" ]; then
+              echo "beta has moved on to a newer build -- not replacing its exe with this one."
+              exit 0
+            fi
+          fi
+          gh release upload "$RELEASE" build-exe/Sourcerer-Windows.zip --clobber

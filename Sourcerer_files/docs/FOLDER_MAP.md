@@ -78,6 +78,11 @@ Sourcerer/                        <- what Sourcerer.zip unpacks to; move it free
                                     another library folder is chosen in Settings
 ```
 
+The standalone Windows download (Sourcerer-Windows.zip, built by CI, not in the repository) is
+`Sourcerer.exe` + `Sourcerer_files/` -- the same folder name, with `static/`, `VERSION` and a
+`Userdata/` made on first start inside, and Python, the packages and gallery-dl compiled in
+(no `launch.py`, no `venv/`, no `sourcerer/` sources). See CLAUDE.md, "Sourcerer.exe".
+
 Only in the repository, never in the ZIP (`export-ignore` in `.gitattributes`):
 
 ```
@@ -87,6 +92,10 @@ Only in the repository, never in the ZIP (`export-ignore` in `.gitattributes`):
 │   ├─ workflows/version-bump.yml raises the version on every push to main,
 │   │                               and puts that build on the `beta` prerelease
 │   ├─ workflows/release-zip.yml  attaches Sourcerer.zip to a published release
+│   ├─ workflows/build-exe.yml    builds Sourcerer-Windows.zip (PyInstaller, Windows runner),
+│   │                               tests it, attaches it to a release / `beta`; also on PRs
+│   ├─ exe/build.py               the PyInstaller build; exe/smoke.py starts the result like a
+│   │                               user; exe/Sourcerer.ico is the logo as the exe's icon
 │   ├─ bump_version.py            rewrites the number everywhere it is written
 │   └─ changelog_entry.py         turns commit subjects into the changelog entry
 ├─ .gitattributes
