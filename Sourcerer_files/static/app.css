@@ -148,6 +148,8 @@ input[type=range] { accent-color: var(--fill-accent); cursor: pointer; }
 .br-add:hover:not(:disabled) { border-color: var(--fill-accent); color: var(--text-accent); background: transparent; }
 .br-main { flex: 1; min-width: 0; display: flex; flex-direction: column; position: relative; }
 .br-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 9px 14px; border-bottom: .5px solid var(--border); }
+.br-avatar { display: contents; }
+.br-avatar .avatar { width: 30px; height: 30px; font-size: 11px; margin-right: -2px; }
 .br-title { font-weight: 600; font-size: 15px; white-space: nowrap; min-width: 0; max-width: 40%; overflow: hidden; text-overflow: ellipsis; }
 #br-download { white-space: nowrap; flex: none; }
 @media (max-width: 800px) { .br-side { width: 160px; } .br-order { flex-direction: column; } #br-sort { flex: none; } #version { display: none; } }
@@ -188,6 +190,8 @@ input[type=range] { accent-color: var(--fill-accent); cursor: pointer; }
 .gal-tag { position: absolute; left: 7px; bottom: 7px; display: flex; align-items: center; color: #fff; font-size: 11px; font-weight: 500;
   filter: drop-shadow(0 0 2px rgba(0, 0, 0, .75)) drop-shadow(0 1px 2px rgba(0, 0, 0, .5)); }
 .gal-tag .ic.logo { width: 18px; height: 18px; flex: none; }
+.gal-name { margin-left: 6px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gal-tag:has(.gal-name) { right: 7px; }
 .gal-saved { position: absolute; right: 6px; top: 6px; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center;
   justify-content: center; background: var(--fill-ok); color: #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, .45); }
 .gal-saved .ic { width: 15px; height: 15px; stroke-width: 3; }

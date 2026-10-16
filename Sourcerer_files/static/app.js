@@ -520,12 +520,16 @@ function renderBrowseList() {
   if (html !== brHtml) { brHtml = html; $("br-list").innerHTML = html; }
 }
 
+var brAvatar = "";
 function renderBrowseHead() {
   var a = G && G.artist, sup = !!a && a.sources.some(function (s) { return s.supported; });
   var cur = S.sync.current && a && S.sync.current.artist_id === a.id ? S.sync.current : null;
   var queued = a && (S.sync.queue || []).indexOf(a.id) >= 0;
   $("br-progress").textContent = cur ? (cur.mode === "refresh" ? "Looking for new posts…" : cur.phase === "scan" ? "Checking sources…"
     : "Downloading " + cur.done + " / " + cur.total) : queued ? "Queued" : a && a.pending ? a.pending + (a.pending >= 120 ? "+" : "") + " to download" : "";
+  // The artist's picture beside the name (not for "All artists"); replaced only when it changed, or it would blink on every poll.
+  var av = a ? avatarHtml(a) : "";
+  if (av !== brAvatar) { brAvatar = av; $("gal-avatar").innerHTML = av; }
   ["br-download", "br-edit", "br-refresh", "br-folder"].forEach(function (id) { $(id).classList.toggle("hidden", !a); });
   $("br-download").disabled = $("br-refresh").disabled = !sup;
   galHead();
@@ -687,11 +691,12 @@ function tileHtml(it, i) {
     ? '<img loading="lazy" decoding="async" referrerpolicy="no-referrer" ' + (proxied ? "data-lazy" : "src") + '="' + esc(it.thumb) + '" alt="">'
     : '<span class="gal-noimg">' + icon(it.video ? "play" : "photo") + "</span>";
   var who = G.all ? it.artist + " · " + it.source : it.source;
+  var name = G.all ? '<span class="gal-name">' + esc(it.artist) + "</span>" : "";      // "All artists": whose picture it is, beside the mark
   return '<button type="button" class="gal-tile' + (G.hidden[it.source] ? " hidden" : "") + '" data-i="' + i +
     (it.w && it.h ? '" data-ar="' + galRatio(it.w, it.h) : "") +
     '" data-src="' + esc(it.source) + '" title="' + esc(who + (it.posted ? " · " + it.posted.slice(0, 10) : "")) + '">' +
     picture + (it.video && it.thumb ? '<span class="gal-play">' + icon("play") + "</span>" : "") +
-    '<span class="gal-tag">' + (siteLogo(it.source) || esc(it.source)) + "</span>" +
+    '<span class="gal-tag">' + (siteLogo(it.source) || esc(it.source)) + name + "</span>" +
     (it.saved ? '<span class="gal-saved" title="Downloaded">' + icon("tick") + "</span>" : "") + "</button>";
 }
 

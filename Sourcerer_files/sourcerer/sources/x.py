@@ -27,6 +27,10 @@ _RESERVED = {"home", "i", "explore", "search", "settings", "notifications", "mes
              "intent", "share", "hashtag", "login", "logout", "signup", "tos", "privacy", "jobs"}
 OPTIONS = {"sleep-request": "2.0-4.0", "ratelimit": "abort", "locked": "abort",
            "retweets": False, "quoted": False, "text-tweets": False, "videos": True}
+# The first page of a gallery takes two or three requests (the account, the timeline); at a scan's
+# gap of 2-4 s each, somebody opening an artist waited ten seconds. A person scrolling x.com asks
+# as often, so an open gallery reads at about half that gap -- still random, never regular.
+OPEN_SLEEP = "1.0-2.0"
 LOGIN = ("required", "X shows a profile's media only to logged-in accounts.")
 FIELDS = {"url": "{_url!j}", "tweet": "{tweet_id!j}", "num": "{num!j}", "key": "{filename!j}",
           "ext": "{extension!j}", "date": '"{date:%Y-%m-%dT%H:%M:%SZ}"', "user": "{author[name]!j}",
@@ -51,7 +55,10 @@ def normalize(url):
 
 
 def _options():
-    return dict(OPTIONS, cookies=accounts.jar("x", fresh=True))
+    options = dict(OPTIONS, cookies=accounts.jar("x", fresh=True))
+    if net.waiting():
+        options["sleep-request"] = OPEN_SLEEP
+    return options
 
 
 def _run(fn, *args):

@@ -401,6 +401,11 @@ class _Polite:
         self.entry["sem"].release()
 
 
+def waiting():
+    """True inside interactive(): somebody is waiting for what this thread asks."""
+    return bool(getattr(_local, "interactive", 0))
+
+
 @contextlib.contextmanager
 def interactive():
     """Requests made while somebody waits for the answer (a download asked for in the
