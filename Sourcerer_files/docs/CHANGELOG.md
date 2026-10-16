@@ -5,6 +5,13 @@ automatically -- one line per change, newest first. A release is drafted by hand
 from the tag of whichever version is judged ready, and this is the text to paste
 into it.
 
+## v0.14 — 2026-10-16
+
+- Sync only looks and Download downloads, cards get an Auto-download switch and four buttons, Browse opens at once from kept snapshots with spinner and green chips, and the grid can show squares or whole pictures
+- Review fixes: the count of posts waiting for a download is kept per source, a download is never widened or lost in the queue, snapshots cannot run code, Browse checks every seeded site, a deferred card look comes back
+- Review fixes: Full mode learns the real shape of pictures and no longer flickers, spinners end, cards are patched instead of rebuilt, Ctrl+Shift+R is not Download all
+- Review fixes, round 2: a download is never lost in the queue, Browse counts new posts by the first post it knows, every unchecked source gets its check, snapshot tails expire
+
 ## v0.13 — 2026-10-16
 
 - Manage your accounts: Add account button, a faster gallery, and cards that show the 4 newest posts
