@@ -351,8 +351,10 @@ Do not create releases or tags yourself, and do not push to `main`.
   Ctrl+wheel and Ctrl +/-/0 size the *pictures*. A picture open has its own keys, in a capture
   listener ahead of the page's: arrows, `D` download, `O` open post, `Esc`. A key that a
   browser reserves (Ctrl+N opens a window in a plain browser) has a plain twin (`N`).
-- **The site's mark is the only label on a tile**: `siteLogo(label)` alone, no pill, no artist
-  name (the title attribute says it); a site without a mark shows its name. The downloaded
+- **The site's mark is the only label on a tile** -- in "All artists" the artist's name sits beside it
+  (`.gal-name`, cut with an ellipsis): `siteLogo(label)`, no pill, nothing else; a site without a mark
+  shows its name. The artist's picture stands beside the title in Browse's head (`#gal-avatar`,
+  `renderBrowseHead`, replaced only when its markup changed). The downloaded
   tick is green (`--fill-ok`), the viewer's Download turns into a green *Downloaded*. A chip
   has no hover circle (`.chip.logo:hover` keeps its background transparent).
   Manage Accounts rows wear the same mark with the status dot on its corner (`accMark`).
@@ -399,6 +401,10 @@ Do not create releases or tags yourself, and do not push to `main`.
   pause, MAX_NEW cut) or is still being retried (`failures`, count below
   `GIVE_UP`) is taken out of that set, or its missing page would be lost for
   good; one given up on is put in, or it would be listed on every sync.
+- **X reads at half the scan gap while somebody waits** (`x.OPEN_SLEEP`, chosen by `net.waiting()`
+  when the listing starts): an artist's gallery needs two or three requests before the first page
+  and ten seconds of 2-4 s gaps was the slowest thing in Browse. "All artists" and every sync keep
+  `2.0-4.0`; the gap stays random.
 - **X's "locked" is gallery-dl's exact "Account temporarily locked".** A
   plain `"locked" in text` also matched "<artist> blocked your account" and
   paused X for a day for every card.
