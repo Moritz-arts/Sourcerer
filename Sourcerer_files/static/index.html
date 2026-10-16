@@ -30,6 +30,7 @@
   <symbol id="i-chevron-left" viewBox="0 0 24 24"><path d="M15 6l-6 6l6 6"/></symbol>
   <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="M9 6l6 6l-6 6"/></symbol>
   <symbol id="i-check" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0"/><path d="M9 12l2 2l4 -4"/></symbol>
+  <symbol id="i-tick" viewBox="0 0 24 24"><path d="M5 12l5 5l10 -10"/></symbol>
   <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 9v4"/><path d="M10.363 3.591l-8.106 13.534a1.914 1.914 0 0 0 1.636 2.871h16.214a1.914 1.914 0 0 0 1.636 -2.87l-8.106 -13.536a1.914 1.914 0 0 0 -3.274 0z"/><path d="M12 16h.01"/></symbol>
   <symbol id="i-info" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0"/><path d="M12 9h.01"/><path d="M11 12h1v4h1"/></symbol>
   <symbol id="i-error" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0"/><path d="M10 10l4 4m0 -4l-4 4"/></symbol>
@@ -62,51 +63,17 @@
   <header class="toolbar">
     <img class="logo" src="/static/logo.svg" alt="">
     <span class="brand">Sourcerer</span><span id="version" class="muted small"></span>
-    <div class="seg" role="tablist" aria-label="View">
-      <button id="view-cards" class="selected" role="tab" title="The artist cards">Cards</button>
-      <button id="view-browse" role="tab" title="Browse the artists' posts from every source (G)">Browse</button>
-    </div>
     <span class="grow"></span>
     <button id="btn-add" title="New card (Ctrl+N)"><svg class="ic"><use href="#i-plus"/></svg> New card</button>
-    <button id="btn-sync-all" title="Sync all cards: look for new posts; cards with auto-download download them (F5)"><svg class="ic"><use href="#i-refresh"/></svg> Sync all</button>
-    <button id="btn-download-all" class="primary" title="Download all cards: everything that is not in the library yet (Shift+F5)"><svg class="ic"><use href="#i-download"/></svg> Download all</button>
+    <button id="btn-sync-all" title="Refresh every artist: look for new posts; artists with auto-download download them (F5)"><svg class="ic"><use href="#i-refresh"/></svg> Refresh</button>
+    <button id="btn-download-all" class="primary" title="Download everything of every artist that is not in the library yet (Shift+F5)"><svg class="ic"><use href="#i-download"/></svg> Download all</button>
     <button id="btn-accounts" title="Log in to your sites and keep the logins working"><svg class="ic"><use href="#i-key"/></svg> Manage Accounts<span id="acc-count" class="count hidden"></span></button>
     <button id="btn-quit" class="icon hidden" aria-label="Quit" title="Quit Sourcerer"><svg class="ic"><use href="#i-power"/></svg></button>
     <button id="btn-settings" class="icon" aria-label="Settings" title="Settings (Ctrl+,)"><svg class="ic"><use href="#i-settings"/></svg><span id="update-dot" class="dot hidden"></span></button>
   </header>
 
-  <div class="filterbar">
-    <div class="searchbox">
-      <svg class="ic"><use href="#i-search"/></svg>
-      <input id="search" type="text" placeholder="Search artists" autocomplete="off" title="Search (Ctrl+F)">
-    </div>
-    <select id="sort" aria-label="Sort">
-      <option value="activity">Newest activity</option>
-      <option value="name">Name</option>
-      <option value="files">Most files</option>
-    </select>
-    <span class="grow"></span>
-    <div class="sizer" title="Card size (Ctrl + mouse wheel)">
-      <button id="btn-smaller" class="icon flat" aria-label="Smaller cards"><svg class="ic sm"><use href="#i-minus"/></svg></button>
-      <input id="size" type="range" min="160" max="800" step="10" aria-label="Card size">
-      <button id="btn-larger" class="icon flat" aria-label="Larger cards"><svg class="ic sm"><use href="#i-plus"/></svg></button>
-    </div>
-  </div>
-
-  <main id="main">
-    <div id="empty" class="empty hidden">
-      <img class="logo-hero" src="/static/logo.svg" alt="">
-      <h2>No artist cards yet</h2>
-      <p>Create a card and add the places the artist posts. Sourcerer downloads every
-         picture and video from there into your library &ndash; and on every sync, only what is new.</p>
-      <button class="primary" data-act="add"><svg class="ic"><use href="#i-plus"/></svg> Create the first card</button>
-    </div>
-    <p id="nomatch" class="nomatch hidden">No card matches the search.</p>
-    <div id="cards" class="grid"></div>
-  </main>
-
   <!-- Browse: the artists on the left, their posts from every source on the right. -->
-  <section id="browse" class="browse hidden">
+  <section id="browse" class="browse">
     <aside class="br-side">
       <div class="searchbox">
         <svg class="ic"><use href="#i-search"/></svg>
@@ -120,7 +87,6 @@
         <select id="br-count" aria-label="The number beside each artist" title="The number beside each artist">
           <option value="sources">Sources</option>
           <option value="files">Images</option>
-          <option value="auto">Auto-download</option>
         </select>
       </div>
       <div id="br-list" class="br-list"></div>
@@ -129,13 +95,15 @@
     <div class="br-main">
       <div class="br-head">
         <span id="gal-title" class="br-title">All artists</span>
-        <button type="button" id="br-edit" class="icon flat hidden" aria-label="Edit the card" title="Edit the card (Enter on the card)"><svg class="ic sm"><use href="#i-pencil"/></svg></button>
+        <button type="button" id="br-edit" class="icon flat hidden" aria-label="Edit the card" title="Edit the card (Enter)"><svg class="ic sm"><use href="#i-pencil"/></svg></button>
+        <button type="button" id="br-refresh" class="icon flat hidden" aria-label="Refresh" title="Refresh: look for new posts of this artist (U)"><svg class="ic sm"><use href="#i-refresh"/></svg></button>
+        <button type="button" id="br-folder" class="icon flat hidden" aria-label="Open downloaded files" title="Open the downloaded files (O)"><svg class="ic sm"><use href="#i-folder"/></svg></button>
         <i id="gal-spin" class="spin hidden" title="Asking the sites…"></i>
         <span id="gal-sources" class="gal-sources"></span>
         <button type="button" id="gal-new" class="pill accent hidden" title="Show them: the gallery opens again"></button>
         <span class="grow"></span>
         <span id="br-progress" class="muted small"></span>
-        <button type="button" id="br-download" class="primary" title="Download everything from the sources that are switched on"><svg class="ic"><use href="#i-download"/></svg> Download all</button>
+        <button type="button" id="br-download" class="primary" title="Download everything that is not in the library yet from the sources that are switched on (D)"><svg class="ic"><use href="#i-download"/></svg> Download selected source(s)</button>
         <div class="seg" id="gal-fit" role="group" aria-label="Pictures">
           <button type="button" data-fit="square" title="Square tiles, cropped to fill">Squares</button>
           <button type="button" data-fit="full" title="Whole pictures in rows, as they are">Full</button>
@@ -146,12 +114,20 @@
         <div id="gal-grid" class="gal-grid"></div>
         <div id="gal-end" class="gal-end"></div>
       </div>
+      <div id="empty" class="empty hidden">
+        <img class="logo-hero" src="/static/logo.svg" alt="">
+        <h2>No artists yet</h2>
+        <p>Create a card and add the places the artist posts. Sourcerer downloads every
+           picture and video from there into your library &ndash; and on every sync, only what is new.</p>
+        <button type="button" class="primary" id="empty-add"><svg class="ic"><use href="#i-plus"/></svg> Create the first card</button>
+      </div>
       <div id="gal-view" class="gal-view hidden">
+        <span id="gal-source" class="gal-source"></span>
         <button type="button" class="gal-nav prev" data-gal="prev" aria-label="Previous"><svg class="ic"><use href="#i-chevron-left"/></svg></button>
         <div class="gal-stage" id="gal-stage"></div>
         <button type="button" class="gal-nav next" data-gal="next" aria-label="Next"><svg class="ic"><use href="#i-chevron-right"/></svg></button>
         <div class="gal-bar">
-          <span id="gal-info"></span><span class="grow"></span>
+          <span id="gal-who" class="gal-who"></span><span id="gal-info"></span><span class="grow"></span>
           <button type="button" data-gal="post"><svg class="ic"><use href="#i-external"/></svg> Open post</button>
           <button type="button" class="primary" data-gal="download" id="gal-download"><svg class="ic"><use href="#i-download"/></svg> <span>Download</span></button>
           <button type="button" class="icon" data-gal="back" aria-label="Back to the pictures"><svg class="ic"><use href="#i-x"/></svg></button>
@@ -177,8 +153,8 @@
 
 <div id="menu" class="menu hidden" role="menu">
   <button data-menu="edit"><svg class="ic"><use href="#i-pencil"/></svg> Edit<span class="kbd">Enter</span></button>
-  <button data-menu="gallery"><svg class="ic"><use href="#i-photo"/></svg> Browse<span class="kbd">G</span></button>
-  <button data-menu="sync"><svg class="ic"><use href="#i-refresh"/></svg> Sync<span class="kbd">U</span></button>
+  <button data-menu="auto"><svg class="ic"><use href="#i-cloud-down"/></svg> <span id="menu-auto">Auto-download</span><span class="kbd">A</span></button>
+  <button data-menu="sync"><svg class="ic"><use href="#i-refresh"/></svg> Refresh<span class="kbd">U</span></button>
   <button data-menu="download"><svg class="ic"><use href="#i-download"/></svg> Download<span class="kbd">D</span></button>
   <button data-menu="folder"><svg class="ic"><use href="#i-folder"/></svg> Open downloaded files<span class="kbd">O</span></button>
   <button data-menu="delete" class="danger"><svg class="ic"><use href="#i-trash"/></svg> Delete<span class="kbd">Del</span></button>
@@ -380,33 +356,28 @@
             <button type="button" data-set="theme" data-value="dark">Dark</button>
           </div>
         </div>
-        <div class="field">
-          <span class="label">Card size</span>
-          <input id="set-size" type="range" min="160" max="800" step="10">
-          <p class="hint">Also with Ctrl + mouse wheel over the cards, or Ctrl + plus / minus.</p>
-        </div>
       </section>
 
       <section data-pane="keys">
         <h3>Keyboard &amp; mouse</h3>
         <table class="keys">
-          <tr><td><span class="kbd">Ctrl</span> <span class="kbd">N</span></td><td>New card</td></tr>
-          <tr><td><span class="kbd">Ctrl</span> <span class="kbd">F</span> &nbsp;or&nbsp; <span class="kbd">/</span></td><td>Search</td></tr>
-          <tr><td><span class="kbd">F5</span> &nbsp;or&nbsp; <span class="kbd">Ctrl</span> <span class="kbd">R</span></td><td>Sync all cards (<span class="kbd">Shift</span> to download all)</td></tr>
+          <tr><td><span class="kbd">Ctrl</span> <span class="kbd">N</span> &nbsp;or&nbsp; <span class="kbd">N</span></td><td>New card</td></tr>
+          <tr><td><span class="kbd">Ctrl</span> <span class="kbd">F</span> &nbsp;or&nbsp; <span class="kbd">/</span></td><td>Search the artists</td></tr>
+          <tr><td><span class="kbd">F5</span> &nbsp;or&nbsp; <span class="kbd">Ctrl</span> <span class="kbd">R</span></td><td>Refresh every artist (<span class="kbd">Shift</span> to download all)</td></tr>
           <tr><td><span class="kbd">Ctrl</span> <span class="kbd">,</span></td><td>Settings</td></tr>
           <tr><td><span class="kbd">Ctrl</span> <span class="kbd">L</span></td><td>Show or hide the activity log</td></tr>
-          <tr><td><span class="kbd">&larr;</span> <span class="kbd">&rarr;</span> <span class="kbd">&uarr;</span> <span class="kbd">&darr;</span> <span class="kbd">Home</span> <span class="kbd">End</span></td><td>Select a card</td></tr>
-          <tr><td><span class="kbd">Enter</span></td><td>Edit the card</td></tr>
-          <tr><td>Double-click</td><td>Browse the card's posts</td></tr>
-          <tr><td><span class="kbd">U</span></td><td>Sync the card: look for new posts</td></tr>
-          <tr><td><span class="kbd">D</span></td><td>Download the card</td></tr>
-          <tr><td><span class="kbd">O</span> &nbsp;or click its folder</td><td>Open the card's folder</td></tr>
-          <tr><td><span class="kbd">G</span></td><td>Browse this artist: every source, straight from the sites</td></tr>
-          <tr><td><span class="kbd">&larr;</span> <span class="kbd">&rarr;</span> &nbsp;in Browse</td><td>Previous and next picture (<span class="kbd">Esc</span> closes it)</td></tr>
-          <tr><td><span class="kbd">Del</span></td><td>Delete the card</td></tr>
-          <tr><td>Right-click</td><td>The card's menu</td></tr>
-          <tr><td><span class="kbd">Ctrl</span> + wheel, <span class="kbd">Ctrl</span> <span class="kbd">+</span> <span class="kbd">&minus;</span> <span class="kbd">0</span></td><td>Card size, and back to normal</td></tr>
-          <tr><td><span class="kbd">Esc</span></td><td>Close the dialog, menu or search</td></tr>
+          <tr><td><span class="kbd">&uarr;</span> <span class="kbd">&darr;</span> <span class="kbd">Home</span> <span class="kbd">End</span></td><td>Pick the previous or next artist</td></tr>
+          <tr><td><span class="kbd">Enter</span></td><td>Edit the artist's card</td></tr>
+          <tr><td><span class="kbd">U</span></td><td>Refresh the artist: look for new posts</td></tr>
+          <tr><td><span class="kbd">D</span></td><td>Download the artist (the sources that are switched on)</td></tr>
+          <tr><td><span class="kbd">A</span></td><td>Turn the artist's auto-download on or off</td></tr>
+          <tr><td><span class="kbd">O</span></td><td>Open the artist's folder</td></tr>
+          <tr><td><span class="kbd">Del</span></td><td>Delete the artist's card</td></tr>
+          <tr><td>Right-click an artist</td><td>The artist's menu</td></tr>
+          <tr><td><span class="kbd">&larr;</span> <span class="kbd">&rarr;</span> &nbsp;in a picture</td><td>Previous and next picture (<span class="kbd">Esc</span> closes it)</td></tr>
+          <tr><td><span class="kbd">D</span> &nbsp;or&nbsp; <span class="kbd">O</span> &nbsp;in a picture</td><td>Download the picture, open its post</td></tr>
+          <tr><td><span class="kbd">Ctrl</span> + wheel, <span class="kbd">Ctrl</span> <span class="kbd">+</span> <span class="kbd">&minus;</span> <span class="kbd">0</span></td><td>Picture size, and back to normal</td></tr>
+          <tr><td><span class="kbd">Esc</span></td><td>Close the picture, dialog, menu or search</td></tr>
         </table>
       </section>
 

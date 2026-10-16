@@ -36,8 +36,8 @@ Sourcerer/                        <- what Sourcerer.zip unpacks to; move it free
     │   │                           automatic sync, link checks, profile pictures
     │   ├─ gallery.py             the gallery: all sources of a card in one stream,
     │   │                           straight from the sites, pictures in memory only
-    │   ├─ previews.py            the 4 newest pictures on a card, downloaded or not:
-    │   │                           first page of each source, small copies kept
+    │   ├─ previews.py            looks at each card's sources in the background and keeps
+    │   │                           their snapshots fresh (its small copies are no longer shown)
     │   ├─ snapshots.py           the newest posts of a source as last seen (pickled Media
     │   │                           in the DB): Browse opens from it, previews use it
     │   ├─ accounts.py            logins: login window, cookies.txt, saved cookies

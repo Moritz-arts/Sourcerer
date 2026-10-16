@@ -1,12 +1,12 @@
-// Sourcerer's window: artist cards, the card dialog, settings, the activity bar.
+// Sourcerer's window: the artists and their posts (Browse), the card dialog, settings, the activity bar.
 // Plain DOM code, no framework, no build step -- the same as TrackImage.
 
 var S = {
   artists: [], sync: {}, library: "", window: false, sep: "/", sites: [], fields: [], settings: {},
-  selected: null, menuFor: null, logFilter: "all", logSeen: "", update: null
+  menuFor: null, logFilter: "all", logSeen: "", update: null
 };
 var F = null;   // the card dialog's working copy: {id, sources, layout, dedupe, master, autoName}
-var DEFAULT_SIZE = 230;
+var DEFAULT_GAL = 200;
 
 function $(id) { return document.getElementById(id); }
 function $$(sel) { return Array.prototype.slice.call(document.querySelectorAll(sel)); }
@@ -78,11 +78,6 @@ function bytes(n) {
 }
 function plural(n, one, many) { return n + " " + (n === 1 ? one : (many || one + "s")); }
 function shortUrl(url) { return url.replace(/^https?:\/\/(www\.)?/, ""); }
-// The end of a path is what tells folders apart: …/Library/Inkwell.
-function shortPath(path) {
-  var parts = path.split(/[\\\/]/).filter(Boolean);
-  return parts.length > 2 ? "…" + S.sep + parts.slice(-2).join(S.sep) : path;
-}
 function hoursText(h) {
   h = +h;
   return h === 1 ? "hour" : h === 24 ? "day" : h === 168 ? "week" : h + " hours";
@@ -128,145 +123,28 @@ function applySettings() {
   var t = S.settings.theme;
   if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
   else delete document.documentElement.dataset.theme;
-  setSize(+S.settings.card_size || DEFAULT_SIZE, false);
 }
 
-var sizeTimer = null;
-function setSize(px, save) {
-  px = Math.max(160, Math.min(800, Math.round(px / 10) * 10));
-  document.documentElement.style.setProperty("--card", px + "px");
-  $("size").value = px; $("set-size").value = px;
-  if (save && String(px) !== String(S.settings.card_size)) {
-    S.settings.card_size = String(px);
-    clearTimeout(sizeTimer);
-    sizeTimer = setTimeout(function () { api("PUT", "/api/settings", { card_size: px }).catch(fail); }, 400);
-  }
-}
-
-// ---- cards -----------------------------------------------------------------
+// ---- artists ---------------------------------------------------------------
 
 function artistById(id) { return S.artists.filter(function (a) { return a.id === id; })[0]; }
 
 // When something last happened on a card: a download, else a sync, else its making.
 function activityOf(a) { return a.last_activity || a.last_sync || a.created || ""; }
 
-function visibleArtists() {
-  var q = $("search").value.trim().toLowerCase();
-  var list = S.artists.filter(function (a) {
-    return !q || a.name.toLowerCase().indexOf(q) >= 0 ||
-      a.sources.some(function (s) { return s.url.toLowerCase().indexOf(q) >= 0; });
-  });
-  var by = $("sort").value;
-  list.sort(function (a, b) {
-    if (by === "files" && a.file_count !== b.file_count) return b.file_count - a.file_count;
-    if (by === "activity") {
-      var ta = activityOf(a), tb = activityOf(b);
-      if (ta !== tb) return ta < tb ? 1 : -1;
-    }
-    return a.name.localeCompare(b.name);
-  });
-  return list;
-}
-
-function render() {
-  var list = visibleArtists();
+function renderAll() {
   $("empty").classList.toggle("hidden", S.artists.length > 0);
-  $("nomatch").classList.toggle("hidden", !S.artists.length || list.length > 0);
-  $("cards").classList.toggle("hidden", !S.artists.length);
-  patchCards(list.map(cardHtml).join("") +
-    '<button class="add-tile" data-act="add" title="New card (Ctrl+N)">' + icon("plus") + "New card</button>");
-  renderActivity();
-}
-
-// The cards are rebuilt every poll while a sync runs. Replacing all of them would swallow a click that
-// began before the rebuild (a switch, a button): only a card whose markup changed is replaced, and a
-// running one has its progress parts replaced, nothing else.
-function patchCards(html) {
-  var grid = $("cards"), next = document.createElement("div");
-  next.innerHTML = html;
-  var now = Array.prototype.slice.call(grid.children), want = Array.prototype.slice.call(next.children);
-  var same = now.length === want.length && want.every(function (n, i) { return n.tagName === now[i].tagName && n.dataset.id === now[i].dataset.id; });
-  if (!same) { grid.innerHTML = html; return; }
-  want.forEach(function (n, i) {
-    var o = now[i];
-    if (o.outerHTML === n.outerHTML) return;
-    var live = [".progress-text", ".bar", ".card-status"];
-    if (o.classList.contains("busy") && n.classList.contains("busy") && live.every(function (q) { return o.querySelector(q) && n.querySelector(q); })) {
-      var a = o.cloneNode(true), b = n.cloneNode(true);
-      live.forEach(function (q) { a.querySelector(q).remove(); b.querySelector(q).remove(); });
-      if (a.outerHTML === b.outerHTML) {
-        live.forEach(function (q) { var x = o.querySelector(q), y = n.querySelector(q); if (x.outerHTML !== y.outerHTML) x.replaceWith(y); });
-        return;
-      }
-    }
-    o.replaceWith(n);
-  });
-}
-
-// One link per source, its dot saying how it fares; a click opens it in the browser.
-function dotsHtml(a) {
-  return '<div class="srcdots">' + a.sources.map(function (s) {
-    return '<a href="' + esc(s.url) + '" data-act="link" data-url="' + esc(s.url) + '" title="' +
-      esc(shortUrl(s.url) + " — " + statusText(s)) + '"><i class="dot ' + s.status + '"></i>' +
-      esc(s.label) + "</a>";
-  }).join("") + "</div>";
-}
-
-function cardHtml(a) {
-  var c = colours(a.name);
-  var cur = S.sync.current && S.sync.current.artist_id === a.id ? S.sync.current : null;
-  var queued = (S.sync.queue || []).indexOf(a.id) >= 0;
-  var thumbs = "";
-  for (var i = 0; i < 4; i++) {
-    thumbs += a.thumbs[i]
-      ? '<img loading="lazy" src="' + a.thumbs[i].src + '" alt="">'
-      : '<div style="background:' + (i % 2 ? c[3] : c[2]) + ';opacity:.45"></div>';
-  }
-  var html = '<div class="card' + (cur ? " busy" : "") + (S.selected === a.id ? " selected" : "") +
-    '" data-id="' + a.id + '" tabindex="-1">' +
-    '<div class="card-head">' + avatarHtml(a) +
-    '<div class="who"><p class="card-name" title="' + esc(a.name + " — double-click to browse") + '">' + esc(a.name) + "</p>" +
-    '<p class="card-path" data-act="folder" title="Open folder: ' + esc(a.path) + '">' + esc(shortPath(a.path)) + "</p></div></div>" +
-    '<div class="thumbs">' + thumbs + "</div>" + dotsHtml(a);
-
-  if (cur) {
-    var text, pct = 0;
-    if (cur.mode === "refresh") text = "Looking for new posts · " + plural(cur.found, "new post") + " so far";
-    else if (cur.phase === "scan") text = "Checking sources · " + cur.found + " new found";
-    else {
-      text = (cur.first ? "First sync · " : "") + "downloading " + cur.done + " / " + cur.total;
-      pct = cur.total ? Math.round(100 * cur.done / cur.total) : 100;
-    }
-    return html + '<div class="progress-text">' + esc(text) + "</div>" +
-      '<div class="bar' + (cur.phase === "scan" ? " indeterminate" : "") + '"><div style="width:' + pct + '%"></div></div>' +
-      '<div class="card-status">' + (cur.phase === "scan" ? "" : "<span>" + esc(plural(cur.new, "new file") +
-        (cur.duplicates ? " · " + plural(cur.duplicates, "duplicate") + " skipped" : "")) + "</span>") + "</div>" +
-      '<div class="card-foot">' + autoHtml(a) + '<span class="acts"><button class="mini" data-act="cancel">Cancel</button></span></div></div>';
-  }
-  var supported = a.sources.some(function (s) { return s.supported; });
-  var badges = queued ? '<span class="badge accent">Queued</span>'
-    : "<span>" + esc(plural(a.file_count, "file") + " · " + ago(a.last_activity || a.last_sync)) + "</span>" +
-      (a.pending ? '<span class="badge accent" title="Found by the last sync, not downloaded yet' + (a.pending >= 120 ? " (a sync only reads the newest posts: at least this many)" : "") +
-        '">' + a.pending + (a.pending >= 120 ? "+" : "") + " to download</span>" : "") +
-      (a.last_new && !a.pending ? '<span class="badge accent">+' + a.last_new + " new</span>" : "") +
-      (a.last_failed ? '<span class="badge warning">' + a.last_failed + " failed</span>" : "");
-  return html + '<div class="card-status">' + badges + '</div><div class="card-foot">' + autoHtml(a) + '<span class="acts">' +
-    (queued
-      ? '<button class="mini" data-act="cancel">Cancel</button>'
-      : '<button class="mini" data-act="sync" aria-label="Sync" title="Sync: look for new posts (U)"' +
-        (supported ? "" : " disabled") + ">" + icon("refresh") + "</button>" +
-        '<button class="mini" data-act="download" aria-label="Download" title="Download everything that is not in the library yet (D)"' +
-        (supported ? "" : " disabled") + ">" + icon("download") + "</button>" +
-        '<button class="mini" data-act="folder" aria-label="Open downloaded files" title="Open the downloaded files (O)">' + icon("folder") + "</button>" +
-        '<button class="mini danger" data-act="delete" aria-label="Delete" title="Delete the card (Del)">' + icon("trash") + "</button>") +
-    "</span></div></div>";
+  $("browse").classList.toggle("blank", !S.artists.length);
+  renderBrowseList(); renderBrowseHead(); renderActivity();
 }
 
 // The card's switch: a sync of it also downloads what it finds.
-function autoHtml(a) {
-  return '<label class="autorow" title="Auto-download: a sync of this card also downloads what it finds">' +
-    '<span class="switch sm"><input type="checkbox" data-auto="' + a.id + '"' + (a.auto_download ? " checked" : "") + "><span></span></span>" +
-    "Auto-download</label>";
+function setAuto(a, on) {
+  a.auto_download = on ? 1 : 0;
+  renderBrowseList();
+  api("POST", "/api/artists/" + a.id + "/auto-download", { on: on }).then(function () {
+    toast("Auto-download " + (on ? "on" : "off") + " for " + a.name);
+  }).catch(function (err) { fail(err); a.auto_download = on ? 0 : 1; renderBrowseList(); });
 }
 
 // ---- activity bar and log ---------------------------------------------------
@@ -351,39 +229,38 @@ function load() {
     S.artists = d.artists; S.sync = d.sync; S.library = d.library; S.window = d.window;
     S.sep = d.sep; S.sites = d.sites; S.fields = d.fields; S.settings = d.settings; S.logins = d.logins || []; S.pauses = d.pauses || [];
     $("version").textContent = "v" + d.version;
-    if (S.selected && !artistById(S.selected)) S.selected = null;
     $("btn-quit").classList.toggle("hidden", S.window);
     applySettings();
-    render();
+    Object.keys(GS).forEach(function (k) { if (+k && !artistById(+k)) galDrop(k); });      // a deleted card's gallery
     if (S.brArtist && !artistById(S.brArtist)) {          // deleted: All artists instead
       S.brArtist = 0;
       if (G && !G.all) browseClose();
     }
-    if (S.view === "browse") {
-      renderBrowseList();
-      if (G && G.artist) { G.artist = artistById(G.artist.id) || G.artist; $("gal-title").textContent = G.artist.name; }
-      renderBrowseHead();
-      if (!G) browseOpen(0);
-    }
+    if (G && G.artist) { G.artist = artistById(G.artist.id) || G.artist; $("gal-title").textContent = G.artist.name; }
+    renderAll();
+    if (!G) browseOpen(S.brArtist);
     showUpdate();
     showAccounts();
   });
 }
 
 // A poll is a delay: quick while a sync runs, slow when nothing does. The
-// cards are reloaded whenever the artist being synced changes, so counts,
-// badges and thumbnails follow without reloading on every tick.
+// artists are reloaded whenever the artist being synced changes, so counts
+// and badges follow without reloading on every tick.
 var lastKey = "";
 function poll() {
   api("GET", "/api/sync").then(function (s) {
     var key = (s.current ? s.current.artist_id : "-") + "|" + s.running + "|" + (s.queue || []).join(",") +
-      "|" + (s.log || []).length + "|" + (s.pauses || []).map(function (p) { return p.site; }).join(",") +
-      "|" + s.previews;                        // new pictures found for a card: the cards load them
+      "|" + (s.log || []).length + "|" + (s.pauses || []).map(function (p) { return p.site; }).join(",");
+    // A sync that ended may have saved files: a gallery kept aside would still show them as not downloaded.
+    if (S.sync.finished !== s.finished) {
+      Object.keys(GS).forEach(function (k) { GS[k].stale = true; });
+      if (G) G.stale = true;                       // (the open one is let go of when it is left)
+    }
     S.sync = s;
     if (s.pauses) S.pauses = s.pauses;
-    if (S.view === "browse") renderBrowseHead();
     if (key !== lastKey) { lastKey = key; return load(); }
-    if (s.current) render(); else renderActivity();
+    renderBrowseList(); renderBrowseHead(); renderActivity();
   }).catch(function () {}).then(function () {
     setTimeout(poll, S.sync.running ? 700 : 3000);
   });
@@ -396,117 +273,92 @@ function sync(artistId, download) {
   if (download) body.mode = "download";
   api("POST", "/api/sync", body).then(function () {
     lastKey = ""; return api("GET", "/api/sync");
-  }).then(function (s) { S.sync = s; if (s.pauses) S.pauses = s.pauses; render(); }).catch(fail);
+  }).then(function (s) { S.sync = s; if (s.pauses) S.pauses = s.pauses; renderAll(); }).catch(fail);
 }
 
 function removeArtist(a) {
   if (!confirm('Delete the card "' + a.name + '"? The downloaded files stay in the library.')) return;
-  api("DELETE", "/api/artists/" + a.id).then(load).catch(fail);
+  api("DELETE", "/api/artists/" + a.id).then(function () {
+    galDrop(a.id);
+    galDrop(0);                                    // All artists listed this card
+    if (G && G.all) G.stale = true;
+    return load();
+  }).catch(fail);
 }
 
 function openFolder(a) { api("POST", "/api/open", { target: "artist", artist_id: a.id }).catch(fail); }
 
-// ---- selection, mouse and the card menu ------------------------------------
-
-function select(id, scroll) {
-  S.selected = id;
-  $$(".card").forEach(function (c) { c.classList.toggle("selected", +c.dataset.id === id); });
-  var el = document.querySelector('.card[data-id="' + id + '"]');
-  if (el && scroll) el.scrollIntoView({ block: "nearest" });
-}
+// ---- the artist's menu, mouse and keyboard ------------------------------------
 
 function closeMenu() { $("menu").classList.add("hidden"); S.menuFor = null; }
 function openMenu(a, x, y) {
   var m = $("menu");
   S.menuFor = a.id;
-  select(a.id);
-  m.querySelector('[data-menu="gallery"]').classList.toggle("hidden", S.view === "browse");
+  $("menu-auto").textContent = a.auto_download ? "Turn auto-download off" : "Turn auto-download on";
   m.classList.remove("hidden");
-  m.style.top = Math.min(y, innerHeight - m.offsetHeight - 8) + "px";
-  m.style.left = Math.min(x, innerWidth - m.offsetWidth - 8) + "px";
+  m.style.top = Math.max(4, Math.min(y, innerHeight - m.offsetHeight - 8)) + "px";
+  m.style.left = Math.max(4, Math.min(x, innerWidth - m.offsetWidth - 8)) + "px";
+}
+
+// The open artist's actions: from the menu, the header's buttons and the keys.
+function artistAct(act, a) {
+  if (!a) return;
+  if (act === "edit") openCard(a);
+  else if (act === "auto") setAuto(a, !a.auto_download);
+  else if (act === "sync") sync(a.id);
+  else if (act === "download") downloadSelected(a);
+  else if (act === "folder") openFolder(a);
+  else if (act === "delete") removeArtist(a);
 }
 
 document.addEventListener("click", function (e) {
   if (!e.target.closest("#menu")) closeMenu();
-  var card = e.target.closest(".card");
-  if (card) select(+card.dataset.id);
   var btn = e.target.closest("[data-act]");
   if (!btn) return;
-  var a = card && artistById(+card.dataset.id);
   switch (btn.dataset.act) {
     case "add": openCard(null); break;
-    case "sync": sync(a.id); break;
-    case "download": sync(a.id, true); break;
-    case "folder": openFolder(a); break;
-    case "delete": removeArtist(a); break;
-    case "cancel": api("POST", "/api/sync/cancel", { artist_id: a.id }).then(function () { lastKey = ""; }); break;
     case "cancel-current":
       if (S.sync.current) api("POST", "/api/sync/cancel", { artist_id: S.sync.current.artist_id });
       break;
     case "log": toggleLog(); break;
-    case "link":
-      e.preventDefault();
-      api("POST", "/api/open-url", { url: btn.dataset.url }).catch(fail);
-      break;
     case "accounts": e.preventDefault(); openAccounts(); break;
   }
-});
-// A double-click on a card opens its Browse view; editing is Enter, the right-click menu or the pencil in Browse.
-$("cards").addEventListener("dblclick", function (e) {
-  var card = e.target.closest(".card");
-  if (card && !e.target.closest("button, [data-act], .autorow")) openGallery(artistById(+card.dataset.id));
-});
-$("cards").addEventListener("change", function (e) {
-  var box = e.target.closest("[data-auto]");
-  if (!box) return;
-  var a = artistById(+box.dataset.auto), on = box.checked;
-  if (a) a.auto_download = on ? 1 : 0;
-  api("POST", "/api/artists/" + box.dataset.auto + "/auto-download", { on: on }).catch(function (err) {
-    fail(err); if (a) a.auto_download = on ? 0 : 1; render();
-  });
-});
-$("cards").addEventListener("contextmenu", function (e) {
-  var card = e.target.closest(".card");
-  if (!card) return;
-  e.preventDefault();
-  openMenu(artistById(+card.dataset.id), e.clientX, e.clientY);
 });
 $("menu").addEventListener("click", function (e) {
   var btn = e.target.closest("[data-menu]");
   if (!btn) return;
   var a = artistById(S.menuFor);
   closeMenu();
-  if (!a) return;
-  if (btn.dataset.menu === "edit") openCard(a);
-  else if (btn.dataset.menu === "gallery") openGallery(a);
-  else if (btn.dataset.menu === "sync") sync(a.id);
-  else if (btn.dataset.menu === "download") sync(a.id, true);
-  else if (btn.dataset.menu === "folder") openFolder(a);
-  else if (btn.dataset.menu === "delete") removeArtist(a);
+  artistAct(btn.dataset.menu, a);
 });
-
-// Ctrl + wheel sizes the cards instead of zooming the page.
-$("main").addEventListener("wheel", function (e) {
-  if (!e.ctrlKey) return;
-  e.preventDefault();
-  setSize(+$("size").value + (e.deltaY < 0 ? 10 : -10), true);
-}, { passive: false });
-$("size").addEventListener("input", function () { setSize(+this.value, true); });
-$("btn-smaller").addEventListener("click", function () { setSize(+$("size").value - 20, true); });
-$("btn-larger").addEventListener("click", function () { setSize(+$("size").value + 20, true); });
+$("empty-add").addEventListener("click", function () { openCard(null); });
 
 // ---- keyboard --------------------------------------------------------------
 
-function moveSelection(key) {
-  var cards = $$(".card");
-  if (!cards.length) return;
-  var ids = cards.map(function (c) { return +c.dataset.id; });
-  var i = ids.indexOf(S.selected);
-  if (i < 0) return select(ids[0], true);
-  var top = cards[0].offsetTop, cols = cards.filter(function (c) { return c.offsetTop === top; }).length || 1;
-  var next = { ArrowLeft: i - 1, ArrowRight: i + 1, ArrowUp: i - cols, ArrowDown: i + cols,
-               Home: 0, End: ids.length - 1 }[key];
-  select(ids[Math.max(0, Math.min(ids.length - 1, next))], true);
+// Up / Down / Home / End pick the previous or next artist in the list. The gallery opens a moment
+// after the last key, so holding a key down does not open a gallery per artist it passes.
+var pickTimer = 0;
+function pickArtist(key) {
+  var ids = $$("#br-list .br-item").map(function (b) { return +b.dataset.id; });
+  if (!ids.length) return;
+  var i = ids.indexOf(S.brArtist);
+  var next = { ArrowUp: i - 1, ArrowDown: i + 1, Home: 0, End: ids.length - 1 }[key];
+  S.brArtist = ids[Math.max(0, Math.min(ids.length - 1, next))];
+  renderBrowseList();
+  var el = $("br-list").querySelector(".br-item.selected");
+  if (el) el.scrollIntoView({ block: "nearest" });
+  clearTimeout(pickTimer);
+  pickTimer = setTimeout(function () { browseOpen(S.brArtist); }, 250);
+}
+
+// Picture size: the gallery's slider, in steps of its own.
+function galSize(px) {
+  var r = $("gal-size");
+  px = Math.max(+r.min, Math.min(+r.max, Math.round(px / 20) * 20));
+  r.value = px;
+  $("gal-grid").style.setProperty("--gal", px + "px");
+  try { localStorage.setItem(BR_SIZE, String(px)); } catch (e) {}
+  galLayout();
 }
 
 document.addEventListener("keydown", function (e) {
@@ -516,33 +368,27 @@ document.addEventListener("keydown", function (e) {
   var dialog = document.querySelector("dialog[open]");
   if (k === "Escape") {
     closeMenu();
-    if (!dialog && t === $("search")) { t.value = ""; t.blur(); render(); }
+    if (!dialog && t === $("br-search")) { t.value = ""; t.blur(); renderBrowseList(); }
     return;                                   // an open dialog closes itself
   }
-  if (ctrl && (k === "+" || k === "=")) { e.preventDefault(); return setSize(+$("size").value + 20, true); }
-  if (ctrl && k === "-") { e.preventDefault(); return setSize(+$("size").value - 20, true); }
-  if (ctrl && k === "0") { e.preventDefault(); return setSize(DEFAULT_SIZE, true); }
+  if (!dialog && ctrl && (k === "+" || k === "=")) { e.preventDefault(); return galSize(+$("gal-size").value + 20); }
+  if (!dialog && ctrl && k === "-") { e.preventDefault(); return galSize(+$("gal-size").value - 20); }
+  if (!dialog && ctrl && k === "0") { e.preventDefault(); return galSize(DEFAULT_GAL); }
   if (dialog) return;
-  if (ctrl && low === "n") { e.preventDefault(); return openCard(null); }
-  if ((ctrl && low === "f") || (k === "/" && !typing)) {
-    var box = S.view === "browse" ? $("br-search") : $("search");
-    e.preventDefault(); box.focus(); return box.select();
-  }
+  if ((ctrl && low === "n") || (!ctrl && !e.altKey && !typing && low === "n")) { e.preventDefault(); return openCard(null); }
+  if ((ctrl && low === "f") || (k === "/" && !typing)) { e.preventDefault(); $("br-search").focus(); return $("br-search").select(); }
   if (k === "F5" || (ctrl && low === "r")) { e.preventDefault(); return sync(null, k === "F5" && e.shiftKey); }
   if (ctrl && k === ",") { e.preventDefault(); return openSettings(); }
   if (ctrl && low === "l") { e.preventDefault(); return toggleLog(); }
-  if (S.view === "browse") return;              // the card shortcuts below are the cards'
 
-  if (typing || ctrl || e.altKey) return;
-  if (/^(Arrow(Left|Right|Up|Down)|Home|End)$/.test(k)) { e.preventDefault(); return moveSelection(k); }
-  var a = artistById(S.selected);
+  if (typing || ctrl || e.altKey || t.type === "range" || !$("gal-view").classList.contains("hidden")) return;   // (a picture open: its own keys)
+  if (/^(Arrow(Up|Down)|Home|End)$/.test(k)) { e.preventDefault(); return pickArtist(k); }
+  var a = artistById(S.brArtist);
   if (!a) return;
-  if (k === "Enter") { e.preventDefault(); openCard(a); }
-  else if (low === "u") sync(a.id);
-  else if (low === "d") sync(a.id, true);
-  else if (low === "o") openFolder(a);
-  else if (low === "g") openGallery(a);
-  else if (k === "Delete") removeArtist(a);
+  // Enter on a button presses it; in the artist list it edits the card instead.
+  if (k === "Enter" && t.tagName === "BUTTON" && !t.closest("#br-list")) return;
+  var act = k === "Enter" ? "edit" : k === "Delete" ? "delete" : { a: "auto", u: "sync", d: "download", o: "folder" }[low];
+  if (act) { e.preventDefault(); artistAct(act, a); }
 });
 
 // ---- browse: the artists on the left, their posts on the right ---------------
@@ -601,38 +447,38 @@ function galWatch() {
 }
 
 var BR_HIDDEN = "sourcerer.browse.hidden";
-var BR_FIT = "sourcerer.browse.fit";
-var BR_SORT = "sourcerer.browse.sort", BR_COUNT = "sourcerer.browse.count";
-S.view = "cards"; S.brArtist = 0; S.brFit = "square"; S.brSort = "name"; S.brCount = "sources";
+var BR_FIT = "sourcerer.browse.fit", BR_SIZE = "sourcerer.browse.size";
+var BR_SORT = "sourcerer.browse.sort", BR_COUNT = "sourcerer.browse.count", BR_LAST = "sourcerer.browse.last";
+S.brArtist = 0; S.brFit = "square"; S.brSort = "name"; S.brCount = "sources";
 try {
   S.brSort = localStorage.getItem(BR_SORT) === "activity" ? "activity" : "name";
-  S.brCount = { files: "files", auto: "auto" }[localStorage.getItem(BR_COUNT)] || "sources";
+  S.brCount = localStorage.getItem(BR_COUNT) === "files" ? "files" : "sources";   // (older versions also had "auto": the cloud is always shown now)
+  S.brArtist = +localStorage.getItem(BR_LAST) || 0;                              // the artist that was open when Sourcerer was closed
 } catch (e) {}
 $("br-sort").value = S.brSort; $("br-count").value = S.brCount;
 try { S.brHidden = JSON.parse(localStorage.getItem(BR_HIDDEN) || "{}"); } catch (e) { S.brHidden = {}; }
 try { S.brFit = localStorage.getItem(BR_FIT) === "full" ? "full" : "square"; } catch (e) {}
 
-function setView(view) {
-  S.view = view;
-  var browse = view === "browse";
-  $$(".filterbar, #main").forEach(function (e) { e.classList.toggle("hidden", browse); });
-  $("browse").classList.toggle("hidden", !browse);
-  $("view-cards").classList.toggle("selected", !browse);
-  $("view-browse").classList.toggle("selected", browse);
-  // The gallery stays while the cards are shown (it asks nothing meanwhile); it comes back as it was.
-  if (browse) {
-    renderBrowseList(); renderBrowseHead();
-    if (!G || (G.all ? 0 : G.artist.id) !== S.brArtist) browseOpen(S.brArtist);      // not the one that was left open
-    else if (galLoading(G)) galPoll(G);
-  }
+// A gallery the user has left stays: it keeps loading on the server, its posts stay here, and picking the artist
+// again shows it at once, where it was -- no new request to any site. (The filter never asks a site: it only hides.)
+// Kept aside at most GS_KEEP of them, each for GS_AGE: after that its posts are too old to trust (a link may have
+// expired, a download may have changed what is saved) and the gallery opens again, from its snapshots.
+var GS = {}, GS_KEEP = 6, GS_AGE = 15 * 60 * 1000;
+
+function galDrop(key) {
+  var g = GS[key];
+  delete GS[key];
+  if (g && g.id) api("POST", "/api/gallery/close", { gallery: g.id }).catch(function () {});
 }
 
-// From a card: Browse, with this artist picked.
-function openGallery(a) {
-  closeMenu();
-  if (!a) return;
-  S.brArtist = a.id;
-  if (S.view === "browse") browseOpen(a.id); else setView("browse");
+// Leaves the open gallery without closing it -- unless it is out of date or never opened: then it is closed.
+function galStash() {
+  if (!G) return;
+  if (G.stale || (!G.id && !G.loading)) { var old = G; G = null; if (old.id) api("POST", "/api/gallery/close", { gallery: old.id }).catch(function () {}); return; }
+  G.scroll = $("gal-body").scrollTop; G.at = Date.now(); G.polling = false;
+  GS[G.key] = G;
+  Object.keys(GS).sort(function (x, y) { return GS[x].at - GS[y].at; }).slice(0, -GS_KEEP).forEach(galDrop);
+  G = null;
 }
 
 function browseClose() {
@@ -643,9 +489,12 @@ function browseClose() {
   closeView();
 }
 
-// The artists, "All artists" first; the one open is marked. Alphabetic or the latest activity first,
-// and the number beside a name is what the second choice says: the sources Sourcerer tracks, the images
-// in the library, or whether the card downloads by itself (the cloud, dimmed when it does not).
+// The artists, "All artists" first; the one open is marked. Alphabetic or the latest activity first, and the
+// number beside a name is what the second choice says: the sources Sourcerer tracks or the images in the library.
+// The cloud at the end is the card's auto-download: green when it is on, dark grey when it is off. A card that
+// is syncing shows a ring instead of its number. The list is only replaced when its markup changed: it is
+// redrawn on every poll while a sync runs, and replacing it would swallow a click that began before.
+var brHtml = "";
 function renderBrowseList() {
   var q = $("br-search").value.trim().toLowerCase();
   var list = S.artists.filter(function (a) { return !q || a.name.toLowerCase().indexOf(q) >= 0; })
@@ -653,36 +502,39 @@ function renderBrowseList() {
       if (S.brSort === "activity") { var tx = activityOf(x), ty = activityOf(y); if (tx !== ty) return tx < ty ? 1 : -1; }
       return x.name.localeCompare(y.name);
     });
+  var cur = S.sync.current && S.sync.current.artist_id, queue = S.sync.queue || [];
   function count(a) {
+    if (cur === a.id || queue.indexOf(a.id) >= 0) return '<i class="spin" title="' + (cur === a.id ? "Working…" : "Queued") + '"></i>';
     if (S.brCount === "files") return a.file_count || "";
-    if (S.brCount === "auto") return '<span title="Auto-download ' + (a.auto_download ? "on" : "off") + '">' +
-      icon("cloud-down", a.auto_download ? "" : "off") + "</span>";
     return a.sources.filter(function (s) { return s.supported; }).length || "";
   }
-  $("br-list").innerHTML = (q ? "" : '<button type="button" class="br-item all' + (!S.brArtist ? " selected" : "") +
+  var html = (q ? "" : '<button type="button" class="br-item all' + (!S.brArtist ? " selected" : "") +
     '" data-id="0">' + icon("photo") + '<span class="br-name">All artists</span></button>') +
     list.map(function (a) {
       return '<button type="button" class="br-item' + (S.brArtist === a.id ? " selected" : "") + '" data-id="' + a.id + '">' +
         avatarHtml(a) + '<span class="br-name" title="' + esc(a.name) + '">' + esc(a.name) + "</span>" +
-        '<span class="br-n">' + count(a) + "</span></button>";
+        '<span class="br-n">' + count(a) + "</span>" +
+        '<span class="br-auto ' + (a.auto_download ? "on" : "off") + '" title="Auto-download ' + (a.auto_download ? "on" : "off") +
+        ' (right-click to change)">' + icon("cloud-down") + "</span></button>";
     }).join("");
+  if (html !== brHtml) { brHtml = html; $("br-list").innerHTML = html; }
 }
 
 function renderBrowseHead() {
-  var cur = S.sync.current && G && G.artist && S.sync.current.artist_id === G.artist.id ? S.sync.current : null;
-  var queued = G && G.artist && (S.sync.queue || []).indexOf(G.artist.id) >= 0;
+  var a = G && G.artist, sup = !!a && a.sources.some(function (s) { return s.supported; });
+  var cur = S.sync.current && a && S.sync.current.artist_id === a.id ? S.sync.current : null;
+  var queued = a && (S.sync.queue || []).indexOf(a.id) >= 0;
   $("br-progress").textContent = cur ? (cur.mode === "refresh" ? "Looking for new posts…" : cur.phase === "scan" ? "Checking sources…"
-    : "Downloading " + cur.done + " / " + cur.total) : queued ? "Queued" : "";
-  $("br-download").classList.toggle("hidden", !G || G.all);
-  $("br-edit").classList.toggle("hidden", !G || G.all);
+    : "Downloading " + cur.done + " / " + cur.total) : queued ? "Queued" : a && a.pending ? a.pending + (a.pending >= 120 ? "+" : "") + " to download" : "";
+  ["br-download", "br-edit", "br-refresh", "br-folder"].forEach(function (id) { $(id).classList.toggle("hidden", !a); });
+  $("br-download").disabled = $("br-refresh").disabled = !sup;
   galHead();
 }
 
 // The spinner while a site is still being asked, and the count of new posts a check found
 // (they join when the gallery is opened again, so the pictures keep their places meanwhile).
-// Still waiting for a site the filter has not switched off.
 function galLoading(g) {
-  return !!(g && g.loading && (!g.sources || g.sources.some(function (s) { return s.loading && !g.hidden[s.label]; })));
+  return !!(g && g.loading && (!g.sources || g.sources.some(function (s) { return s.loading; })));
 }
 
 function galHead() {
@@ -693,13 +545,15 @@ function galHead() {
 }
 
 // The state of the sources while the page waits for them: a spinner per site, green once asked.
-// It asks nobody and only runs while Browse is shown; it slows down the longer a site takes.
+// It asks nobody and only runs while the gallery is shown; it slows down the longer a site takes.
+// A gallery that comes back from being kept aside is asked once, even when nothing was loading: the server
+// may have closed it meanwhile.
 function galPoll(g) {
   if (g.polling) return;
   g.polling = true;
   var n = 0;
   (function tick() {
-    if (g !== G || !g.id || S.view !== "browse") { g.polling = false; return; }      // setView starts it again
+    if (g !== G || !g.id) { g.polling = false; return; }      // left: galResume starts it again
     api("POST", "/api/gallery/state", { gallery: g.id }).then(function (d) {
       if (g !== G) return;
       g.sources = d.sources; g.loading = d.loading; g.newPosts = d.new_posts;
@@ -707,22 +561,30 @@ function galPoll(g) {
       if (galLoading(g)) setTimeout(tick, Math.min(3000, 600 + 100 * n++)); else g.polling = false;
     }).catch(function (e) {
       g.polling = false;
-      // Closed by the server (a long rest, a restart): open it again where it was.
-      if (g === G && /was closed/.test(e.message)) browseOpen(S.brArtist);
+      // Closed by the server (a long rest, a restart): open it again.
+      if (g === G && /was closed/.test(e.message)) browseOpen(S.brArtist, true);
       else if (g === G) { g.loading = false; galHead(); galSources(g.sources || []); }
     });
   })();
 }
 
-function browseOpen(id) {
+// Opens an artist's gallery -- or shows the one kept aside, as it was. fresh: open it again whatever is kept.
+function browseOpen(id, fresh) {
   closeMenu();
   var a = id ? artistById(id) : null;
   if (id && !a) id = 0;                         // the artist is gone: All artists
   S.brArtist = id || 0;
-  if (G && G.id) api("POST", "/api/gallery/close", { gallery: G.id }).catch(function () {});
-  G = { artist: a, all: !id, id: null, items: [], busy: false, done: false, hidden: S.brHidden, view: -1, sources: null, downloading: {},
-        loading: true, newPosts: 0, polling: false };
+  try { localStorage.setItem(BR_LAST, String(S.brArtist)); } catch (e) {}
+  if (G && G.key === S.brArtist) {              // the open one again: only to show it fresh
+    if (!fresh) return;
+    browseClose();
+  } else galStash();
   galQueue = []; galFlight.clear(); galNear.disconnect();
+  var kept = GS[S.brArtist];
+  if (kept && (fresh || kept.stale || Date.now() - kept.at > GS_AGE)) { galDrop(S.brArtist); kept = null; }
+  if (kept) { delete GS[S.brArtist]; return galResume(kept, a); }
+  G = { key: S.brArtist, artist: a, all: !id, id: null, items: [], busy: false, done: false, hidden: S.brHidden, view: -1, sources: null,
+        downloading: {}, loading: true, newPosts: 0, polling: false };
   $("gal-title").textContent = a ? a.name : "All artists";
   $("gal-grid").innerHTML = ""; $("gal-sources").innerHTML = "";
   $("gal-body").scrollTop = 0;
@@ -731,20 +593,39 @@ function browseOpen(id) {
   renderBrowseList(); renderBrowseHead();
   if (!id && !S.artists.length) { G.loading = false; galHead(); $("gal-end").textContent = "No cards yet: create a card first."; return; }
   var g = G;
-  var hidden = Object.keys(S.brHidden).filter(function (k) { return S.brHidden[k]; });
-  api("POST", "/api/gallery/open", { artist_id: id || 0, hidden: hidden }).then(function (d) {
-    if (g !== G) return api("POST", "/api/gallery/close", { gallery: d.gallery });
+  api("POST", "/api/gallery/open", { artist_id: id || 0 }).then(function (d) {
+    if (g !== G && GS[g.key] !== g) return api("POST", "/api/gallery/close", { gallery: d.gallery });
     g.id = d.gallery; g.sources = d.sources;
     g.loading = d.sources.some(function (s) { return s.loading; });
+    if (g !== G) return;                        // left before it opened: it is kept aside, and shown again from here
     galSources(d.sources); galHead();
     moreGallery();
     if (g.loading) galPoll(g);
-  }).catch(function (e) { if (g === G) { g.loading = false; galHead(); } $("gal-end").textContent = e.message; });
+  }).catch(function (e) { g.loading = false; if (g === G) { galHead(); $("gal-end").textContent = e.message; } });
 }
 
-// The ids of the sources whose site the filter has switched off.
-function offIds(g) {
-  return (g.sources || []).filter(function (s) { return g.hidden[s.label]; }).map(function (s) { return s.id; });
+// A gallery kept aside, shown again: its posts from memory, then one look at the server's state.
+function galResume(g, a) {
+  G = g;
+  g.artist = a; g.hidden = S.brHidden; g.polling = false;
+  $("gal-title").textContent = a ? a.name : "All artists";
+  closeView();
+  renderBrowseList(); renderBrowseHead();
+  $("gal-grid").innerHTML = g.items.map(function (it, i) { return tileHtml(it, i); }).join("");
+  $("gal-sources").innerHTML = "";
+  if (g.sources) galSources(g.sources);
+  $("gal-end").textContent = g.done ? (g.items.length ? plural(g.items.length, "picture") + " – that is all" : "Nothing found.") : "";
+  galWatch(); galLayout();
+  $("gal-body").scrollTop = g.scroll || 0;
+  if (!g.id) return;                            // still waiting for its opening: the answer shows it
+  galPoll(g);
+  if (!g.busy && !g.done && galEndNear()) moreGallery();
+}
+
+// The end of the grid is in sight, so more is wanted. (The observer only fires on a change.)
+function galEndNear() {
+  var end = $("gal-end").getBoundingClientRect(), box = $("gal-body").getBoundingClientRect();
+  return end.top < box.bottom + 800;
 }
 
 function moreGallery() {
@@ -762,31 +643,26 @@ function moreGallery() {
   }
   g.busy = true;
   $("gal-end").textContent = "Asking the sites…";
-  var sent = offIds(g).join(",");
   // The first page is only what the window shows: it is there as soon as one source answered.
-  api("POST", "/api/gallery/more", { gallery: g.id, n: g.items.length ? 60 : 24, off: offIds(g) }).then(function (d) {
-    if (g !== G) return;
-    // A site switched on while this was on its way was left out of it: ask again, whatever it says.
-    var stale = offIds(g).join(",") !== sent;
-    g.busy = false; g.done = d.done && !stale; g.sources = d.sources;
+  api("POST", "/api/gallery/more", { gallery: g.id, n: g.items.length ? 60 : 24 }).then(function (d) {
+    // What the server handed out is kept even when the gallery was left meanwhile: it will not hand it out again.
+    g.busy = false; g.done = d.done; g.sources = d.sources;
     g.loading = d.loading; g.newPosts = d.new_posts;
     var start = g.items.length;
     g.items = g.items.concat(d.items);
+    if (g !== G) return;                        // kept aside: shown from memory when it comes back
     $("gal-grid").insertAdjacentHTML("beforeend", d.items.map(function (it, k) { return tileHtml(it, start + k); }).join(""));
     galWatch(); galLayout();
     galSources(d.sources); galHead();
     if (g.loading) galPoll(g);
     $("gal-end").textContent = !g.done ? "" : g.items.length ? plural(g.items.length, "picture") + " – that is all" : "Nothing found.";
     // The observer fires on a change only: while the end is still in sight, ask on.
-    if (!g.done && (d.items.length || stale)) {
-      var end = $("gal-end").getBoundingClientRect(), box = $("gal-body").getBoundingClientRect();
-      if (end.top < box.bottom + 800) setTimeout(moreGallery, 50);
-    }
+    if (!g.done && d.items.length && galEndNear()) setTimeout(moreGallery, 50);
   }).catch(function (e) {
-    if (g !== G) return;
     g.busy = false;
+    if (g !== G) return;
     // Closed by the server after a long rest (or a restart): open it again where it was.
-    if (/was closed/.test(e.message)) return browseOpen(S.brArtist);
+    if (/was closed/.test(e.message)) return browseOpen(S.brArtist, true);
     $("gal-end").textContent = e.message;
   });
 }
@@ -815,8 +691,8 @@ function tileHtml(it, i) {
     (it.w && it.h ? '" data-ar="' + galRatio(it.w, it.h) : "") +
     '" data-src="' + esc(it.source) + '" title="' + esc(who + (it.posted ? " · " + it.posted.slice(0, 10) : "")) + '">' +
     picture + (it.video && it.thumb ? '<span class="gal-play">' + icon("play") + "</span>" : "") +
-    '<span class="gal-tag">' + (G.all ? esc(it.artist) + " " : "") + (siteLogo(it.source) || esc(it.source)) + "</span>" +
-    (it.saved ? '<span class="gal-saved" title="Downloaded">' + icon("check") + "</span>" : "") + "</button>";
+    '<span class="gal-tag">' + (siteLogo(it.source) || esc(it.source)) + "</span>" +
+    (it.saved ? '<span class="gal-saved" title="Downloaded">' + icon("tick") + "</span>" : "") + "</button>";
 }
 
 // One chip per site the open gallery has a source of: switching it off hides its posts and
@@ -827,8 +703,8 @@ function galSources(list) {
   $("gal-sources").innerHTML = sites.map(function (label) {
     var of = list.filter(function (s) { return s.label === label; });
     var bad = of.filter(function (s) { return s.error; }), off = !!G.hidden[label];
-    var busy = !off && of.some(function (s) { return s.loading; });
-    var ready = !off && !busy && !bad.length && of.every(function (s) { return s.checked || s.state === "done"; });
+    var busy = of.some(function (s) { return s.loading; });
+    var ready = !busy && !bad.length && of.every(function (s) { return s.checked || s.state === "done"; });
     var news = of.reduce(function (n, s) { return n + (s.new || 0); }, 0);
     var tip = bad.length ? label + ": " + bad[0].error : off ? "Show " + label
       : busy ? label + ": asking the site…" : "Hide " + label + (G.all ? " (" + plural(of.length, "source") + ")" : "") +
@@ -869,14 +745,25 @@ function viewItem(i) {
       else { img.onerror = null; if (small) img.remove(); }
     };
   }
-  $("gal-info").textContent = [G.all ? it.artist : "", it.source, it.posted ? new Date(it.posted).toLocaleString() : "",
+  // Top left the site's mark; bottom left who it is -- picture and name -- and what is known of the file.
+  $("gal-source").innerHTML = siteLogo(it.source) || '<b>' + esc(it.source) + "</b>";
+  $("gal-source").title = it.source;
+  $("gal-who").innerHTML = avatarHtml(artistById(it.artist_id) || { name: it.artist }) + "<span>" + esc(it.artist) + "</span>";
+  $("gal-info").textContent = [it.posted ? new Date(it.posted).toLocaleString() : "",
     it.w ? it.w + " × " + it.h : "", (i + 1) + " / " + G.items.length + (G.done ? "" : "+")].filter(Boolean).join(" · ");
-  var busy = !!G.downloading[it.id];
-  $("gal-download").disabled = it.saved || busy;
-  $("gal-download").querySelector("span").textContent = it.saved ? "Downloaded" : busy ? "Downloading…" : "Download";
+  galDlState(it);
   $("gal-view").classList.remove("hidden");
   // Near the end of what is listed: the next page, before it is needed.
   if (i > G.items.length - 8) moreGallery();
+}
+
+// The viewer's Download button: green "Downloaded" once the picture is in the library.
+function galDlState(it) {
+  var b = $("gal-download"), busy = !!G.downloading[it.id];
+  b.disabled = it.saved || busy;
+  b.classList.toggle("done", !!it.saved);
+  b.querySelector("svg use").setAttribute("href", it.saved ? "#i-tick" : "#i-download");
+  b.querySelector("span").textContent = it.saved ? "Downloaded" : busy ? "Downloading…" : "Download";
 }
 
 // The next two pictures are fetched while this one is looked at, once it has arrived (not before: it
@@ -927,6 +814,12 @@ $("gal-grid").addEventListener("error", function (e) {
     setTimeout(galPump);                 // after this event: listeners added now would hear it
     return;
   }
+  if (e.target.dataset.lazy && !e.target.dataset.retried) {      // one dropped connection must not leave a hole in the grid
+    var img = e.target;
+    img.dataset.retried = "1"; img.removeAttribute("src");
+    setTimeout(function () { if (img.isConnected) { galQueue.push(img); galPump(); } }, 1500);
+    return;
+  }
   e.target.outerHTML = '<span class="gal-noimg">' + icon(it && it.video ? "play" : "photo") + "</span>";
 }, true);
 $("gal-sources").addEventListener("click", function (e) {
@@ -937,13 +830,9 @@ $("gal-sources").addEventListener("click", function (e) {
   try { localStorage.setItem(BR_HIDDEN, JSON.stringify(G.hidden)); } catch (e2) {}
   chip.classList.toggle("off", !!G.hidden[label]);
   $$("#gal-grid .gal-tile").forEach(function (t) { if (t.dataset.src === label) t.classList.toggle("hidden", !!G.hidden[label]); });
-  if (!G.hidden[label]) {
-    // A site that was off since the gallery opened has no pictures yet: they belong in date order,
-    // not at the end, so the gallery opens again.
-    if (!G.items.some(function (it) { return it.source === label; })) return browseOpen(S.brArtist);
-    G.done = false; galWatch();
-  }
-  moreGallery();
+  // The filter only hides: every site is asked whatever it says, so showing one again needs no request.
+  if (!G.hidden[label]) galWatch();
+  if (galEndNear()) moreGallery();
   galLayout();
 });
 $("gal-view").addEventListener("click", function (e) {
@@ -954,29 +843,32 @@ $("gal-view").addEventListener("click", function (e) {
   else if (b.dataset.gal === "next") step(1);
   else if (b.dataset.gal === "back") closeView();
   else if (b.dataset.gal === "post" && it && it.post) api("POST", "/api/open-url", { url: it.post }).catch(fail);
-  else if (b.dataset.gal === "download" && it && !it.saved) {
-    var g = G, i = G.view;
-    g.downloading[it.id] = true;
-    b.disabled = true;
-    b.querySelector("span").textContent = "Downloading…";
-    api("POST", "/api/gallery/download", { gallery: g.id, item: it.id }).then(function (d) {
-      if (g !== G) return;
-      delete g.downloading[it.id];
-      g.items[i] = d.item;
+  else if (b.dataset.gal === "download") galDownload();
+});
+function galDownload() {
+  var g = G, i = G && G.view, it = g && g.items[i];
+  if (!it || it.saved || g.downloading[it.id]) return;
+  g.downloading[it.id] = true;
+  galDlState(it);
+  api("POST", "/api/gallery/download", { gallery: g.id, item: it.id }).then(function (d) {
+    delete g.downloading[it.id];
+    g.items[i] = d.item;
+    if (g === G) {                               // (left meanwhile: it shows the file saved when it comes back)
       var tile = document.querySelector('#gal-grid .gal-tile[data-i="' + i + '"]');
       if (tile) { tile.outerHTML = tileHtml(d.item, i); galWatch(); galLayout(); }
       if (g.view === i) viewItem(i);
-      toast(d.kept ? "Saved in " + d.item.artist + "'s folder" : "Not saved: the same picture is already in the folder");
-      load();
-    }).catch(function (err) {
-      fail(err);
-      if (g !== G) return;
-      delete g.downloading[it.id];
-      if (g.view === i) viewItem(i);
-    });
-  }
-});
-$("gal-size").addEventListener("input", function () { $("gal-grid").style.setProperty("--gal", this.value + "px"); galLayout(); });
+    }
+    toast(d.kept ? "Saved in " + d.item.artist + "'s folder" : "Not saved: the same picture is already in the folder");
+    load();
+  }).catch(function (err) {
+    fail(err);
+    delete g.downloading[it.id];
+    if (g === G && g.view === i) galDlState(it);
+  });
+}
+$("gal-size").addEventListener("input", function () { galSize(+this.value); });
+try { var savedSize = +localStorage.getItem(BR_SIZE); if (savedSize) $("gal-size").value = savedSize; } catch (e) {}
+$("gal-grid").style.setProperty("--gal", $("gal-size").value + "px");
 
 // ---- squares or whole pictures -----------------------------------------------
 // Squares: a grid of square tiles, cropped to fill. Full: rows of whole pictures, each row as
@@ -1067,19 +959,24 @@ $("gal-fit").addEventListener("click", function (e) {
   if (b && b.dataset.fit !== S.brFit) galFit(b.dataset.fit, true);
 });
 galFit(S.brFit, false);
-$("br-edit").addEventListener("click", function () { if (G && G.artist) openCard(G.artist); });
-$("gal-new").addEventListener("click", function () { browseOpen(S.brArtist); });
-// The large view: arrows step, Esc closes it (the keys of the card grid do not apply here).
+$("br-edit").addEventListener("click", function () { artistAct("edit", G && G.artist); });
+$("br-refresh").addEventListener("click", function () { artistAct("sync", G && G.artist); });
+$("br-folder").addEventListener("click", function () { artistAct("folder", G && G.artist); });
+$("gal-new").addEventListener("click", function () { browseOpen(S.brArtist, true); });
+// A picture open: arrows step, Esc closes it, D downloads it and O opens its post. Ahead of the page's own keys.
 document.addEventListener("keydown", function (e) {
-  if (S.view !== "browse" || document.querySelector("dialog[open]")) return;
-  var open = !$("gal-view").classList.contains("hidden"), t = e.target;
+  if (document.querySelector("dialog[open]") || $("gal-view").classList.contains("hidden")) return;
+  var t = e.target, low = e.key.toLowerCase();
   var typing = (t.tagName === "INPUT" && !/^(range|checkbox)$/.test(t.type)) || t.tagName === "SELECT" || t.tagName === "TEXTAREA";
-  if (e.key === "Escape" && open) { e.preventDefault(); e.stopPropagation(); closeView(); }
-  else if (open && !typing && e.key === "ArrowLeft") { e.preventDefault(); step(-1); }
-  else if (open && !typing && e.key === "ArrowRight") { e.preventDefault(); step(1); }
+  var it = G && G.items[G.view], plain = !typing && !e.ctrlKey && !e.metaKey && !e.altKey;
+  if (e.key === "Escape") closeView();
+  else if (plain && e.key === "ArrowLeft") step(-1);
+  else if (plain && e.key === "ArrowRight") step(1);
+  else if (plain && low === "d") galDownload();
+  else if (plain && low === "o" && it && it.post) api("POST", "/api/open-url", { url: it.post }).catch(fail);
+  else return;
+  e.preventDefault(); e.stopPropagation();
 }, true);
-$("view-cards").addEventListener("click", function () { setView("cards"); });
-$("view-browse").addEventListener("click", function () { setView("browse"); });
 $("br-search").addEventListener("input", renderBrowseList);
 $("br-add").addEventListener("click", function () { openCard(null); });
 $("br-sort").addEventListener("change", function () {
@@ -1088,11 +985,11 @@ $("br-sort").addEventListener("change", function () {
   renderBrowseList();
 });
 $("br-count").addEventListener("change", function () {
-  S.brCount = { files: "files", auto: "auto" }[this.value] || "sources";
+  S.brCount = this.value === "files" ? "files" : "sources";
   try { localStorage.setItem(BR_COUNT, S.brCount); } catch (e) {}
   renderBrowseList();
 });
-// Right-click on an artist: the card's menu (Delete among it), as on the cards.
+// Right-click on an artist: the card's menu (auto-download, delete ... among it).
 $("br-list").addEventListener("contextmenu", function (e) {
   var b = e.target.closest("[data-id]"), a = b && artistById(+b.dataset.id);
   if (!a) return;
@@ -1101,20 +998,24 @@ $("br-list").addEventListener("contextmenu", function (e) {
 });
 $("br-list").addEventListener("click", function (e) {
   var b = e.target.closest("[data-id]");
-  if (b && !(G && G.id && +b.dataset.id === S.brArtist)) browseOpen(+b.dataset.id);
+  if (b && +b.dataset.id !== S.brArtist) browseOpen(+b.dataset.id);
 });
-// Download all: the card is synced, but only through the sources that are switched on.
-$("br-download").addEventListener("click", function () {
-  if (!G || G.all) return;
-  var ids = (G.sources || []).filter(function (s) { return !G.hidden[s.label]; }).map(function (s) { return s.id; });
-  if (!ids.length) return toast("Switch on at least one source first.", true);
-  var b = this;
+// Download: the card is synced, but only through the sources that are switched on. Another artist's
+// card (from the menu) is downloaded whole.
+function downloadSelected(a) {
+  var open = G && G.artist && G.artist.id === a.id;
+  var on = open ? (G.sources || []).filter(function (s) { return !G.hidden[s.label]; }) : [];
+  if (open && !on.length) return toast("Switch on at least one source first.", true);
+  var body = { artist_id: a.id, mode: "download" };
+  if (open && on.length < G.sources.length) body.sources = on.map(function (s) { return s.id; });
+  var b = $("br-download");
   b.disabled = true;
-  api("POST", "/api/sync", { artist_id: G.artist.id, sources: ids, mode: "download" }).then(function (d) {
-    toast(d.added ? "Downloading from " + plural(ids.length, "source") + "…" : "This card is syncing or queued already.");
+  api("POST", "/api/sync", body).then(function (d) {
+    toast(d.added ? "Downloading " + a.name + (body.sources ? " from " + plural(on.length, "source") : "") + "…" : a.name + " is syncing or queued already.");
     lastKey = ""; return api("GET", "/api/sync");
-  }).then(function (s) { S.sync = s; renderBrowseHead(); }).catch(fail).then(function () { b.disabled = false; });
-});
+  }).then(function (s) { S.sync = s; renderBrowseHead(); }).catch(fail).then(function () { b.disabled = false; renderBrowseHead(); });
+}
+$("br-download").addEventListener("click", function () { artistAct("download", G && G.artist); });
 
 // ---- the card dialog -------------------------------------------------------
 
@@ -1363,10 +1264,13 @@ $("form-card").addEventListener("submit", function (e) {
   }).then(function (d) {
     var edited = F.id;
     $("dlg-card").close(); lastKey = "";
-    if (d.id) S.selected = d.id;
-    // Browse of the card that was edited (or of every card) shows its new sources.
+    // The sources changed: every gallery kept aside that lists this card is out of date; an open one opens again.
+    if (edited) galDrop(edited);
+    galDrop(0);
+    if (G && (G.all || G.key === edited)) G.stale = true;
     load().then(function () {
-      if (S.view === "browse" && G && (G.all || (edited && G.artist && G.artist.id === edited))) browseOpen(S.brArtist);
+      if (d.id && !edited) browseOpen(d.id);                       // a new card: its posts
+      else if (G && (G.all || (edited && G.artist && G.artist.id === edited))) browseOpen(S.brArtist, true);
     });
     // The dots and the profile picture arrive a moment later, from the background.
     setTimeout(load, 2500);
@@ -1432,7 +1336,6 @@ $("set-hours").addEventListener("change", function () { saveSetting({ auto_hours
 $("set-parallel").addEventListener("change", function () { saveSetting({ parallel: this.value }); });
 $("set-perhost").addEventListener("change", function () { saveSetting({ per_host: this.value }); });
 $("set-pace").addEventListener("change", function () { saveSetting({ pace_ms: this.value }); });
-$("set-size").addEventListener("input", function () { setSize(+this.value, true); });
 $("btn-settings").addEventListener("click", function () { openSettings(S.update && S.update.available ? "updates" : null); });
 $$("[data-open]").forEach(function (b) {
   b.addEventListener("click", function () { api("POST", "/api/open", { target: b.dataset.open }).catch(fail); });
@@ -1509,7 +1412,7 @@ function accBox(a, win) {
     if (a.kind === "window" && !win) btns += '<button type="button" data-acc="import" title="Import a cookies.txt">Import&hellip;</button>';
   }
   return '<form class="accbox' + (expired ? " expired" : "") + (a.key === S.accFocus ? " focus" : "") + '" data-key="' + key + '" data-kind="' + a.kind + '">' +
-    accId(dot, a.group || a.label, a.group ? a.label : "", accState(a), dot === "warn" ? "warn" : expired ? "bad" : "") +
+    accId(a.key.split(":")[0], dot, a.group || a.label, a.group ? a.label : "", accState(a), dot === "warn" ? "warn" : expired ? "bad" : "") +
     (fields ? '<div class="acc-fields">' + fields + "</div>" : "") +
     '<div class="acc-btns">' + btns + "</div>" +
     '<p class="error">' + esc(S.accError[a.key] || "") + "</p></form>";
@@ -1517,9 +1420,17 @@ function accBox(a, win) {
 
 var ACC_DOT = { ok: "Works", warn: "Works, but needs attention", error: "Ran out: log in again", blank: "Not logged in", checking: "Checking…" };
 
-// The left of a row: the status dot, the name and what is known about the login.
-function accId(dot, name, sub, state, tone) {
-  return '<div class="acc-id"><i class="dot ' + dot + '" title="' + ACC_DOT[dot] + '"></i><div class="acc-text">' +
+// A login's site mark with its status dot in the corner (the same as Browse's chips); the bare dot for a
+// type without a mark. The account types are the sites' own names.
+var ACC_LOGOS = { bluesky: "bluesky", mastodon: "mastodon", pixiv: "pixiv", patreon: "patreon", x: "x", xenforo: "xenforo", booru: "booru" };
+function accMark(type, dot) {
+  var d = '<i class="dot ' + dot + '" title="' + ACC_DOT[dot] + '"></i>';
+  return ACC_LOGOS[type] ? '<span class="mark"><svg class="ic logo" aria-hidden="true"><use href="#l-' + ACC_LOGOS[type] + '"/></svg>' + d + "</span>" : d;
+}
+
+// The left of a row: the site's mark and status dot, the name and what is known about the login.
+function accId(type, dot, name, sub, state, tone) {
+  return '<div class="acc-id">' + accMark(type, dot) + '<div class="acc-text">' +
     '<div class="acc-top"><b>' + esc(name) + "</b>" + (sub ? '<span class="muted small">' + esc(sub) + "</span>" : "") + "</div>" +
     '<p class="hint acc-state' + (tone ? " " + tone : "") + '">' + esc(state) + "</p></div></div>";
 }
@@ -1554,7 +1465,7 @@ function accAdd(d) {
   if (t && t.kind === "window" && !S.window) btns += '<button type="button" data-acc="import-add" title="Import a cookies.txt">Import&hellip;</button>';
   btns += '<button type="button" data-acc="cancel">Cancel</button>';
   return '<form class="accbox adding' + (S.accFocus === "add" ? " focus" : "") + '" data-key="add" data-add="1" data-kind="' + (t ? t.kind : "") + '">' +
-    '<div class="acc-id"><i class="dot blank"></i><div class="acc-text"><div class="acc-top"><b>Add account</b></div>' +
+    '<div class="acc-id">' + accMark(t ? t.type : "", "blank") + '<div class="acc-text"><div class="acc-top"><b>Add account</b></div>' +
     '<select name="type" aria-label="Type of account"><option value="">Choose the type of account…</option>' +
     types.map(function (x) { return '<option value="' + x.type + '"' + (x.type === S.accType ? " selected" : "") + ">" + esc(x.label) + "</option>"; }).join("") +
     "</select></div></div>" + (fields ? '<div class="acc-fields">' + fields + "</div>" : "") +
@@ -1893,8 +1804,6 @@ $("btn-quit").addEventListener("click", function () {
 });
 $("btn-sync-all").addEventListener("click", function () { sync(null); });
 $("btn-download-all").addEventListener("click", function () { sync(null, true); });
-$("search").addEventListener("input", render);
-$("sort").addEventListener("change", render);
 
 load().then(function () {
   poll();

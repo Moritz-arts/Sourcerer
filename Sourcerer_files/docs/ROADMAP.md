@@ -211,6 +211,23 @@ add the one that replaced it.
   Causes found: a global `.spin` rule, `max-width` that never enlarges, and a TLS
   handshake per picture (a thread per request). See CLAUDE.md, Browse traps.
 
+- 2026-10-16 — **Browse is the window; the Cards view is gone.** The user, from a
+  screenshot review: only Browse, nothing else; tiles show *just* the site's logo (no
+  grey pill); a downloaded picture is a green tick, in the viewer a green *Downloaded*;
+  no circle round a site chip on hover; auto-download is a cloud in the list that is
+  always there (green on, dark grey off) and no longer an entry of the number's choice;
+  *Sync all* is **Refresh**, Browse's *Download all* is **Download selected source(s)**;
+  Manage Accounts shows each site's logo; the large view has the site's logo top left,
+  the artist's picture and name bottom left, and wide arrow areas; the artist's
+  right-click menu turns auto-download on and off; shortcuts must work (they were bound
+  to the cards -- `U`, `D`, `O`, `Enter`, `Del`, the size keys did nothing in Browse);
+  and the sites must not be asked again on every switch of filter or artist.
+  So: a gallery that is left stays aside (up to 6, 15 minutes) and shows again from
+  memory; the site filter only hides (every site is asked once per gallery, hiding or
+  showing one costs no request); a dropped connection on a gallery picture is retried
+  once. The mockups' card grid is superseded by the user's decision; the card dialog,
+  the activity bar and the toolbar stay as in them.
+
 ## Done
 
 - [x] Repository workshop: CLAUDE.md, docs, version workflow
@@ -271,6 +288,9 @@ add the one that replaced it.
 - [x] Browse polish: Add artist, order and counter of the list, right-click menu, site
       logos, a circling spinner, the large view fills the window, sharper tiles, pictures
       through one pooled session and prefetched in the viewer
+- [x] Browse is the only view (no Cards view): logo-only tiles, green tick / *Downloaded*,
+      always-visible auto-download cloud and menu entry, Refresh, site logos in Manage Accounts
+      and the viewer, working shortcuts, galleries kept aside so a switch asks no site
 - [x] Browse opens from snapshots at once and checks the sites meanwhile (spinner,
       green chips, "N new posts"); Squares / Full picture layout; previews for cards
       with login sources without a sync first

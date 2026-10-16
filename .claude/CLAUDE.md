@@ -7,23 +7,25 @@ project of TrackImage, built the same way: the repository *is* the program —
 what people download and unpack is these folders, unchanged.
 
 **Status: early development.** What exists: the three launchers with
-`launch.py` behind them; the program — a window with artist cards, a card
-dialog (sources with a live dot each, own folder, master source, folder
+`launch.py` behind them; the program — a window that is Browse (the artists
+on the left, their posts on the right), a card dialog (sources with a live dot each, own folder, master source, folder
 layout, what to do with the same picture from two sources), a queued
 background sync that downloads from Bluesky, Mastodon, Pixiv, Patreon, X,
 XenForo forums and boorus, a gallery per card (all its sources, straight from
 the sites), a login for every site (Manage Accounts, checked at each start),
 settings like TrackImage's, and an
-updater with Stable/Beta and repair; a card has four buttons (sync, download,
-open the downloaded files, delete), opens its Browse view on a double-click and
-carries an Auto-download switch; and the workshop —
+updater with Stable/Beta and repair; an artist has a menu (edit, auto-download,
+refresh, download, open the downloaded files, delete) and an Auto-download
+cloud in the list; and the workshop —
 these notes, the docs and the automation that versions every push. `Sourcerer_files/sourcerer/__init__.py`
 lists the program's layers.
 
 **The design is fixed by two mockups in `.claude/design/`** — the main window
 and the artist card dialog. The page in `Sourcerer_files/static/` follows them:
 their colours, sizes and layout. Change the look there only with the user, and
-keep the mockups as the reference. **Everything is English** — the interface
+keep the mockups as the reference. **One decision of the user's supersedes the
+main window mockup: there is no card grid any more** -- Browse is the window
+(2026-10-16); the toolbar, the card dialog and the activity bar stay as drawn. **Everything is English** — the interface
 too (the user's decision; the mockups' German wording is superseded), as are
 code, comments and file names. The logo is `static/logo.svg`, also the
 favicon.
@@ -287,7 +289,7 @@ Do not create releases or tags yourself, and do not push to `main`.
   running, a restricted download of other sources runs -- is kept in `_followup` and
   enqueued when that job ends (`_work`), so it is asked for, never lost; `enqueue` counts it
   as added, `cancel` drops it. A download asked while the card's look is running is queued behind it.
-  Download buttons (card, Download all, Browse's Download all, Create & download)
+  Download buttons (Download all, Browse's Download selected source(s), the menu's Download, Create & download)
   always send `mode: "download"`. **Existing cards keep downloading**: `db.init`
   switches `auto_download` on once for every card that exists (setting
   `auto_download_migrated`); a card made later starts with it off. A single
@@ -334,10 +336,26 @@ Do not create releases or tags yourself, and do not push to `main`.
   are Simple Icons (CC0, symbols `l-<site>` in the sprite; `SITE_LOGOS` in `app.js` maps a
   source's `LABEL` to one, a site without one shows its name). The forum and the booru draw a
   Tabler icon in their own colour. A new site adds its symbol there.
-- **Browse's list** (`renderBrowseList`): the order (*Alphabetic | Latest activity*, as the cards'
-  `activityOf`) and the number beside a name (*Sources | Images | Auto-download*, the last one a
-  dimmed or lit cloud) are kept in localStorage; a right-click on a name opens the card menu
-  (Delete among it), the *Add artist* button at the bottom opens the new-card dialog.
+- **Browse's list** (`renderBrowseList`): the order (*Alphabetic | Latest activity*, by
+  `activityOf`) and the number beside a name (*Sources | Images*) are kept in localStorage. The
+  **auto-download cloud is always there, never a choice of the number**: green (`--dot-ok`) when
+  the card downloads by itself, dark grey when not; the artist's right-click menu (edit,
+  auto-download, refresh, download, open folder, delete -- the same keys `Enter A U D O Del`)
+  turns it on and off. A card that syncs shows a ring in place of its number. The list is
+  replaced only when its markup changed (it is redrawn on every poll while a sync runs, and
+  replacing it swallowed a click that began before). The *Add artist* button at the bottom
+  opens the new-card dialog.
+- **Keys act on the open artist** (`S.brArtist`, `artistAct`): there is no card selection any
+  more -- the cards' keys once did nothing in Browse, which was the "shortcuts don't work".
+  Up/Down/Home/End pick the previous or next artist (the gallery opens 250 ms after the last key),
+  Ctrl+wheel and Ctrl +/-/0 size the *pictures*. A picture open has its own keys, in a capture
+  listener ahead of the page's: arrows, `D` download, `O` open post, `Esc`. A key that a
+  browser reserves (Ctrl+N opens a window in a plain browser) has a plain twin (`N`).
+- **The site's mark is the only label on a tile**: `siteLogo(label)` alone, no pill, no artist
+  name (the title attribute says it); a site without a mark shows its name. The downloaded
+  tick is green (`--fill-ok`), the viewer's Download turns into a green *Downloaded*. A chip
+  has no hover circle (`.chip.logo:hover` keeps its background transparent).
+  Manage Accounts rows wear the same mark with the status dot on its corner (`accMark`).
 - **`.spin` is the ring that circles; only `.logo-hero.spin` bobs.** A global `.spin` rule meant
   for the update overlay's logo made every site spinner hop. On a chip the state sits on the
   logo (a dot in its corner, a ring round it), so it never changes size.
@@ -387,18 +405,25 @@ Do not create releases or tags yourself, and do not push to `main`.
 - **A refused Mastodon token is sent once** (`mastodon._dead`): net counts a
   login's 401s, three rest the whole server, and the visitor fallback made
   every request send the dead token first. A new login is another token.
-- **Browse is the gallery, in the window** (`#browse`, the *Cards | Browse*
-  switch): the artists left, one artist's posts -- or "All artists", one
-  timeline over every card (`gallery.open_gallery(None)`) -- right. The filter is
-  **by site** (`G.hidden`, a label like "Pixiv"; kept across artists in
-  localStorage): the page sends the ids of the switched-off sources as `off`
-  and the server does not list them (the page also sends the hidden labels as
-  `hidden` when it opens, so they are not even seeded). *Download all* is
-  `/api/sync` with `sources` and `mode: "download"`: `sync.enqueue(only=...)`
-  asks just those sources of that card. A double-click on a card opens it here.
-  Every item says its artist (`artist_id`): a download goes to *its* card's
-  folder with *its* dedupe rules, in "All artists" too. The mockup's card grid
-  stays the default view; Browse is the second one, never a replacement.
+- **Browse is the gallery, and the window** (`#browse`; there is no Cards view): the
+  artists left, one artist's posts -- or "All artists", one timeline over every card
+  (`gallery.open_gallery(None)`) -- right. The filter is **by site** (`G.hidden`, a label
+  like "Pixiv"; kept across artists in localStorage) and **only hides**: the server asks every
+  source whatever the filter says (it once skipped switched-off ones, and showing one again
+  meant opening the gallery again -- a request storm on every click). *Download selected
+  source(s)* is `/api/sync` with `sources` (only when some are off) and `mode: "download"`:
+  `sync.enqueue(only=...)` asks just those sources of that card. Every item says its artist
+  (`artist_id`): a download goes to *its* card's folder with *its* dedupe rules, in "All
+  artists" too.
+- **A gallery that is left stays aside** (`GS`, `galStash`, `galResume`; the server's `IDLE`
+  and `MAX_GALLERIES` are sized for it): switching artist does not close the gallery -- it keeps
+  loading on the server and its posts stay in the page, so picking the artist again shows them
+  where they were (scroll too), with one `/api/gallery/state` and no request to any site. Up to
+  `GS_KEEP` (6) for `GS_AGE` (15 min); after that, or after a sync ended (`stale`), or after
+  the card was edited or deleted, it is dropped and opens again from its snapshots. **A `more`
+  or download that answers after its gallery was left must still be stored in it** (the server
+  never hands the items out twice) -- only the drawing is skipped (`g !== G`). The picture
+  cache is per gallery id, which is why reopening a gallery refetched every proxied thumbnail.
 - **The gallery asks its sources at the same time** (`gallery._Source`, on
   `POOL` daemon threads shared by all galleries, each source in its own polite
   lane; a site gallery-dl reads -- `SERIAL`: X, forums -- and every login's
@@ -436,14 +461,9 @@ Do not create releases or tags yourself, and do not push to `main`.
   gallery** -- the pictures would jump; the page offers "N new posts - show", which
   opens the gallery again from the refreshed snapshot. The live page is saved as the
   source's snapshot as soon as it arrives.
-- **The card list is patched, not rebuilt** (`patchCards`): a poll while a sync runs re-renders
-  every 700 ms, and replacing all cards swallowed a click that began before it (the Auto-download
-  switch). Only a card whose markup changed is replaced; a running card gets just its
-  `.progress-text`, `.bar` and `.card-status` replaced. Keep those three in every busy card.
-  Browse's state poll (`galPoll`) runs only while Browse is shown and while a site the filter has
-  not switched off is loading, slows down, and reopens a gallery the server closed; every path
-  that ends a gallery's loading (no cards, a failed open) must clear `G.loading`.
-- **Squares or Full** (`S.brFit`
+- Browse's state poll (`galPoll`) runs only while a source of the open gallery is loading
+  (and once when a gallery comes back from aside), slows down, and reopens a gallery the server
+  closed; every path that ends a gallery's loading (no cards, a failed open) must clear `G.loading`.
 - **Squares or Full** (`S.brFit`, localStorage `sourcerer.browse.fit`): *Squares*
   is the CSS grid of square tiles; *Full* is TrackImage's "ratio" layout done in
   `galLayout`: rows of whole pictures, each row scaled to fill the width, the last
@@ -454,8 +474,11 @@ Do not create releases or tags yourself, and do not push to `main`.
   back as a default (it would stop the `load` handler learning the real one), and
   `.gal-body` always shows its scrollbar (`overflow-y: scroll`): one that comes and goes
   changes the width the rows are laid out for, and the layout flickered for ever.
-- **The card shows the 4 newest posts of its sources, downloaded or not**
-  (`previews.py`). One card at a time in the background (`previews._loop`),
+- **Previews** (`previews.py`) once drew the 4 newest posts on a card; **the cards are gone, the
+  page no longer shows them** (`/api/state` still carries `thumbs`). They stay because their look at
+  a card's sources keeps its snapshots fresh, which is what lets Browse open at once -- but the
+  small JPEGs they make are now wasted requests: a candidate for trimming. How it works: one card at a
+  time in the background (`previews._loop`),
   the first page of each source through the same lanes as a sync, a small JPEG
   of each in `Userdata/Previews/<artist>/` (a cache: safe to delete, goes with
   the card) and the rows in the `previews` table. A post that is downloaded shows

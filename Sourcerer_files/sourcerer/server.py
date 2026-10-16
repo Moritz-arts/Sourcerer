@@ -469,12 +469,9 @@ def _body():
 
 @app.post("/api/gallery/open")
 def gallery_open():
-    body = _body()
-    hidden = body.get("hidden")
     try:
         # No artist: every card (All artists).
-        return jsonify(gallery.open_gallery(int(body.get("artist_id") or 0) or None,
-                                            [h for h in hidden if isinstance(h, str)] if isinstance(hidden, list) else None))
+        return jsonify(gallery.open_gallery(int(_body().get("artist_id") or 0) or None))
     except (TypeError, ValueError):
         abort(400)
     except KeyError:
@@ -485,7 +482,7 @@ def gallery_open():
 def gallery_more():
     body = request.get_json(force=True) or {}
     try:
-        return jsonify(gallery.more(body.get("gallery") or "", body.get("n") or gallery.PAGE, body.get("off")))
+        return jsonify(gallery.more(body.get("gallery") or "", body.get("n") or gallery.PAGE))
     except KeyError:
         return jsonify(error="This gallery was closed; open it again."), 410
 
