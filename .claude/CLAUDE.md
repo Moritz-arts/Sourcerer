@@ -271,17 +271,24 @@ Do not create releases or tags yourself, and do not push to `main`.
 - **Sync and download are two jobs** (`sync.enqueue(mode=...)`, `_sync_artist`).
   *Sync* (`refresh`) only looks: `_glance` reads at most `REFRESH_ITEMS` posts /
   `REFRESH_PAGES` pages of each source, keeps them as the source's snapshot, and
-  `_looked` stores how many are not in the library (`artists.pending`, the card's
-  "N to download"); no walk through the history, nothing marked complete.
+  `_looked` stores how many are not in the library -- **per source**
+  (`sources.pending`; `artists.pending` is their sum, the card's "N to download", via
+  `_set_pending`), so a source that failed, rests or was left alone keeps its count and one
+  that was not asked about (Browse's filter) is not forgotten; no walk through the history,
+  nothing marked complete. A download sets each source it read to what is left of it (failed,
+  cut off, rested).
   *Download* walks and downloads as before. With no mode asked for, the card
   decides: `artists.auto_download` on = a sync (the button, Sync all, Automatic
-  sync) downloads too, off = it only looks. A download asked for while a look
-  waits in the queue makes the wait a download; a look never narrows one.
+  sync) downloads too, off = it only looks. Queue rules (`enqueue`): a full
+  download covers whatever waits; a restricted one (Browse's Download all) joins a
+  restricted wait and is dropped from a full one -- and **nothing widens a restricted
+  download** (a plain sync asked meanwhile changes nothing: it would download the sources the
+  filter left out); a download asked while the same card's look is running is queued behind it.
   Download buttons (card, Download all, Browse's Download all, Create & download)
   always send `mode: "download"`. **Existing cards keep downloading**: `db.init`
   switches `auto_download` on once for every card that exists (setting
   `auto_download_migrated`); a card made later starts with it off. A single
-  picture saved in Browse takes one off `pending`.
+  picture saved in Browse takes one off `pending` when it is one of the source's newest posts.
 - **Snapshots are the shared "newest posts"** (`snapshots.py`, table
   `snapshots`, one row per source, at most `KEEP` posts, merged so a short look
   does not throw away a longer one). Sync (`_scan` of a site that does not skip
@@ -289,9 +296,15 @@ Do not create releases or tags yourself, and do not push to `main`.
   Browse and the previews read them. They are **pickled `Media`** (pixiv's
   `fetch` is a `functools.partial`; a closure or lambda would not pickle -- the
   snapshot is then simply not kept), read back through an unpickler that builds
-  only `sourcerer.sources.*` and `functools.partial`, and dropped when `Media`'s
-  fields changed (`SHAPE`). Their URLs can be stale: Browse always checks the
-  site again and never trusts a snapshot more than for the first screen.
+  only what `snapshots.ALLOWED` names (`Media`, pixiv's two fetch functions,
+  `functools.partial`) -- **a new site whose `Media` carries a `fetch` must add it there**; any
+  other callable of Sourcerer's own (`_gdl._start` is a bare `Popen`) would run a command out
+  of a Userdata that somebody else made. Dropped when `Media`'s fields changed (`SHAPE`).
+  `save` merges so that the newest page leads, older posts beyond its reach follow, one it
+  skips over (deleted on the site) goes, and a page that shares nothing replaces the
+  snapshot (no gap is kept); it never raises into the look that made it. Their URLs can be stale: Browse always checks the
+  site again, hands out the live copy of a post whose link may have changed, and does
+  not show a snapshot older than `gallery.SEED_AGE` (Patreon's thumbnail links expire).
 - **The same picture from two sources** is found by a 64-bit difference hash
   (`imaging.py`, Pillow): ≤ 5 differing bits is one picture. Only *across*
   sources — two similar posts on one site are usually two versions the artist
@@ -395,7 +408,9 @@ Do not create releases or tags yourself, and do not push to `main`.
   (`gallery._Source.seed`, `_Gallery.start_checks`). A source with a snapshot
   puts its posts in the buffer at once (`FAST` grace instead of `SLOW`: the first
   screen is there in milliseconds), and `open_gallery` already starts its live
-  first page. The page shows **a spinner per site chip while `loading`**, a green
+  first page -- and `more()` and `status()` start those that could not begin
+  (their site's lane was busy: X, forums, login sites are asked one source at a time),
+  or the spinner would run for ever. The page shows **a spinner per site chip while `loading`**, a green
   dot once `checked`, orange on an error, and polls `/api/gallery/state` (no site is
   asked) while any source loads. What the live page has that the snapshot did not
   is counted (`new`, only among the newest posts) and **never slipped into the open
@@ -424,8 +439,11 @@ Do not create releases or tags yourself, and do not push to `main`.
   gets one first look, after that the site is read only for a card somebody just
   made or changed, or while automatic sync is on -- otherwise the old snapshot
   stands in. Cards of one login site are spaced like sync's (`sync.NEXT_CARD`):
-  `previews._ready` says no, `refresh` defers the card (about 45 s) and the worker
-  goes on to a card of another site instead of sleeping. Posts are
+  `previews._ready` says no, `refresh` puts the card in `_later` with the reason it was
+  asked for (forced or not), does not stamp `previews_at`, and `_next` brings it back
+  after `LATER_SECONDS` while the worker goes on to a card of another site. A sync's
+  `previews.soon(forced=False)` only reads the fresh snapshots -- it never reads a login
+  site the sync left alone. Posts are
   ordered by their UTC time, not their text (`previews._order`). The page
   never asks a site for a card picture -- it only reads what is kept, and
   `previews.version` in `/api/sync` makes it reload its cards when that moves.

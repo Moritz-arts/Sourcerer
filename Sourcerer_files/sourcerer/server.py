@@ -402,7 +402,7 @@ def start_sync():
 @app.post("/api/artists/<int:artist_id>/auto-download")
 def set_auto_download(artist_id):
     """The card's switch: a sync that finds new posts downloads them too."""
-    on = 1 if (request.get_json(silent=True) or {}).get("on") else 0
+    on = 1 if _body().get("on") else 0
     with db.connect() as con:
         if not con.execute("UPDATE artists SET auto_download = ? WHERE id = ?", (on, artist_id)).rowcount:
             abort(404)
@@ -457,12 +457,26 @@ def _own_page():
         abort(403)
 
 
+def _body():
+    """The JSON body as a dict: anything else is a request no page of ours sends."""
+    body = request.get_json(force=True, silent=True)
+    if body is None:
+        return {}
+    if not isinstance(body, dict):
+        abort(400)
+    return body
+
+
 @app.post("/api/gallery/open")
 def gallery_open():
+    body = _body()
+    hidden = body.get("hidden")
     try:
         # No artist: every card (All artists).
-        body = request.get_json(force=True) or {}
-        return jsonify(gallery.open_gallery(int(body.get("artist_id") or 0) or None, body.get("hidden")))
+        return jsonify(gallery.open_gallery(int(body.get("artist_id") or 0) or None,
+                                            [h for h in hidden if isinstance(h, str)] if isinstance(hidden, list) else None))
+    except (TypeError, ValueError):
+        abort(400)
     except KeyError:
         abort(404)
 
@@ -479,8 +493,9 @@ def gallery_more():
 @app.post("/api/gallery/state")
 def gallery_state():
     """Which sources are still loading, which are up to date, how many new posts they found."""
+    gallery_id = _body().get("gallery")
     try:
-        return jsonify(gallery.status((request.get_json(force=True) or {}).get("gallery") or ""))
+        return jsonify(gallery.status(gallery_id if isinstance(gallery_id, str) else ""))
     except KeyError:
         return jsonify(error="This gallery was closed; open it again."), 410
 

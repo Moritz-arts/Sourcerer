@@ -115,6 +115,7 @@ COLUMNS = {
         # 'ok', 'warn' (works with a catch: login, bot check, slow down) or 'error'
         "last_level": "TEXT",
         "walked": "TEXT",                 # when a sync last went through all of it
+        "pending": "INTEGER NOT NULL DEFAULT 0",   # its newest posts a look found that are not in the library
     },
     "files": {
         "phash": "TEXT",                  # imaging fingerprint; NULL for video

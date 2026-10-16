@@ -53,6 +53,7 @@ PAGE = 60                    # items a page asks for at a time
 SLOW = 2.5                   # seconds the first page waits for a source that is not ready, once something can be shown
 SLOW_LATER = 0.8             # ... and every later page: the sources are mid-way, a slow one must not hold the rest up
 FAST = 0.3                   # ... when snapshots show the first page at once
+SEED_AGE = 7 * 86400         # a snapshot older than this is not shown (its links may have expired: Patreon's thumbnails)
 AHEAD = 24                   # a source with fewer pictures waiting than this is asked for its next page already
 POOL = 6                     # listings running at once, all galleries together
 SERIAL = ("x", "xenforo")    # sites gallery-dl reads: one source at a time (_gdl._busy would turn the rest away)
@@ -120,6 +121,7 @@ class _Source:
         self.asked_at = 0.0                   # when it was last asked: the one asked longest ago goes next
         self.spaced = False                   # All artists: a login site's next card waits (CARD_GAP)
         self.seeded, self.seed_len, self.known = False, 0, set()      # shown from the snapshot already
+        self.live = {}                        # remote_key -> the site's own copy of a post the snapshot showed
         self.checked = False                  # the site has been asked for its first page
         self.pages = 0
         self.new = 0                          # posts the check found that the snapshot did not have
@@ -143,7 +145,7 @@ class _Source:
     def seed(self):
         """The newest posts of the last look, ready to show before any request."""
         snap = snapshots.load(self.row["id"]) if self.site else None
-        if not snap:
+        if not snap or time.time() - snap[0] > SEED_AGE:
             return
         for m in snap[1]:
             when = _when(m.posted)
@@ -214,6 +216,8 @@ class _Source:
             snapshots.save(self.row["id"], page)          # the next opening starts from this
             self.checked = True
         if self.seeded:
+            if self.pages == 1:                    # the links of what the snapshot showed are renewed as they are handed out
+                self.live = {m.remote_key: m for m in page}
             # What the snapshot showed is not shown twice. The first page's posts that it did not
             # have, among its newest, are new posts: counted, and shown when the gallery is
             # opened again; the rest of the page goes on where the snapshot ended.
@@ -337,6 +341,7 @@ class _Gallery:
             self.spoken += 1
             s.turn = self.spoken
             _when_, m = s.buffer.popleft()
+            m = s.live.get(m.remote_key, m)
             key = (s.artist["id"], m.remote_key)
             if key in self.keys:                    # a post two sources share by id (mirrors)
                 continue
@@ -349,6 +354,7 @@ class _Gallery:
         for s in sorted(self.sources, key=lambda s: s.asked_at):     # the next page before it is needed
             if not s.done and not s.off and len(s.buffer) < AHEAD:
                 s.start_fill()
+        self.start_checks()                          # a seeded source whose turn had not come yet
         return [self.item(n) for n in out]
 
     def _settle(self, deadline, grace):
@@ -418,6 +424,7 @@ def open_gallery(artist_id=None, hidden=()):
 def status(gallery_id):
     """Where the sources of a gallery are: loading, checked, new posts found. Asks nobody."""
     g = _get(gallery_id)
+    g.start_checks()                  # a source that could not be asked at the opening (its site was busy) goes on now
     return {"sources": g.state(), "new_posts": sum(s.new for s in g.sources if not s.off),
             "loading": any(s.loading() for s in g.sources)}
 
@@ -527,8 +534,9 @@ def download(gallery_id, number):
     kept = bool(cur["new"] or cur["existing"])         # else the same picture was already there
     if cur["new"]:
         sync.event("done", "Saved from the gallery: %s" % (m.post_url or m.url), artist)
-        with db.connect() as con:                  # one post fewer waiting for a download
-            con.execute("UPDATE artists SET pending = MAX(pending - 1, 0) WHERE id = ?", (artist["id"],))
+        snap = snapshots.load(s.row["id"])         # a post of the newest ones: one fewer waits for a download
+        if snap and any(k.remote_key == m.remote_key for k in snap[1]):
+            sync.pending_down(artist["id"], s.row["id"])
     return g.item(number), kept
 
 
