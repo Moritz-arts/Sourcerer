@@ -5,6 +5,13 @@ automatically -- one line per change, newest first. A release is drafted by hand
 from the tag of whichever version is judged ready, and this is the text to paste
 into it.
 
+## v0.13 — 2026-10-16
+
+- Manage your accounts: Add account button, a faster gallery, and cards that show the 4 newest posts
+- Review fixes: closing a gallery no longer spins, a login being made shows its row, previews respect login sites
+- Browse: the artists you follow on the left, their posts from every source on the right, with a site filter and Download all
+- Browse review fixes: queued fills of a closed gallery do not run, every X/forum/login source gets its turn, the page copes with empty and changing states
+
 ## v0.12 — 2026-10-15
 
 - Manage Accounts: a Login files button opens the folder where the logins are kept
