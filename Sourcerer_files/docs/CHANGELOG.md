@@ -5,6 +5,10 @@ automatically -- one line per change, newest first. A release is drafted by hand
 from the tag of whichever version is judged ready, and this is the text to paste
 into it.
 
+## v0.16 — 2026-10-16
+
+- Browse is the only view: logo-only tiles, green downloaded mark, always-visible auto-download cloud, site logos in accounts and viewer, working shortcuts, galleries kept aside so switching asks no site
+
 ## v0.15 — 2026-10-16
 
 - Browse: add-artist button, order and counter for the list, right-click delete, site logos instead of names, a spinner that circles, the large view fills the window, sharper tiles, pictures load faster
