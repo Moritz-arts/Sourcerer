@@ -5,6 +5,10 @@ automatically -- one line per change, newest first. A release is drafted by hand
 from the tag of whichever version is judged ready, and this is the text to paste
 into it.
 
+## v0.15 — 2026-10-16
+
+- Browse: add-artist button, order and counter for the list, right-click delete, site logos instead of names, a spinner that circles, the large view fills the window, sharper tiles, pictures load faster
+
 ## v0.14 — 2026-10-16
 
 - Sync only looks and Download downloads, cards get an Auto-download switch and four buttons, Browse opens at once from kept snapshots with spinner and green chips, and the grid can show squares or whole pictures
