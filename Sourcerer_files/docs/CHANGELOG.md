@@ -5,6 +5,10 @@ automatically -- one line per change, newest first. A release is drafted by hand
 from the tag of whichever version is judged ready, and this is the text to paste
 into it.
 
+## v0.17 — 2026-10-16
+
+- Browse: the artist's picture beside the title, the artist's name beside the site mark in All artists, X reads faster while an artist's gallery is open
+
 ## v0.16 — 2026-10-16
 
 - Browse is the only view: logo-only tiles, green downloaded mark, always-visible auto-download cloud, site logos in accounts and viewer, working shortcuts, galleries kept aside so switching asks no site
