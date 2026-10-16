@@ -30,6 +30,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    outputs:
+      version: ${{ steps.bump.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -110,10 +112,26 @@ jobs:
           git tag -f beta "v$VER^{commit}"
           git push -f origin refs/tags/beta
           TITLE="Beta - newest build (v$VER)"
-          NOTES="Every change, minutes after it is merged -- untested, so bugs are part of the deal. Download Sourcerer.zip below and unpack it: you get one folder, Sourcerer. The stable download is the latest release."
+          NOTES="Every change, minutes after it is merged -- untested, so bugs are part of the deal. Download Sourcerer.zip below and unpack it: you get one folder, Sourcerer. Windows without Python: Sourcerer-Windows.zip, added a few minutes later. The stable download is the latest release."
           if gh release view beta >/dev/null 2>&1; then
             gh release edit beta --prerelease --title "$TITLE" --notes "$NOTES"
           else
             gh release create beta --prerelease --verify-tag --title "$TITLE" --notes "$NOTES"
           fi
+          # The exe of the previous version must not sit under this version's name until
+          # the new one is built (build-exe.yml, below).
+          gh release delete-asset beta Sourcerer-Windows.zip --yes 2>/dev/null || true
           gh release upload beta Sourcerer.zip --clobber
+
+  # Sourcerer-Windows.zip of the same version goes onto the same 'beta' release,
+  # a few minutes after Sourcerer.zip: a Windows build takes longer. A call, not a
+  # trigger of its own: this workflow's pushes use GITHUB_TOKEN, which starts no runs.
+  exe:
+    needs: bump
+    if: ${{ needs.bump.outputs.version }}
+    permissions:
+      contents: write
+    uses: ./.github/workflows/build-exe.yml
+    with:
+      ref: v${{ needs.bump.outputs.version }}
+      release: beta

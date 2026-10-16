@@ -228,6 +228,14 @@ add the one that replaced it.
   once. The mockups' card grid is superseded by the user's decision; the card dialog,
   the activity bar and the toolbar stay as in them.
 
+- 2026-10-16 — **Sourcerer.exe, a standalone Windows build** beside Sourcerer.zip, not
+  instead of it: PyInstaller on a Windows runner, `Sourcerer-Windows.zip` attached to every
+  release and to `beta`, tested by starting it before it is published. The bundle's folder
+  is named `Sourcerer_files` so paths and Userdata mean what they do in the repository.
+  Updates of the exe are **by hand** for now. -- The user asked for an .exe; the earlier
+  decision for a system Python and a venv stands for everybody who has one, and the
+  launcher download keeps the in-app updater, which an exe cannot use as it is.
+
 ## Done
 
 - [x] Repository workshop: CLAUDE.md, docs, version workflow
@@ -296,6 +304,11 @@ add the one that replaced it.
       with login sources without a sync first
 
 ## Next
+
+- [ ] Sourcerer.exe: update inside the program (a helper that does not need Python:
+      PowerShell or a second small exe), then gallery-dl between releases (its wheel
+      next to the exe); look at the first real runs on Windows; sign the exe if the
+      warnings turn out to scare people off
 
 - [ ] Forums behind a Cloudflare challenge without a login: fetch their
       pages through the login window's browser engine. (VerticalScope's

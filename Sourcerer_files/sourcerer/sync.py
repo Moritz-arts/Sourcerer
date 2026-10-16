@@ -356,7 +356,7 @@ def _upgrade_gallery_dl():
     from .sources import _gdl
     last = db.get_setting("gdl_updated") or ""
     now = datetime.datetime.now(datetime.timezone.utc)
-    if not _gdl.available() or (last and (now - datetime.datetime.fromisoformat(last)).days < 7):
+    if config.FROZEN or not _gdl.available() or (last and (now - datetime.datetime.fromisoformat(last)).days < 7):
         return
     db.set_setting("gdl_updated", now.isoformat())
     try:

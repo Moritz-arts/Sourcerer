@@ -33,6 +33,28 @@ is written outside the folder.
 Needs Python 3.10 or newer — on Windows from [python.org](https://www.python.org/downloads/),
 on macOS from python.org or Homebrew (`brew install python`).
 
+### Windows without Python: Sourcerer.exe
+
+**Sourcerer-Windows.zip** has Python inside: unpack it and double-click
+`Sourcerer.exe` — nothing to install, no console.
+
+| | |
+|---|---|
+| **Stable** | [Sourcerer-Windows.zip from the latest release](https://github.com/Moritz-arts/Sourcerer/releases/latest/download/Sourcerer-Windows.zip) |
+| **Beta** | [Sourcerer-Windows.zip, newest build](https://github.com/Moritz-arts/Sourcerer/releases/download/beta/Sourcerer-Windows.zip) — added a few minutes after each Sourcerer.zip |
+
+Windows says *Windows protected your PC* the first time (the file is not
+signed): **More info › Run anyway**. Some virus scanners distrust every program
+built this way; if one removes the file, use Sourcerer.zip instead.
+
+The window needs Microsoft's WebView2, which Windows 11 and current Windows 10
+already have; without it Sourcerer opens in your browser. Your data is in
+`Sourcerer_files/Userdata`, as with the other download — copy that folder
+between the two to move over. **Updates are by hand** for now: Settings ›
+Updates tells you when a version is out; close Sourcerer and copy `Sourcerer.exe`
+and `Sourcerer_files` from the new zip over the old ones (*Replace*) — `Userdata`
+stays.
+
 **If an update does not go through** (Sourcerer closes and comes back as
 the old version): close every Explorer/Finder window showing a folder inside
 `Sourcerer_files`, then try again — Settings › Updates shows what went wrong.

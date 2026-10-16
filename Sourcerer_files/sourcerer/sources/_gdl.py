@@ -60,6 +60,9 @@ def available():
 def upgrade():
     """pip install -U gallery-dl into Sourcerer's own environment -- the way X's
     fixes reach users between Sourcerer releases. Returns the version after."""
+    if config.FROZEN:
+        raise RuntimeError("The standalone Sourcerer carries its own gallery-dl; a new Sourcerer "
+                           "release brings the newest one.")
     env = dict(os.environ, PIP_CACHE_DIR=str(config.ROOT / "venv" / "pip-cache"),
                PIP_DISABLE_PIP_VERSION_CHECK="1", PYTHONNOUSERSITE="1")
     kwargs = {"capture_output": True, "timeout": 600, "env": env}
@@ -105,7 +108,9 @@ def _config(section, options):
 
 
 def _command(conf, args, url):
-    return [_python(), "-m", "gallery_dl", "--config-ignore", "-c", str(conf),
+    # The exe has no "python -m": app.py runs gallery-dl when started with --gallery-dl.
+    run = [sys.executable, "--gallery-dl"] if config.FROZEN else [_python(), "-m", "gallery_dl"]
+    return run + ["--config-ignore", "-c", str(conf),
             "--cache-file", str(CACHE), "--no-input"] + args + [url]
 
 

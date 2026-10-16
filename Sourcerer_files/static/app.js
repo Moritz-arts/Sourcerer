@@ -1694,6 +1694,15 @@ function loadInfo() {
       return "<tr><td>" + esc(r[0]) + '</td><td class="mono">' + esc(r[1]) + "</td></tr>";
     }).join("");
     $("gdl-version").textContent = d.gallery_dl ? "v" + d.gallery_dl : "(not installed)";
+    // The standalone exe has no Python environment to rebuild, no pip for gallery-dl and no helper
+    // to swap its files: those three rows are not offered there.
+    S.frozen = !!d.frozen;
+    $$('#btn-gdl, [data-repair="venv"], [data-repair="reinstall"]').forEach(function (b) {
+      b.closest(".row").classList.toggle("hidden", S.frozen);
+    });
+    $("upd-hint").textContent = S.frozen
+      ? "Download the new Sourcerer-Windows.zip, close Sourcerer and copy Sourcerer.exe and the folder Sourcerer_files from it over the old ones (Replace). Your cards, settings and library stay."
+      : "An update replaces the program files and keeps your cards, settings and library. Sourcerer restarts by itself.";
     $("upd-log-box").classList.toggle("hidden", !d.update_log.length);
     $("upd-log").textContent = d.update_log.join("\n");
   }).catch(fail);
@@ -1711,7 +1720,7 @@ function showUpdate() {
   else if (has) $("upd-status").textContent = "v" + u.version + " is available.";
   else if (!u.version) $("upd-status").textContent = "Nothing published on this channel yet.";
   else $("upd-status").textContent = "Up to date. Newest " + (u.channel === "beta" ? "build" : "release") + ": v" + u.version + ".";
-  $("btn-install").querySelector("span").textContent = has ? "Install v" + u.version : "Install";
+  $("btn-install").querySelector("span").textContent = has ? (u.manual ? "Download v" : "Install v") + u.version : "Install";
   $("upd-notes").textContent = has ? u.notes : "";
   $("upd-notes").classList.toggle("hidden", !has || !u.notes);
 }
@@ -1745,6 +1754,7 @@ function restarting(title, text) {
 
 $("btn-install").addEventListener("click", function () {
   var u = S.update;
+  if (u && u.available && u.manual) return api("POST", "/api/open-url", { url: u.url }).catch(fail);   // the exe: by hand
   if (!u || !u.available || !confirm("Install v" + u.version + " and restart Sourcerer?")) return;
   $("btn-install").disabled = true;
   $("upd-status").textContent = "Downloading v" + u.version + "…";

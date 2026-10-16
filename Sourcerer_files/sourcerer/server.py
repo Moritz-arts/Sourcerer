@@ -645,7 +645,7 @@ def info():
                    system="%s %s" % (platform.system(), platform.release()),
                    program=str(config.INSTALL), userdata=str(config.USERDATA),
                    library=sync.library(), repo="https://github.com/%s" % config.REPO,
-                   update_log=lines, window=WINDOW is not None)
+                   update_log=lines, window=WINDOW is not None, frozen=config.FROZEN)
 
 
 # ---- accounts -----------------------------------------------------------------------
@@ -866,7 +866,7 @@ def repair():
                 time.sleep(random.uniform(3, 10))
         _background(run)
         return jsonify(message="Profile pictures and link checks are being refreshed.")
-    if action not in ("venv", "reinstall", "restart"):
+    if action not in ("venv", "reinstall", "restart") or (config.FROZEN and action != "restart"):
         abort(400)
     if sync.status()["running"]:
         return jsonify(error="Wait for the running sync to finish, or cancel it."), 409

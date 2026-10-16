@@ -17,6 +17,7 @@ import os
 import shutil
 import threading
 import time
+import urllib.request
 import webbrowser
 
 from werkzeug.serving import make_server
@@ -86,6 +87,23 @@ def _forget():
         pass
 
 
+def _running(focus=False):
+    """Whether a Sourcerer answers on the port running.json names; with focus, asks it to come forward.
+    No proxy: a system proxy would swallow 127.0.0.1."""
+    try:
+        port = json.loads(RUNNING.read_text(encoding="utf-8"))["port"]
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        base = "http://127.0.0.1:%s" % port
+        with opener.open(base + "/api/ping", timeout=2) as r:
+            if json.loads(r.read().decode("utf-8")).get("app") != "sourcerer":
+                return False
+        if focus:
+            opener.open(urllib.request.Request(base + "/api/focus", data=b""), timeout=2).close()
+        return True
+    except (OSError, ValueError, KeyError):
+        return False
+
+
 def _serve_until_idle():
     """Browser mode without a console: run while a page is open, or a sync is."""
     while True:
@@ -101,8 +119,16 @@ def main(argv=None):
     parser.add_argument("--browser", action="store_true", help="open in the browser, not a window")
     parser.add_argument("--no-open", action="store_true", help="open nothing; just serve")
     parser.add_argument("--port", type=int, default=0, help="port on 127.0.0.1 (default: any free)")
+    parser.add_argument("--restart", action="store_true", help="exe: wait until the running Sourcerer is gone")
     args = parser.parse_args(argv)
 
+    if config.FROZEN:                       # launch.py does both for the launchers
+        for _ in range(100 if args.restart else 0):
+            if not _running():
+                break
+            time.sleep(0.3)
+        if _running(focus=True):
+            return 0
     _logging()
     db.init()
     shutil.rmtree(config.UPDATE_DIR, ignore_errors=True)    # an update that never got installed
