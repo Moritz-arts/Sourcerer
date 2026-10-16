@@ -283,12 +283,16 @@ Do not create releases or tags yourself, and do not push to `main`.
   download covers whatever waits; a restricted one (Browse's Download all) joins a
   restricted wait and is dropped from a full one -- and **nothing widens a restricted
   download** (a plain sync asked meanwhile changes nothing: it would download the sources the
-  filter left out); a download asked while the same card's look is running is queued behind it.
+  filter left out). A download the wait or the running job cannot take -- a look is waiting or
+  running, a restricted download of other sources runs -- is kept in `_followup` and
+  enqueued when that job ends (`_work`), so it is asked for, never lost; `enqueue` counts it
+  as added, `cancel` drops it. A download asked while the card's look is running is queued behind it.
   Download buttons (card, Download all, Browse's Download all, Create & download)
   always send `mode: "download"`. **Existing cards keep downloading**: `db.init`
   switches `auto_download` on once for every card that exists (setting
   `auto_download_migrated`); a card made later starts with it off. A single
-  picture saved in Browse takes one off `pending` when it is one of the source's newest posts.
+  picture saved in Browse takes one off `pending` only when the last look counted it
+  (`sources.pending_keys`, the first `PENDING_KEYS` of them; `sync.pending_down`).
 - **Snapshots are the shared "newest posts"** (`snapshots.py`, table
   `snapshots`, one row per source, at most `KEEP` posts, merged so a short look
   does not throw away a longer one). Sync (`_scan` of a site that does not skip
@@ -300,7 +304,9 @@ Do not create releases or tags yourself, and do not push to `main`.
   `functools.partial`) -- **a new site whose `Media` carries a `fetch` must add it there**; any
   other callable of Sourcerer's own (`_gdl._start` is a bare `Popen`) would run a command out
   of a Userdata that somebody else made. Dropped when `Media`'s fields changed (`SHAPE`).
-  `save` merges so that the newest page leads, older posts beyond its reach follow, one it
+  `save` merges so that the newest page leads, older posts beyond its reach follow (while
+  they were last seen less than `TAIL_AGE` ago: `snapshots.tail`, kept apart from `fetched`
+  because a merge carries posts over without seeing them again and their links expire), one it
   skips over (deleted on the site) goes, and a page that shares nothing replaces the
   snapshot (no gap is kept); it never raises into the look that made it. Their URLs can be stale: Browse always checks the
   site again, hands out the live copy of a post whose link may have changed, and does
@@ -409,11 +415,14 @@ Do not create releases or tags yourself, and do not push to `main`.
   puts its posts in the buffer at once (`FAST` grace instead of `SLOW`: the first
   screen is there in milliseconds), and `open_gallery` already starts its live
   first page -- and `more()` and `status()` start those that could not begin
-  (their site's lane was busy: X, forums, login sites are asked one source at a time),
-  or the spinner would run for ever. The page shows **a spinner per site chip while `loading`**, a green
+  (their site's lane was busy: X, forums, login sites are asked one source at a time; seeded
+  or not), or the spinner would run for ever. `loading` means "the first page is still to
+  come" -- a later page in flight is not loading. The page shows **a spinner per site chip while `loading`**, a green
   dot once `checked`, orange on an error, and polls `/api/gallery/state` (no site is
   asked) while any source loads. What the live page has that the snapshot did not
-  is counted (`new`, only among the newest posts) and **never slipped into the open
+  is counted (`new`: the posts before the first one the snapshot has -- by that post, not by
+  position, so a deleted post or 70 new ones count right; a snapshot more than a page behind
+  counts `SEED_PAGES` pages and then gives up) and **never slipped into the open
   gallery** -- the pictures would jump; the page offers "N new posts - show", which
   opens the gallery again from the refreshed snapshot. The live page is saved as the
   source's snapshot as soon as it arrives.
