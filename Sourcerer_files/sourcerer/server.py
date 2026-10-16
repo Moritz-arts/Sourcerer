@@ -503,7 +503,7 @@ def gallery_state():
 @app.get("/api/gallery/<gallery_id>/<int:number>/<size>")
 def gallery_picture(gallery_id, number, size):
     _own_page()
-    if size not in ("thumb", "large"):
+    if size not in ("thumb", "mid", "large"):
         abort(404)
     try:
         ctype, data = gallery.picture(gallery_id, number, size)

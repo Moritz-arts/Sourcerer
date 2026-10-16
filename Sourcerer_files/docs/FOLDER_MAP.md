@@ -46,7 +46,7 @@ Sourcerer/                        <- what Sourcerer.zip unpacks to; move it free
     │   └─ desktop.py             main(): server thread, window or browser
     ├─ static/                    the page: index.html, app.css, app.js,
     │                               logo.svg (also the favicon),
-    │                               icons-LICENSE.txt (inline icons after Tabler)
+    │                               icons-LICENSE.txt (inline icons after Tabler, site logos from Simple Icons)
     ├─ docs/
     │   ├─ CHANGELOG.md           written by the workflow, never by hand
     │   ├─ FOLDER_MAP.md          this file

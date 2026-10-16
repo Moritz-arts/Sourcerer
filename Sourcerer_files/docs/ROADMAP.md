@@ -201,6 +201,16 @@ add the one that replaced it.
   delete; a double-click opens its Browse view (edit: Enter, right-click, or the
   pencil in Browse).
 
+- 2026-10-16 — **Browse polish.** The user: add an artist from Browse (a plus at the
+  bottom of the list); the site spinner hopped instead of circling; the large view must
+  scale up until it meets the window; the list needs *Alphabetic | Latest activity* and a
+  number that counts sources, images or shows auto-download; right-click on a name
+  deletes; some tiles were more pixelated than others although the pictures have the
+  same resolution (a wide Full tile stretched a small thumb); thumbnails and the large
+  view still loaded slowly; site logos instead of names on the filter and the tiles.
+  Causes found: a global `.spin` rule, `max-width` that never enlarges, and a TLS
+  handshake per picture (a thread per request). See CLAUDE.md, Browse traps.
+
 ## Done
 
 - [x] Repository workshop: CLAUDE.md, docs, version workflow
@@ -258,6 +268,9 @@ add the one that replaced it.
 - [x] Sync and download separated: sync only looks (and counts what is
       waiting), download fetches; a per-card Auto-download switch decides whether
       a sync downloads too; cards have four buttons and open Browse on a double-click
+- [x] Browse polish: Add artist, order and counter of the list, right-click menu, site
+      logos, a circling spinner, the large view fills the window, sharper tiles, pictures
+      through one pooled session and prefetched in the viewer
 - [x] Browse opens from snapshots at once and checks the sites meanwhile (spinner,
       green chips, "N new posts"); Squares / Full picture layout; previews for cards
       with login sources without a sync first

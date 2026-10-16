@@ -330,7 +330,17 @@ Do not create releases or tags yourself, and do not push to `main`.
   empty. Name modifiers for what they mean where they are (`.dot.blank`) and
   give page-wide rules an element (`p.error`).
 - **No CDN, ever.** The icons are inline SVG drawn after Tabler Icons (MIT,
-  `static/icons-LICENSE.txt`); fonts are the system's.
+  `static/icons-LICENSE.txt`); fonts are the system's. The site logos on Browse's chips and tiles
+  are Simple Icons (CC0, symbols `l-<site>` in the sprite; `SITE_LOGOS` in `app.js` maps a
+  source's `LABEL` to one, a site without one shows its name). The forum and the booru draw a
+  Tabler icon in their own colour. A new site adds its symbol there.
+- **Browse's list** (`renderBrowseList`): the order (*Alphabetic | Latest activity*, as the cards'
+  `activityOf`) and the number beside a name (*Sources | Images | Auto-download*, the last one a
+  dimmed or lit cloud) are kept in localStorage; a right-click on a name opens the card menu
+  (Delete among it), the *Add artist* button at the bottom opens the new-card dialog.
+- **`.spin` is the ring that circles; only `.logo-hero.spin` bobs.** A global `.spin` rule meant
+  for the update overlay's logo made every site spinner hop. On a chip the state sits on the
+  logo (a dot in its corner, a ring round it), so it never changes size.
 - **The server listens on 127.0.0.1 only.** Nothing here is for other machines.
   And only Sourcerer's own page may change anything (`server._same_origin`):
   any web page in the user's browser can POST a form to 127.0.0.1, so a
@@ -473,6 +483,20 @@ Do not create releases or tags yourself, and do not push to `main`.
   logins. Its GETs check Host and `Sec-Fetch-Site` (`server._own_page`);
   pictures stay in memory (`gallery.MEMORY`), `no-store` to the web view.
   CDNs the page loads itself get `referrerpolicy="no-referrer"`.
+- **Gallery pictures go through one pooled session** (`net._picture_session`, `fetch_picture`):
+  every request of the page runs on a thread of its own, so the per-thread `_session()` built a
+  fresh TLS context and handshake for each of sixty thumbnails -- most of the wait (8 pictures:
+  5.1 s -> 1.7 s). It takes no cookies; a login's go per request as ever. `gallery.picture`
+  keeps the bytes **by address**, not by size (`_once`): a site whose grid picture is also the
+  viewer's (a booru's sample) is asked once, and the viewer opens at once. The viewer fetches the
+  next two pictures once the open one has arrived (`galPrefetch`).
+- **Grid pictures must be sharp enough for their tile.** Sources hand out their own small sizes
+  and the tile decides how far it is stretched: pixiv 540 px (360 was blocky), danbooru 720,
+  Gelbooru/Moebooru/e621 the sample instead of the 150 px preview. Full mode spreads a wide
+  picture over a whole row, so a tile that the thumb cannot fill (width x devicePixelRatio >
+  1.2 x its natural width) gets the item's `mid` -- a screen-sized rendition that is neither
+  the original nor the thumb (`/api/gallery/<g>/<n>/mid`, the preview lane, no priority) --
+  laid over it (`galSharpen`). An original (Mastodon's, a forum's) is never `mid`.
 - **The browser opens six connections to Sourcerer, no more.** Proxied
   pictures wait in a site's polite lane; fifty asked for at once held back
   the large view, the next page and the state poll for a minute. `app.js`

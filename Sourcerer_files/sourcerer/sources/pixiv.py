@@ -134,13 +134,13 @@ _MASTER = re.compile(r"^(https://i\.pximg\.net)/c/[^/]+/(?:img-master|custom-thu
 
 def _previews(work, n):
     """(grid, large) for page n, made from the listing's 250 px square: pixiv's
-    own 360 px rendition and its 1200 px master. No request; the date in the
-    path and the page number are the work's own. Both need pixiv's Referer."""
+    own 540 px rendition (360 px was blocky once a tile was larger) and its 1200 px master.
+    No request; the date in the path and the page number are the work's own. Both need pixiv's Referer."""
     m = _MASTER.match(work.get("url") or "")
     if not m:
         return work.get("url") or "", ""
     path = "%s%d_master1200.jpg" % (m.group(2), n)
-    return m.group(1) + "/c/360x360_70/img-master" + path, m.group(1) + "/img-master" + path
+    return m.group(1) + "/c/540x540_70/img-master" + path, m.group(1) + "/img-master" + path
 
 
 def _media(work):
