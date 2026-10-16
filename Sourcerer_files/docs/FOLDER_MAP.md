@@ -17,7 +17,7 @@ Sourcerer/                        <- what Sourcerer.zip unpacks to; move it free
     ├─ requirements.txt           the packages, one list for all three systems
     ├─ sourcerer/                 the Python package; layers listed in __init__.py
     │   ├─ config.py              paths, version, user agent, setting defaults
-    │   ├─ db.py                  SQLite: artists, sources, files, failed files, card previews, settings
+    │   ├─ db.py                  SQLite: artists, sources, files, failed files, card previews, snapshots, settings
     │   │                           (also a site's pause, the day's requests, the next auto sync)
     │   ├─ net.py                 HTTP (requests, TLS 1.3 first): JSON, downloads, per-site
     │   │                           limits, a login's slow lane, site pauses, daily budgets
@@ -38,6 +38,8 @@ Sourcerer/                        <- what Sourcerer.zip unpacks to; move it free
     │   │                           straight from the sites, pictures in memory only
     │   ├─ previews.py            the 4 newest pictures on a card, downloaded or not:
     │   │                           first page of each source, small copies kept
+    │   ├─ snapshots.py           the newest posts of a source as last seen (pickled Media
+    │   │                           in the DB): Browse opens from it, previews use it
     │   ├─ accounts.py            logins: login window, cookies.txt, saved cookies
     │   ├─ updater.py             updates and repair: Sourcerer.zip, the helper
     │   ├─ server.py              Flask: /api/* and the page

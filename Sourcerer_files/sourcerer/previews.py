@@ -10,8 +10,10 @@ appears at once, without waiting for the next look at the sites.
 
 Gentle by design: one card at a time in the background, the same polite lanes
 as a sync, a site that rests or whose login ran out is skipped, and a card is
-looked at again after REFRESH_HOURS only. Nothing here is asked on behalf of
-the page: the page only reads what is kept.
+looked at again after REFRESH_HOURS only. What a look finds is kept as the
+source's snapshot (snapshots.py), which a sync also writes: a card that was
+synced needs no look of its own. Nothing here is asked on behalf of the page:
+the page only reads what is kept.
 """
 import datetime
 import hashlib
@@ -24,7 +26,7 @@ import shutil
 import threading
 import time
 
-from . import accounts, config, db, imaging, net, sources, sync
+from . import accounts, config, db, imaging, net, snapshots, sources, sync
 
 log = logging.getLogger(__name__)
 SHOWN = 4                    # pictures on a card
@@ -99,25 +101,31 @@ def card_thumbs(con, artist_id):
     return [{"src": src} for _at, src in ranked[:SHOWN]]
 
 
-def _space(where):
-    """Another card on the same login site: a pause first, as sync takes (NEXT_CARD) --
-    not the next read at once."""
+def _ready(where):
+    """May another card ask this login site now? (As sync spaces its cards -- NEXT_CARD -- but
+    without waiting: the worker goes on to a card of another site and comes back.)"""
     last = max(_read.get(where, -1e9), (sync._used.get(where) or (None, -1e9))[1])
-    wait = random.uniform(*sync.NEXT_CARD) - (time.monotonic() - last)
-    if wait > 0:
-        time.sleep(wait)
+    return time.monotonic() - last >= random.uniform(*sync.NEXT_CARD)
 
 
 def _candidates(artist, rows, forced):
-    """[(posted, Media)] from the first page of each source that can be asked now. A source
-    behind a login is where an account can be locked: it is read only when somebody just made
-    or changed the card, or automatic sync is on; not when a sync has downloaded its newest
-    posts lately (the card shows those); and spaced like sync's cards."""
+    """[(posted, Media)] from the newest posts of each source that can be had now: its snapshot
+    when that is fresh (a sync or Browse made it: no request at all), else a look at the site.
+    A source behind a login is where an account can be locked: a card never looked at gets its
+    first look (spaced like sync's cards); after that it is looked at again only when somebody
+    just made or changed the card, or automatic sync is on -- and the snapshot of a sync stands in."""
     from .sources import LoginRequired
-    out, reached = [], 0
+    out, reached, later = [], 0, False
     for row in rows:
         site = sources.site_for(row["url"])
-        if not site or net.paused(row["url"]):
+        if not site:
+            continue
+        snap = snapshots.load(row["id"])
+        if snap and time.time() - snap[0] < REFRESH_HOURS * 3600:
+            reached += 1
+            out += [(m.posted, m) for m in snap[1] if m.thumb or (m.large and not m.video)][:SHOWN * 2]
+            continue
+        if net.paused(row["url"]):
             continue
         key = sources.account_key(row["url"])
         need, _why = sources.login_need(row["url"])
@@ -128,12 +136,18 @@ def _candidates(artist, rows, forced):
         if need == "required" and not (key and accounts.logged_in(key)):
             continue
         where = net.site_of(row["url"])
-        if key and accounts.logged_in(key):
-            hours = sync.MIN_HOURS.get(where) or sync.MIN_HOURS.get(site.KIND) or 0
-            synced = artist["last_sync"] and sync._hours_since(artist["last_sync"].replace(" ", "T") + "+00:00") < hours
-            if synced or not (forced or db.get_setting("auto_sync") == "1"):
+        login = bool(key and accounts.logged_in(key))
+        if login:
+            # A source nobody has looked at yet (a card never looked at, or never synced and with no
+            # snapshot) gets its first look; after that only the reasons above.
+            first_look = not artist["previews_at"] or (not snap and not artist["last_sync"])
+            if not (forced or first_look or db.get_setting("auto_sync") == "1"):
+                if snap:                                       # an old look is better than none
+                    out += [(m.posted, m) for m in snap[1] if m.thumb or (m.large and not m.video)][:SHOWN * 2]
                 continue
-            _space(where)
+            if not _ready(where):                              # another card was asked lately: later
+                later = True
+                continue
         listing = None
         try:
             listing = site.pages(row["url"])
@@ -151,9 +165,9 @@ def _candidates(artist, rows, forced):
                 except Exception:
                     pass
         reached += 1
-        usable = [m for m in page if m.thumb or (m.large and not m.video)]
-        out += [(m.posted, m) for m in usable[:SHOWN * 2]]
-    return out, reached
+        snapshots.save(row["id"], page)
+        out += [(m.posted, m) for m in page if m.thumb or (m.large and not m.video)][:SHOWN * 2]
+    return out, reached, later
 
 
 def _store(artist_id, media):
@@ -185,7 +199,7 @@ def refresh(artist_id, forced=False):
         rows = con.execute("SELECT * FROM sources WHERE artist_id = ? ORDER BY id", (artist_id,)).fetchall()
         saved = {r[0] for r in con.execute("SELECT remote_key FROM files WHERE artist_id = ? AND path IS NOT NULL "
                                            "AND width IS NOT NULL", (artist_id,))}
-    pool, reached = _candidates(artist, rows, forced)
+    pool, reached, later = _candidates(artist, rows, forced)
     chosen, seen, tries = [], set(), 0
     for posted, media in sorted(pool, key=lambda x: _order(x[0]), reverse=True):
         if len(chosen) >= SHOWN or tries >= MAX_TRIES:
@@ -204,6 +218,11 @@ def refresh(artist_id, forced=False):
             continue
         if name:
             chosen.append((media, posted, name))
+    if later and not chosen:
+        # A login site was asked for another card lately: this one waits its turn, and the
+        # worker tries it again soon (not after RETRY_HOURS).
+        _tried[artist_id] = time.monotonic() - RETRY_HOURS * 3600 + 45
+        return False
     now = datetime.datetime.now(datetime.timezone.utc)
     stamp = now if reached else now - datetime.timedelta(hours=REFRESH_HOURS - RETRY_HOURS)
     # A card with no source left shows nothing from the sites; one whose look found nothing

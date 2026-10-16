@@ -83,6 +83,7 @@ button.icon { padding: 6px 8px; }
 button.flat { border-color: transparent; }
 button.mini { font-size: 12px; padding: 3px 8px; }
 button.danger { color: var(--text-danger); }
+button.mini.danger:hover:not(:disabled) { background: var(--bg-danger); }
 
 input[type=text], input[type=password], input:not([type]), select {
   font: inherit; font-size: 13px; height: 30px; padding: 4px 10px; width: 100%;
@@ -109,6 +110,13 @@ input[type=range] { accent-color: var(--fill-accent); cursor: pointer; }
 .pill.warn { background: var(--bg-danger); color: var(--text-danger); border: none; font-size: 12px; padding: 2px 8px; border-radius: 10px; }
 .pill.warn .ic { color: var(--text-danger); }
 .pill.rest { background: var(--bg-warning); color: var(--text-warning); }
+.pill.accent { background: var(--bg-accent); color: var(--text-accent); border: none; font-size: 12px; padding: 2px 10px; border-radius: 10px; cursor: pointer; }
+/* A site being asked: the spinner takes the dot's place on its chip, and sits by the title while any is. */
+.spin { width: 12px; height: 12px; flex: none; display: inline-block; border-radius: 50%; border: 2px solid var(--border-strong);
+  border-top-color: var(--fill-accent); animation: spin .8s linear infinite; }
+.spin.sm { width: 9px; height: 9px; border-width: 1.5px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spin { animation-duration: 2.4s; } }
 
 /* Browse: the artists on the left, their posts on the right (the gallery) */
 .seg { display: inline-flex; margin-left: 14px; border: .5px solid var(--border-strong); border-radius: var(--radius); overflow: hidden; }
@@ -136,8 +144,13 @@ input[type=range] { accent-color: var(--fill-accent); cursor: pointer; }
 .chip { font-size: 12px; font-weight: 400; padding: 2px 10px; border-radius: 12px; display: inline-flex; align-items: center; gap: 6px; }
 .chip.off { opacity: .45; }
 #gal-size { width: 120px; }
+.br-head .seg { margin-left: 0; }
+.br-head .seg button { padding: 3px 10px; font-size: 12px; }
+#br-edit { padding: 3px 5px; }
 .gal-body { flex: 1; min-height: 0; overflow: auto; padding: 12px; }
 .gal-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--gal, 200px), 1fr)); gap: 8px; }
+.gal-grid.justified { display: flex; flex-wrap: wrap; align-content: flex-start; }
+.gal-grid.justified .gal-tile { aspect-ratio: auto; flex: none; }
 .gal-tile { position: relative; aspect-ratio: 1; padding: 0; border: none; border-radius: var(--radius); overflow: hidden;
   background: var(--surface-1); cursor: zoom-in; display: block; }
 .gal-tile:hover { filter: brightness(1.06); }
@@ -228,11 +241,13 @@ main { flex: 1; overflow: auto; }
 .bar > div { height: 100%; background: var(--fill-accent); transition: width .3s; }
 .bar.indeterminate > div { width: 30%; animation: slide 1.2s ease-in-out infinite; }
 @keyframes slide { from { margin-left: -30%; } to { margin-left: 100%; } }
-.card-foot { margin-top: 8px; display: flex; gap: 6px; align-items: center; min-height: 26px; }
-/* Badges give way, the buttons never wrap onto a second line. */
-.card-foot .badges { flex: 1; min-width: 0; display: flex; gap: 6px; overflow: hidden; align-items: center; font-size: 12px; color: var(--text-secondary); }
-.card-foot .badges > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.card-foot > button { flex: none; }
+.card-status { display: flex; gap: 6px; align-items: center; min-height: 22px; font-size: 12px; color: var(--text-secondary); }
+.card-status > * { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card-status .badge { flex: none; }
+/* The switch has the line to itself when the card is narrow; the buttons never wrap onto a third. */
+.card-foot { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; min-height: 26px; }
+.card-foot .autorow { margin: 0; flex: 1 1 auto; width: auto; }
+.card-foot .acts { display: flex; gap: 6px; margin-left: auto; flex: none; }
 .card-foot .ic { width: 14px; height: 14px; }
 
 .add-tile {
@@ -435,6 +450,14 @@ p.error:empty { display: none; }   /* p only: a status dot is .dot.error, and em
 .switch input:checked + span { background: var(--fill-accent); }
 .switch input:checked + span::after { transform: translateX(16px); }
 .switch input:focus-visible + span { outline: 2px solid var(--border-accent); outline-offset: 1px; }
+/* The small switch on a card, and the row that carries it. */
+.switch.sm { display: inline-block; width: 28px; height: 16px; }
+.switch.sm span { border-radius: 8px; }
+.switch.sm span::after { left: 2px; top: 2px; width: 12px; height: 12px; }
+.switch.sm input:checked + span::after { transform: translateX(12px); }
+.autorow { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--text-secondary); margin: 0 0 8px; cursor: pointer; width: fit-content; }
+.autodl { border-bottom: none; padding: 0; }
+.autodl .section { margin-bottom: 2px; }
 #set-size { width: 100%; }
 .keys { border-collapse: collapse; width: 100%; font-size: 13px; }
 .keys td { padding: 7px 0; border-bottom: .5px solid var(--border); }

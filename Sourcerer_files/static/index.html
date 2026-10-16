@@ -60,7 +60,8 @@
     </div>
     <span class="grow"></span>
     <button id="btn-add" title="New card (Ctrl+N)"><svg class="ic"><use href="#i-plus"/></svg> New card</button>
-    <button id="btn-sync-all" class="primary" title="Sync all cards (F5)"><svg class="ic"><use href="#i-refresh"/></svg> Sync all</button>
+    <button id="btn-sync-all" title="Sync all cards: look for new posts; cards with auto-download download them (F5)"><svg class="ic"><use href="#i-refresh"/></svg> Sync all</button>
+    <button id="btn-download-all" class="primary" title="Download all cards: everything that is not in the library yet (Shift+F5)"><svg class="ic"><use href="#i-download"/></svg> Download all</button>
     <button id="btn-accounts" title="Log in to your sites and keep the logins working"><svg class="ic"><use href="#i-key"/></svg> Manage Accounts<span id="acc-count" class="count hidden"></span></button>
     <button id="btn-quit" class="icon hidden" aria-label="Quit" title="Quit Sourcerer"><svg class="ic"><use href="#i-power"/></svg></button>
     <button id="btn-settings" class="icon" aria-label="Settings" title="Settings (Ctrl+,)"><svg class="ic"><use href="#i-settings"/></svg><span id="update-dot" class="dot hidden"></span></button>
@@ -108,10 +109,17 @@
     <div class="br-main">
       <div class="br-head">
         <span id="gal-title" class="br-title">All artists</span>
+        <button type="button" id="br-edit" class="icon flat hidden" aria-label="Edit the card" title="Edit the card (Enter on the card)"><svg class="ic sm"><use href="#i-pencil"/></svg></button>
+        <i id="gal-spin" class="spin hidden" title="Asking the sites…"></i>
         <span id="gal-sources" class="gal-sources"></span>
+        <button type="button" id="gal-new" class="pill accent hidden" title="Show them: the gallery opens again"></button>
         <span class="grow"></span>
         <span id="br-progress" class="muted small"></span>
         <button type="button" id="br-download" class="primary" title="Download everything from the sources that are switched on"><svg class="ic"><use href="#i-download"/></svg> Download all</button>
+        <div class="seg" id="gal-fit" role="group" aria-label="Pictures">
+          <button type="button" data-fit="square" title="Square tiles, cropped to fill">Squares</button>
+          <button type="button" data-fit="full" title="Whole pictures in rows, as they are">Full</button>
+        </div>
         <input type="range" id="gal-size" min="120" max="420" step="20" value="200" title="Picture size" aria-label="Picture size">
       </div>
       <div class="gal-body" id="gal-body">
@@ -150,7 +158,9 @@
 <div id="menu" class="menu hidden" role="menu">
   <button data-menu="edit"><svg class="ic"><use href="#i-pencil"/></svg> Edit<span class="kbd">Enter</span></button>
   <button data-menu="gallery"><svg class="ic"><use href="#i-photo"/></svg> Browse<span class="kbd">G</span></button>
-  <button data-menu="sync"><svg class="ic"><use href="#i-refresh"/></svg> Sync now<span class="kbd">U</span></button>
+  <button data-menu="sync"><svg class="ic"><use href="#i-refresh"/></svg> Sync<span class="kbd">U</span></button>
+  <button data-menu="download"><svg class="ic"><use href="#i-download"/></svg> Download<span class="kbd">D</span></button>
+  <button data-menu="folder"><svg class="ic"><use href="#i-folder"/></svg> Open downloaded files<span class="kbd">O</span></button>
   <button data-menu="delete" class="danger"><svg class="ic"><use href="#i-trash"/></svg> Delete<span class="kbd">Del</span></button>
 </div>
 
@@ -183,6 +193,13 @@
         </div>
         <p class="hint">Left empty, the card gets its own folder in your library. Renaming the card
            or choosing another folder moves the files along.</p>
+      </div>
+
+      <div class="row autodl">
+        <div><div class="section">Auto-download</div>
+          <p class="hint">On: a sync of this card also downloads what it finds, and Automatic sync does. Off: a sync
+             only looks for new posts (the card says how many are waiting) and you download when you want.</p></div>
+        <label class="switch"><input type="checkbox" id="card-auto"><span></span></label>
       </div>
 
       <div>
@@ -218,7 +235,7 @@
       <span class="grow"></span>
       <button type="button" data-close>Cancel</button>
       <button type="submit" id="btn-card-save" value="save">Create</button>
-      <button type="submit" id="btn-card-sync" value="sync" class="primary"><svg class="ic"><use href="#i-download"/></svg> <span>Create &amp; sync</span></button>
+      <button type="submit" id="btn-card-sync" value="download" class="primary"><svg class="ic"><use href="#i-download"/></svg> <span>Create &amp; download</span></button>
     </div>
   </form>
 </dialog>
@@ -288,7 +305,8 @@
         <h3>Sync</h3>
         <div class="row">
           <div><div class="row-title">Automatic sync</div>
-            <p class="hint">Syncs every card on its own while Sourcerer is open.</p></div>
+            <p class="hint">Syncs every card on its own while Sourcerer is open: it looks for new posts, and the
+               cards with auto-download also download them.</p></div>
           <label class="switch"><input type="checkbox" id="set-auto"><span></span></label>
         </div>
         <div class="row">
@@ -354,12 +372,14 @@
         <table class="keys">
           <tr><td><span class="kbd">Ctrl</span> <span class="kbd">N</span></td><td>New card</td></tr>
           <tr><td><span class="kbd">Ctrl</span> <span class="kbd">F</span> &nbsp;or&nbsp; <span class="kbd">/</span></td><td>Search</td></tr>
-          <tr><td><span class="kbd">F5</span> &nbsp;or&nbsp; <span class="kbd">Ctrl</span> <span class="kbd">R</span></td><td>Sync all cards</td></tr>
+          <tr><td><span class="kbd">F5</span> &nbsp;or&nbsp; <span class="kbd">Ctrl</span> <span class="kbd">R</span></td><td>Sync all cards (<span class="kbd">Shift</span> to download all)</td></tr>
           <tr><td><span class="kbd">Ctrl</span> <span class="kbd">,</span></td><td>Settings</td></tr>
           <tr><td><span class="kbd">Ctrl</span> <span class="kbd">L</span></td><td>Show or hide the activity log</td></tr>
           <tr><td><span class="kbd">&larr;</span> <span class="kbd">&rarr;</span> <span class="kbd">&uarr;</span> <span class="kbd">&darr;</span> <span class="kbd">Home</span> <span class="kbd">End</span></td><td>Select a card</td></tr>
-          <tr><td><span class="kbd">Enter</span> &nbsp;or double-click</td><td>Edit the card</td></tr>
-          <tr><td><span class="kbd">U</span></td><td>Sync the card</td></tr>
+          <tr><td><span class="kbd">Enter</span></td><td>Edit the card</td></tr>
+          <tr><td>Double-click</td><td>Browse the card's posts</td></tr>
+          <tr><td><span class="kbd">U</span></td><td>Sync the card: look for new posts</td></tr>
+          <tr><td><span class="kbd">D</span></td><td>Download the card</td></tr>
           <tr><td><span class="kbd">O</span> &nbsp;or click its folder</td><td>Open the card's folder</td></tr>
           <tr><td><span class="kbd">G</span></td><td>Browse this artist: every source, straight from the sites</td></tr>
           <tr><td><span class="kbd">&larr;</span> <span class="kbd">&rarr;</span> &nbsp;in Browse</td><td>Previous and next picture (<span class="kbd">Esc</span> closes it)</td></tr>
