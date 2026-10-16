@@ -191,6 +191,8 @@ def _store(artist_id, media):
 def refresh(artist_id, forced=False):
     """Look at the sources once and keep the newest pictures. False when no source answered.
     forced: the card is new or was changed -- the one case that reads a login site on request."""
+    with _lock:
+        forced = forced or _later.pop(artist_id, False)      # a look that was put off keeps its reason
     gone = _gone.get(artist_id, 0)
     with db.connect() as con:
         artist = con.execute("SELECT * FROM artists WHERE id = ?", (artist_id,)).fetchone()
@@ -218,11 +220,13 @@ def refresh(artist_id, forced=False):
             continue
         if name:
             chosen.append((media, posted, name))
-    if later and not chosen:
-        # A login site was asked for another card lately: this one waits its turn, and the
-        # worker tries it again soon (not after RETRY_HOURS).
-        _tried[artist_id] = time.monotonic() - RETRY_HOURS * 3600 + 45
-        return False
+    if later:
+        # A login site was asked for another card lately: its source waits its turn and the card is
+        # looked at again soon (_next), as it was asked for -- not after RETRY_HOURS, not never.
+        with _lock:
+            _later[artist_id] = forced
+        if not chosen:
+            return False
     now = datetime.datetime.now(datetime.timezone.utc)
     stamp = now if reached else now - datetime.timedelta(hours=REFRESH_HOURS - RETRY_HOURS)
     # A card with no source left shows nothing from the sites; one whose look found nothing
@@ -236,7 +240,8 @@ def refresh(artist_id, forced=False):
             con.execute("DELETE FROM previews WHERE artist_id = ?", (artist_id,))
             con.executemany("INSERT INTO previews (artist_id, pos, remote_key, posted, file) VALUES (?, ?, ?, ?, ?)",
                             [(artist_id, i, m.remote_key, posted, name) for i, (m, posted, name) in enumerate(chosen)])
-        con.execute("UPDATE artists SET previews_at = ? WHERE id = ?", (stamp.isoformat(), artist_id))
+        if not later:                        # a card with a source still to look at is not "looked at"
+            con.execute("UPDATE artists SET previews_at = ? WHERE id = ?", (stamp.isoformat(), artist_id))
     if replace and folder(artist_id).is_dir():
         keep = {name for _m, _p, name in chosen if name}
         for f in folder(artist_id).iterdir():           # what no card shows any more
@@ -251,15 +256,22 @@ def forget(artist_id):
     """The card is gone: its pictures go with it -- and a look at it that is on its way
     must not give them to the next card that gets this id."""
     _gone[artist_id] = _gone.get(artist_id, 0) + 1
+    with _lock:
+        _later.pop(artist_id, None)
     shutil.rmtree(folder(artist_id), ignore_errors=True)
     _changed()
 
 
-def soon(artist_id):
-    """Look at this card next -- it is new, or its sources changed."""
+def soon(artist_id, forced=True):
+    """Look at this card next -- it is new or its sources changed (forced: a login site may be read for
+    it), or a sync has just made fresh snapshots (not forced: they are read, nobody is asked)."""
     with _lock:
         if artist_id not in _queue:
             _queue.append(artist_id)
+            if not forced:
+                _free.add(artist_id)
+        elif forced:
+            _free.discard(artist_id)
     _wake.set()
 
 
@@ -275,13 +287,22 @@ def _due():
 
 
 _tried = {}                  # card id -> when it was last looked at, so a failing one is not hammered
+_free = set()                # cards in _queue that were not asked for by anybody (soon(forced=False))
+_later = {}                  # card id -> forced: its login source was put off for another card's turn
+LATER_SECONDS = 45
 
 
 def _next():
     """(card, asked for) to look at now: one somebody just made or changed, else the stalest."""
     with _lock:
         if _queue:
-            return _queue.pop(0), True
+            artist_id = _queue.pop(0)
+            forced = artist_id not in _free
+            _free.discard(artist_id)
+            return artist_id, forced
+        for artist_id, forced in list(_later.items()):
+            if time.monotonic() - _tried.get(artist_id, -1e9) > LATER_SECONDS:
+                return artist_id, forced
     for artist_id in _due():
         if time.monotonic() - _tried.get(artist_id, -1e9) > RETRY_HOURS * 3600:
             return artist_id, False
