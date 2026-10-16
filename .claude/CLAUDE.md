@@ -417,13 +417,24 @@ Do not create releases or tags yourself, and do not push to `main`.
   gallery** -- the pictures would jump; the page offers "N new posts - show", which
   opens the gallery again from the refreshed snapshot. The live page is saved as the
   source's snapshot as soon as it arrives.
+- **The card list is patched, not rebuilt** (`patchCards`): a poll while a sync runs re-renders
+  every 700 ms, and replacing all cards swallowed a click that began before it (the Auto-download
+  switch). Only a card whose markup changed is replaced; a running card gets just its
+  `.progress-text`, `.bar` and `.card-status` replaced. Keep those three in every busy card.
+  Browse's state poll (`galPoll`) runs only while Browse is shown and while a site the filter has
+  not switched off is loading, slows down, and reopens a gallery the server closed; every path
+  that ends a gallery's loading (no cards, a failed open) must clear `G.loading`.
+- **Squares or Full** (`S.brFit`
 - **Squares or Full** (`S.brFit`, localStorage `sourcerer.browse.fit`): *Squares*
   is the CSS grid of square tiles; *Full* is TrackImage's "ratio" layout done in
   `galLayout`: rows of whole pictures, each row scaled to fill the width, the last
   row not stretched beyond `GAL_LAST` x the target height, shapes clamped to
   0.3-4 (`galRatio`), a picture whose shape is unknown counts as square until it
   loads (the grid listens for `load`, then re-lays out 150 ms later); a resize
-  re-lays out after 60 ms. Leaving Full clears the inline sizes.
+  re-lays out after 60 ms. Leaving Full clears the inline sizes. A shape is never written
+  back as a default (it would stop the `load` handler learning the real one), and
+  `.gal-body` always shows its scrollbar (`overflow-y: scroll`): one that comes and goes
+  changes the width the rows are laid out for, and the layout flickered for ever.
 - **The card shows the 4 newest posts of its sources, downloaded or not**
   (`previews.py`). One card at a time in the background (`previews._loop`),
   the first page of each source through the same lanes as a sync, a small JPEG
