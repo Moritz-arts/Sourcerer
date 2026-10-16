@@ -47,7 +47,7 @@ Open Anyway**.
 
 ## Use
 
-1. **New card** (or the **+** tile) — paste the links of every place the
+1. **New card** (or **Add artist** beside the list) — paste the links of every place the
    artist posts. Any page of a profile works: `x.com/name/media`, a single
    post, the profile itself. The name and the profile picture come from the
    links; a dot per link says whether it answers (green), fails (red, with the
@@ -55,39 +55,41 @@ Open Anyway**.
    in your library), the layout (all together, or one folder per site) and what
    happens to the same picture from several sites — keep all, keep the best
    quality, or prefer one **master source**. The **Auto-download** switch
-   (also on the card afterwards) says whether a sync of the card downloads what
-   it finds. **Create & download** starts downloading at once, **Create** only
-   saves the card.
-2. **Sync** and **Download** are two things. **Sync** (a card's button, or
-   **Sync all**) *refreshes*: it looks at the newest posts of every source and
-   the card says how many are not downloaded yet — it downloads only on a card
-   whose **Auto-download** is on, and so does Automatic sync. **Download** (a
-   card's button, or **Download all**) fetches what is not in the library yet:
-   the first time the whole history, later only what is new. Originals, not
-   previews, under the file's own name. Cards wait in a queue; a running one
-   can be cancelled. The bar at the bottom shows progress, speed and the queue;
-   **Activity** opens the log. A card has four buttons — sync, download, open
-   the downloaded files, delete; edit it with `Enter`, a right-click or the
-   pencil in Browse.
-3. **Browse** (the *Browse* switch at the top, a double-click on a card, or
-   `G`) — the artists you follow on the left, their posts on the right,
-   everything their sources show merged into one stream, newest first,
-   straight from the sites: nothing is saved unless you ask. **All artists**
-   is one timeline over every card. The chips at the top switch whole sites on
-   and off (Pixiv, X, Booru …); a site that is off is not asked at all, and
-   the choice stays when you pick another artist. What Sourcerer saw last time
-   shows at once while the sites are asked again: a circle spins on a site's
-   chip until it has answered, then the chip is green, and posts that are new
-   since offer themselves as "N new posts". **Squares** crops every picture to
-   a square tile, **Full** shows each one whole, in rows. Scroll and it asks the
-   sites for more; click a picture to see it large (arrow keys step through),
-   **Download** puts that one file into the artist's folder the way a sync
-   would, **Open post** opens it on the site, and **Download all** downloads the
-   artist through the sites that are switched on. Most pictures come from the
-   sites' own image servers; those that need a login or a Referer (Pixiv,
-   Gelbooru, forums) are fetched by Sourcerer and kept in memory only.
+   says whether a refresh of the artist downloads what it finds. **Create &
+   download** starts downloading at once, **Create** only saves the card.
+2. **Refresh** and **Download** are two things. **Refresh** (the button at the top,
+   or `U` for the open artist) looks at the newest posts of every source and
+   says how many are not downloaded yet — it downloads only for an artist
+   whose **Auto-download** is on, and so does Automatic sync. **Download**
+   (**Download all** at the top, **Download selected source(s)** for the open
+   artist) fetches what is not in the library yet: the first time the whole
+   history, later only what is new. Originals, not previews, under the file's
+   own name. Artists wait in a queue; a running one can be cancelled. The bar at
+   the bottom shows progress, speed and the queue; **Activity** opens the log.
+3. **The window is Browse** — the artists you follow on the left, their posts on
+   the right, everything their sources show merged into one stream, newest
+   first, straight from the sites: nothing is saved unless you ask. **All
+   artists** is one timeline over every card. A cloud beside each name is the
+   artist's auto-download: green when it is on, dark grey when it is off;
+   right-click an artist for its menu (edit, auto-download on/off, refresh,
+   download, open the folder, delete). The chips at the top hide whole sites
+   (Pixiv, X, Booru …) — hiding is instant and asks nobody, and the choice
+   stays when you pick another artist. A picture of a site shows only its
+   logo, a green tick marks what is downloaded. What Sourcerer saw last time
+   shows at once while the sites are asked: a ring circles a site's logo until
+   it has answered, and posts that are new since offer themselves as "N new
+   posts". An artist you have looked at stays loaded for a while: picking them
+   again shows the posts where you left, without asking the sites. **Squares**
+   crops every picture to a square tile, **Full** shows each one whole, in rows.
+   Scroll and it asks the sites for more; click a picture to see it large
+   (arrow keys step through; the site's logo is top left, the artist bottom
+   left), **Download** puts that one file into the artist's folder the way a
+   sync would and turns into a green **Downloaded**, **Open post** opens it on
+   the site. Most pictures come from the sites' own image servers; those that
+   need a login or a Referer (Pixiv, Gelbooru, forums) are fetched by
+   Sourcerer and kept in memory only.
 4. **Settings** (the gear) — library folder, file names, automatic sync,
-   parallel downloads, how gently sites are treated, theme, card size,
+   parallel downloads, how gently sites are treated, theme,
    updates (**Stable** or **Beta**) and repair.
 
 A file you delete from the library is not downloaded again, and a file that
@@ -95,10 +97,12 @@ is already there is not downloaded twice: delete a card and make it again, or
 point a card at a folder you collected by hand, and Sourcerer takes over what
 it finds under the files' own names.
 
-Shortcuts: `Ctrl+N` new card, `Ctrl+F` search, `F5` sync all (`Shift+F5`
-download all), `Ctrl+,` settings, arrow keys select a card, `Enter` edits it,
-`U` syncs it, `D` downloads it, `G` opens its Browse view, `Del` deletes it, `Ctrl` + mouse wheel sizes the cards, right-click opens a card's
-menu. The full list is in Settings › Keyboard & mouse.
+Shortcuts: `Ctrl+N` (or `N`) new card, `Ctrl+F` (or `/`) search, `F5` refresh
+all (`Shift+F5` download all), `Ctrl+,` settings, `↑` `↓` pick an artist,
+`Enter` edits, `U` refreshes, `D` downloads, `A` turns auto-download on or off,
+`O` opens the folder, `Del` deletes; in a picture `←` `→` step, `D` downloads,
+`O` opens the post, `Esc` closes; `Ctrl` + mouse wheel sizes the pictures.
+The full list is in Settings › Keyboard & mouse.
 
 Sites downloaded today: **Bluesky**, **Mastodon** (and the fediverse),
 **Pixiv**, **Patreon**, **X**, **XenForo** forums (a member's media
@@ -110,8 +114,8 @@ on the card until their site is supported. The dot beside each link says how it 
 works, yellow works with a catch (a login, a bot check, a site asking to slow
 down), red does not work, grey is not checked yet.
 
-**Manage Accounts** (the button beside *Sync all*) has a box for every site, with a dot
-that says whether its login works. X needs
+**Manage Accounts** (the button beside *Download all*) has a box for every login, with the
+site's logo and a dot that says whether the login works. X needs
 one, Pixiv shows R-18 works and Patreon a patron's posts only to a
 logged-in account, many forums and some Mastodon servers show their media
 to members only, and Gelbooru and Rule 34 answer only to an API key.

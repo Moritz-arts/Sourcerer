@@ -11,7 +11,7 @@
   --bg-warning: #f9dca4; --text-warning: #734500; --dot-warn: #d89000;
   --bg-danger: #f6d3d3; --text-danger: #8e2626; --dot-bad: #d93a3a;
   --shadow: 0 6px 24px rgba(0, 0, 0, .14);
-  --radius: 8px; --card: 230px;
+  --radius: 8px; --fill-ok: #1f8f36;
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
   color-scheme: light;
@@ -119,7 +119,7 @@ input[type=range] { accent-color: var(--fill-accent); cursor: pointer; }
 @media (prefers-reduced-motion: reduce) { .spin { animation-duration: 2.4s; } }
 
 /* Browse: the artists on the left, their posts on the right (the gallery) */
-.seg { display: inline-flex; margin-left: 14px; border: .5px solid var(--border-strong); border-radius: var(--radius); overflow: hidden; }
+.seg { display: inline-flex; border: .5px solid var(--border-strong); border-radius: var(--radius); overflow: hidden; }
 .seg button { border: none; border-radius: 0; background: transparent; padding: 4px 12px; font-size: 13px; }
 .seg button.selected { background: var(--bg-accent); color: var(--text-accent); }
 .browse { flex: 1; min-height: 0; display: flex; }
@@ -135,8 +135,10 @@ input[type=range] { accent-color: var(--fill-accent); cursor: pointer; }
 .br-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .br-n { font-size: 11px; color: var(--text-muted); }
 .br-item.selected .br-n { color: inherit; opacity: .8; }
-.br-item .br-n .ic { width: 14px; height: 14px; vertical-align: -3px; }
-.br-item .br-n .ic.off { opacity: .35; }
+.br-auto { display: inline-flex; flex: none; color: var(--dot-ok); }
+.br-auto.off { color: var(--text-muted); opacity: .4; }
+.br-auto .ic { width: 15px; height: 15px; }
+.br-item .spin { width: 13px; height: 13px; }
 .br-order { display: flex; gap: 6px; }
 .br-order select { min-width: 0; width: auto; padding: 3px 4px; font-size: 12px; }
 #br-sort { flex: 0 0 106px; }
@@ -148,12 +150,14 @@ input[type=range] { accent-color: var(--fill-accent); cursor: pointer; }
 .br-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 9px 14px; border-bottom: .5px solid var(--border); }
 .br-title { font-weight: 600; font-size: 15px; white-space: nowrap; min-width: 0; max-width: 40%; overflow: hidden; text-overflow: ellipsis; }
 #br-download { white-space: nowrap; flex: none; }
-@media (max-width: 800px) { .br-side { width: 160px; } .br-order { flex-direction: column; } #br-sort { flex: none; } #version { display: none; } .seg { margin-left: 6px; } }
+@media (max-width: 800px) { .br-side { width: 160px; } .br-order { flex-direction: column; } #br-sort { flex: none; } #version { display: none; } }
 .gal-sources { display: flex; flex-wrap: wrap; flex: 1 1 140px; gap: 6px; margin-left: 6px; min-width: 0; }
 .chip { font-size: 12px; font-weight: 400; padding: 2px 10px; border-radius: 12px; display: inline-flex; align-items: center; gap: 6px; }
 .chip.off { opacity: .45; }
 .chip.logo { padding: 5px 9px; margin-right: 4px; border-color: transparent; }
-.chip.logo:hover:not(:disabled) { border-color: var(--border-strong); }
+.chip.logo:hover:not(:disabled), .chip.logo:active:not(:disabled) { background: transparent; border-color: transparent; transform: none; }
+.chip.logo .mark { transition: transform .12s; }
+.chip.logo:hover .mark { transform: scale(1.15); }
 /* A site's mark: filled (Simple Icons) or drawn in its own stroke colour. The state sits on the mark -- a dot in its corner, or a ring
    that circles round it while the site is asked -- so a chip is the same size in every state and nothing jumps. */
 .ic.logo { width: 16px; height: 16px; fill: currentColor; stroke: none; vertical-align: middle; }
@@ -162,9 +166,11 @@ input[type=range] { accent-color: var(--fill-accent); cursor: pointer; }
 .mark .spin { position: absolute; inset: -4px; width: auto; height: auto; border-width: 2px; }
 .chip > .dot, .chip > .spin { width: 8px; height: 8px; border-width: 1.5px; }
 #gal-size { width: 120px; }
-.br-head .seg { margin-left: 0; }
 .br-head .seg button { padding: 3px 10px; font-size: 12px; }
-#br-edit { padding: 3px 5px; }
+#br-edit, #br-refresh, #br-folder { padding: 3px 5px; }
+/* No artist yet: the invitation instead of the gallery. */
+.browse.blank .br-head, .browse.blank .gal-body { display: none; }
+.browse.blank .br-main { overflow: auto; }
 /* A scrollbar that comes and goes would change the width Full mode lays its rows out for, and again ... */
 .gal-body { flex: 1; min-height: 0; overflow: auto; overflow-y: scroll; padding: 12px; }
 .gal-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--gal, 200px), 1fr)); gap: 8px; }
@@ -179,11 +185,12 @@ input[type=range] { accent-color: var(--fill-accent); cursor: pointer; }
 .gal-noimg, .gal-play { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--text-muted); }
 .gal-play { color: #fff; filter: drop-shadow(0 1px 3px rgba(0, 0, 0, .6)); }
 .gal-play .ic, .gal-noimg .ic { width: 34px; height: 34px; }
-.gal-tag { position: absolute; left: 6px; bottom: 6px; max-width: calc(100% - 12px); display: flex; align-items: center; gap: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 11px; padding: 2px 7px; border-radius: 9px; background: rgba(0, 0, 0, .55); color: #fff; }
-.gal-tag .ic.logo { width: 13px; height: 13px; flex: none; }
+.gal-tag { position: absolute; left: 7px; bottom: 7px; display: flex; align-items: center; color: #fff; font-size: 11px; font-weight: 500;
+  filter: drop-shadow(0 0 2px rgba(0, 0, 0, .75)) drop-shadow(0 1px 2px rgba(0, 0, 0, .5)); }
+.gal-tag .ic.logo { width: 18px; height: 18px; flex: none; }
 .gal-saved { position: absolute; right: 6px; top: 6px; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center;
-  justify-content: center; background: var(--fill-accent); color: var(--on-accent); }
-.gal-saved .ic { width: 16px; height: 16px; }
+  justify-content: center; background: var(--fill-ok); color: #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, .45); }
+.gal-saved .ic { width: 15px; height: 15px; stroke-width: 3; }
 .gal-end { text-align: center; padding: 20px; color: var(--text-muted); font-size: 13px; }
 .gal-view { position: absolute; inset: 0; z-index: 5; display: flex; align-items: center; background: rgba(0, 0, 0, .93); color: #eee; }
 .gal-stage { flex: 1; align-self: stretch; display: flex; align-items: center; justify-content: center; min-width: 0; padding: 12px 0 64px; }
@@ -191,8 +198,15 @@ input[type=range] { accent-color: var(--fill-accent); cursor: pointer; }
 .gal-stage img, .gal-stage video { width: 100%; height: 100%; object-fit: contain; }
 .gal-stage .gal-ph { width: 100%; height: 100%; filter: blur(2px); opacity: .85; }
 .gal-stage .gal-big { position: absolute; width: 0; height: 0; opacity: 0; }
-.gal-nav { align-self: stretch; width: 64px; border: none; background: none; color: #fff; }
+.gal-nav { align-self: stretch; width: 130px; border: none; border-radius: 0; background: none; color: #fff; }
 .gal-nav:hover:not(:disabled) { background: rgba(255, 255, 255, .06); }
+.gal-nav:active:not(:disabled) { transform: none; }
+.gal-source { position: absolute; left: 18px; top: 16px; z-index: 1; display: flex; align-items: center; pointer-events: none;
+  filter: drop-shadow(0 0 3px rgba(0, 0, 0, .8)); color: #fff; }
+.gal-source .ic.logo { width: 26px; height: 26px; }
+.gal-who { display: inline-flex; align-items: center; gap: 8px; font-weight: 500; margin-right: 4px; }
+.gal-who .avatar { width: 26px; height: 26px; font-size: 10px; }
+.gal-bar button.primary.done, .gal-bar button.primary.done:disabled { background: var(--fill-ok); color: #fff; opacity: 1; }
 .gal-nav .ic { width: 32px; height: 32px; }
 .gal-bar { position: absolute; left: 0; right: 0; bottom: 0; display: flex; align-items: center; gap: 8px; padding: 10px 16px;
   background: rgba(0, 0, 0, .55); font-size: 13px; }
@@ -217,74 +231,23 @@ input[type=range] { accent-color: var(--fill-accent); cursor: pointer; }
   background: var(--surface-1); border-bottom: .5px solid var(--border);
 }
 .brand { font-weight: 600; font-size: 15px; letter-spacing: .1px; }
-.filterbar { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-bottom: .5px solid var(--border); }
-.filterbar select { width: auto; }
 .searchbox { position: relative; width: min(320px, 40vw); }
 .searchbox .ic { position: absolute; left: 9px; top: 8px; color: var(--text-muted); }
 .searchbox input { padding-left: 30px; }
-.sizer { display: flex; align-items: center; gap: 2px; color: var(--text-muted); }
-.sizer input { width: 120px; }
-.sizer button { padding: 4px 6px; color: var(--text-muted); }
-main { flex: 1; overflow: auto; }
-.grid {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--card), 1fr));
-  gap: 12px; padding: 14px; align-items: start;
-}
-
-/* ---- artist card ---- */
-.card {
-  border: .5px solid var(--border-strong); border-radius: 12px; padding: 12px;
-  background: var(--surface-2); display: flex; flex-direction: column; outline: none;
-  transition: box-shadow .15s, border-color .15s;
-}
-.card:hover { box-shadow: var(--shadow); }
-.card.selected { border-color: var(--fill-accent); box-shadow: 0 0 0 2px var(--bg-accent); }
-.card.busy { border: 2px solid var(--border-accent); padding: 11px; }
-.card-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.card-head .who { min-width: 0; }
-.card-name { margin: 0; font-weight: 500; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.card-path {
-  margin: 0; font-size: 12px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis;
-  white-space: nowrap; cursor: pointer;
-}
-.card-path:hover { color: var(--text-accent); text-decoration: underline; }
 .avatar {
   width: 40px; height: 40px; border-radius: 50%; flex: none; display: flex; align-items: center;
   justify-content: center; font-weight: 500; font-size: 14px; object-fit: cover;
 }
 .avatar.xs { width: 20px; height: 20px; font-size: 9px; }
 .avatar.lg { width: 48px; height: 48px; font-size: 16px; }
-.thumbs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin: 10px 0 8px; }
-.thumbs > * { aspect-ratio: 1; border-radius: 4px; width: 100%; object-fit: cover; display: block; }
-.srcdots { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; }
-.srcdots a { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; color: inherit; text-decoration: none; }
-.srcdots a:hover { color: var(--text-accent); text-decoration: underline; }
-.progress-text { font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; display: flex; gap: 6px; }
 .bar { height: 4px; border-radius: 2px; background: var(--border); overflow: hidden; }
 .bar > div { height: 100%; background: var(--fill-accent); transition: width .3s; }
 .bar.indeterminate > div { width: 30%; animation: slide 1.2s ease-in-out infinite; }
 @keyframes slide { from { margin-left: -30%; } to { margin-left: 100%; } }
-.card-status { display: flex; gap: 6px; align-items: center; min-height: 22px; font-size: 12px; color: var(--text-secondary); }
-.card-status > * { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.card-status .badge { flex: none; }
-/* The switch has the line to itself when the card is narrow; the buttons never wrap onto a third. */
-.card-foot { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; min-height: 26px; }
-.card-foot .autorow { margin: 0; flex: 1 1 auto; width: auto; }
-.card-foot .acts { display: flex; gap: 6px; margin-left: auto; flex: none; }
-.card-foot .ic { width: 14px; height: 14px; }
-
-.add-tile {
-  border: 1.5px dashed var(--border-strong); border-radius: 12px; background: transparent;
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
-  min-height: 150px; height: 100%; color: var(--text-muted); font-size: 13px; padding: 12px;
-}
-.add-tile:hover:not(:disabled) { border-color: var(--fill-accent); color: var(--text-accent); background: transparent; }
-.add-tile .ic { width: 28px; height: 28px; stroke-width: 1.5; }
 
 .empty { max-width: 460px; margin: 10vh auto; text-align: center; color: var(--text-secondary); padding: 0 20px; }
 .empty h2 { color: var(--text-primary); font-size: 17px; font-weight: 500; margin: 12px 0 6px; }
 .empty p { margin: 0 0 16px; }
-.nomatch { color: var(--text-muted); text-align: center; margin: 24px 0 0; }
 
 /* ---- activity bar and log ---- */
 .activity {
@@ -449,7 +412,10 @@ p.error:empty { display: none; }   /* p only: a status dot is .dot.error, and em
 .accbox.expired { border-color: var(--dot-bad); background: var(--bg-danger); }
 .accbox.focus { box-shadow: 0 0 0 2px var(--bg-accent); border-color: var(--fill-accent); }
 .acc-id { flex: 0 0 250px; display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
-.acc-id .dot { width: 12px; height: 12px; margin-top: 4px; }
+.acc-id > .dot { width: 12px; height: 12px; margin-top: 4px; }
+.acc-id .mark { width: 24px; height: 24px; margin: 1px 4px 0 0; }
+.acc-id .mark .ic.logo { width: 24px; height: 24px; }
+.acc-id .mark .dot { width: 11px; height: 11px; right: -5px; bottom: -4px; box-shadow: 0 0 0 2px var(--surface-2); }
 .acc-id .dot.blank { border-width: 2px; }
 .acc-text { min-width: 0; }
 .acc-top { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: 14px; }
@@ -481,7 +447,6 @@ p.error:empty { display: none; }   /* p only: a status dot is .dot.error, and em
 .autorow { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--text-secondary); margin: 0 0 8px; cursor: pointer; width: fit-content; }
 .autodl { border-bottom: none; padding: 0; }
 .autodl .section { margin-bottom: 2px; }
-#set-size { width: 100%; }
 .keys { border-collapse: collapse; width: 100%; font-size: 13px; }
 .keys td { padding: 7px 0; border-bottom: .5px solid var(--border); }
 .keys td:first-child { width: 48%; color: var(--text-secondary); }
@@ -499,5 +464,4 @@ details summary { cursor: pointer; margin: 12px 0 6px; }
   .rail { width: 56px; }
   .rail button { font-size: 0; justify-content: center; }
   .rail button .ic { width: 18px; height: 18px; }
-  .sizer input { width: 70px; }
 }

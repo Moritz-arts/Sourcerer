@@ -16,9 +16,12 @@ whose waiting pictures run low gets its next page in the background, one page
 ahead, so scrolling does not stop at every page. A source whose newest posts are kept
 (snapshots.py) shows them at once; the site is checked meanwhile -- the page shows a
 spinner on that source's chip until it has been, and a count of new posts it found, which
-join when the gallery is opened again. A source the page has switched off
-(the filter) is not asked at all. The listings of many cards run on a few threads
-(POOL), and a site that gallery-dl reads (X, forums) is asked for one source at a time.
+join when the gallery is opened again. The page's filter by site only hides: every
+source is asked whatever the filter says, so switching a site on or off never costs a
+request. A gallery the page has left stays open for IDLE seconds (MAX_GALLERIES of them): the
+page shows it again as it was, and its pictures are still in memory. The listings of many
+cards run on a few threads (POOL), and a site that gallery-dl reads (X, forums) is asked for
+one source at a time.
 
 Pictures: most sites' preview hosts are plain CDNs the page loads itself
 (Media.thumb / large, sent with no referrer). Those that want a Referer or a
@@ -43,12 +46,14 @@ import threading
 import time
 import uuid
 
+import requests
+
 from . import accounts, db, imaging, net, snapshots, sources, sync
 
 log = logging.getLogger(__name__)
 MEMORY = 160 << 20           # bytes of fetched pictures kept, the oldest dropped first
-IDLE = 900                   # a gallery nobody asked anything of this long is closed
-MAX_GALLERIES = 3
+IDLE = 1800                  # a gallery nobody asked anything of this long is closed (the page reopens one after 15 minutes anyway)
+MAX_GALLERIES = 8            # the page keeps up to 7 aside beside the one it shows
 PAGE = 60                    # items a page asks for at a time
 SLOW = 2.5                   # seconds the first page waits for a source that is not ready, once something can be shown
 SLOW_LATER = 0.8             # ... and every later page: the sources are mid-way, a slow one must not hold the rest up
@@ -135,14 +140,13 @@ class _Source:
         self.lock = threading.Lock()          # starts one listing at a time
         self.future = None
         self.closed = False
-        self.off = False                      # the page's filter: not asked, not shown
 
     def running(self):
         return self.future is not None and not self.future.done()
 
     def loading(self):
         """Its first page is still to come -- what the page's spinner shows. (A later page in flight is not.)"""
-        return not self.done and not self.off and not self.checked
+        return not self.done and not self.checked
 
     def seed(self):
         """The newest posts of the last look, ready to show before any request."""
@@ -160,7 +164,7 @@ class _Source:
         """The next page, asked for in the background -- not twice at once, and not while another
         source of a site gallery-dl reads is being listed (it would be turned away as busy)."""
         with self.lock:
-            if self.done or self.closed or self.off or self.running():
+            if self.done or self.closed or self.running():
                 return
             if self.serial:
                 with _lock:
@@ -176,7 +180,7 @@ class _Source:
 
     def _run(self):
         try:
-            if self.closed or self.off:           # queued behind others while the page moved on
+            if self.closed:                       # queued behind others while the page moved on
                 return
             # One artist open: somebody is waiting for these pages, at the gap of a person browsing.
             # All artists reads many accounts at once: the pace of a scan.
@@ -257,9 +261,8 @@ class _Source:
 
 
 class _Gallery:
-    def __init__(self, artist_id, hidden=()):
-        """artist_id: one card, or None for every card (All artists). hidden: the sites the page's
-        filter has switched off."""
+    def __init__(self, artist_id):
+        """artist_id: one card, or None for every card (All artists)."""
         self.id = uuid.uuid4().hex
         self.all = not artist_id
         self.lock = threading.Lock()
@@ -282,16 +285,14 @@ class _Gallery:
                         if r["artist_id"] in artists and sources.site_for(r["url"])]
         for s in self.sources:
             s.spaced = self.all
-            s.off = s.label in hidden
-            if not s.off:
-                s.seed()
+            s.seed()
 
     def start_checks(self):
         """Ask the sources that have not been asked for their first page: the ones that showed a
         snapshot, so the page knows they are up to date (and what is new), and any that could not
         start before (their site's lane was busy, or another card was asked lately)."""
         for s in sorted(self.sources, key=lambda s: s.asked_at):
-            if not s.checked and not s.done and not s.off:
+            if not s.checked and not s.done:
                 s.start_fill()
 
     def _library(self, pairs):
@@ -310,7 +311,7 @@ class _Gallery:
 
     def state(self):
         return [{"id": s.row["id"], "label": s.label, "url": s.row["url"],
-                 "artist_id": s.artist["id"], "artist": s.artist["name"], "off": s.off,
+                 "artist_id": s.artist["id"], "artist": s.artist["name"],
                  "loading": s.loading(), "checked": s.checked, "cached": s.seeded, "new": s.new,
                  # Items still waiting are more to show, whatever a later page did (a prefetch that failed).
                  "state": "more" if s.buffer else "error" if s.error else "done" if s.done else "more",
@@ -320,25 +321,23 @@ class _Gallery:
         # In the order they were last asked (never first): a site one source at a time serves its
         # sources in turn, not the first one again and again.
         for s in sorted(self.sources, key=lambda s: s.asked_at):
-            if not s.buffer and not s.done and not s.off:
+            if not s.buffer and not s.done:
                 s.start_fill()
 
-    def more(self, n, off=()):
-        for s in self.sources:
-            s.off = s.row["id"] in off
+    def more(self, n):
         out, deadline = [], None
         # Nothing shown yet and nothing kept to show: wait for the first source (SLOW for the rest).
         # With snapshots to show at once there is nothing to wait for.
-        grace = SLOW if not self.items and not any(s.buffer and not s.off for s in self.sources) else \
+        grace = SLOW if not self.items and not any(s.buffer for s in self.sources) else \
             (FAST if not self.items else SLOW_LATER)
         while len(out) < n:
             self._kick()
             if out and deadline is None:
                 deadline = time.monotonic() + grace
             deadline = self._settle(deadline, grace)
-            live = [s for s in self.sources if s.buffer and not s.off]
+            live = [s for s in self.sources if s.buffer]
             if not live:
-                if out or all(s.done or s.off for s in self.sources):
+                if out or all(s.done for s in self.sources):
                     break
                 deadline = None                     # nothing to show yet: wait for the pages on their way
                 if not any(s.running() for s in self.sources):
@@ -364,7 +363,7 @@ class _Gallery:
         self._library([(self.items[n][0].artist["id"], self.items[n][1].remote_key) for n in out])
         self._kick()
         for s in sorted(self.sources, key=lambda s: s.asked_at):     # the next page before it is needed
-            if not s.done and not s.off and len(s.buffer) < AHEAD:
+            if not s.done and len(s.buffer) < AHEAD:
                 s.start_fill()
         self.start_checks()                          # a seeded source whose turn had not come yet
         return [self.item(n) for n in out]
@@ -372,9 +371,9 @@ class _Gallery:
     def _settle(self, deadline, grace):
         """Wait for the pages on their way: as long as it takes while there is nothing to show,
         and grace seconds from the moment there is. Returns the time to stop waiting at."""
-        while any(s.running() and not s.buffer and not s.off for s in self.sources):
+        while any(s.running() and not s.buffer for s in self.sources):
             now = time.monotonic()
-            if deadline is None and any(s.buffer and not s.off for s in self.sources):
+            if deadline is None and any(s.buffer for s in self.sources):
                 deadline = now + grace
             if deadline is not None and now >= deadline:
                 break
@@ -421,10 +420,10 @@ def _reap():
         _forget(g.id)
 
 
-def open_gallery(artist_id=None, hidden=()):
+def open_gallery(artist_id=None):
     """A gallery of one card, or -- without an id -- of every card."""
     _reap()
-    g = _Gallery(artist_id, set(hidden or ()))
+    g = _Gallery(artist_id)
     with _lock:
         _galleries[g.id] = g
         extra = sorted(_galleries.values(), key=lambda x: x.seen)[:-MAX_GALLERIES]
@@ -441,7 +440,7 @@ def status(gallery_id):
     """Where the sources of a gallery are: loading, checked, new posts found. Asks nobody."""
     g = _get(gallery_id)
     g.start_checks()                  # a source that could not be asked at the opening (its site was busy) goes on now
-    return {"sources": g.state(), "new_posts": sum(s.new for s in g.sources if not s.off),
+    return {"sources": g.state(), "new_posts": sum(s.new for s in g.sources),
             "loading": any(s.loading() for s in g.sources)}
 
 
@@ -454,17 +453,15 @@ def _get(gallery_id):
     return g
 
 
-def more(gallery_id, n=PAGE, off=()):
-    """off: the ids of the sources the page's filter has switched off."""
+def more(gallery_id, n=PAGE):
     g = _get(gallery_id)
-    off = {int(i) for i in off or ()}
     with g.lock:                                     # one page at a time per gallery
-        items = g.more(max(1, min(int(n), 200)), off)
+        items = g.more(max(1, min(int(n), 200)))
         state = g.state()
     return {"items": items, "sources": state,
-            "new_posts": sum(s.new for s in g.sources if not s.off),
+            "new_posts": sum(s.new for s in g.sources),
             "loading": any(s.loading() for s in g.sources),
-            "done": all((s.done and not s.buffer) or s.off for s in g.sources)}
+            "done": all(s.done and not s.buffer for s in g.sources)}
 
 
 def close(gallery_id):
@@ -527,9 +524,17 @@ def picture(gallery_id, number, size):
     thumb = size == "thumb"
     url = (m.thumb if thumb else "") or m.large or m.thumb or m.url
 
+    def get(address):
+        # No retries for an answer (a refusal, a pause), but a dropped connection or a timeout is
+        # asked once more: one hiccup must not leave a hole in the grid.
+        try:
+            return net.fetch_picture(address, headers=m.preview_headers or None, first=size == "large")
+        except (requests.ConnectionError, requests.Timeout):
+            time.sleep(0.8)
+            return net.fetch_picture(address, headers=m.preview_headers or None, first=size == "large")
+
     def fetch(address):
-        return _once(gallery_id, (gallery_id, number, address, ""),
-                     lambda: net.fetch_picture(address, headers=m.preview_headers or None, first=size == "large"))
+        return _once(gallery_id, (gallery_id, number, address, ""), lambda: get(address))
 
     try:
         data = fetch(url)
