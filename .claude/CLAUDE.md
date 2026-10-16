@@ -14,7 +14,9 @@ background sync that downloads from Bluesky, Mastodon, Pixiv, Patreon, X,
 XenForo forums and boorus, a gallery per card (all its sources, straight from
 the sites), a login for every site (Manage Accounts, checked at each start),
 settings like TrackImage's, and an
-updater with Stable/Beta and repair; and the workshop —
+updater with Stable/Beta and repair; a card has four buttons (sync, download,
+open the downloaded files, delete), opens its Browse view on a double-click and
+carries an Auto-download switch; and the workshop —
 these notes, the docs and the automation that versions every push. `Sourcerer_files/sourcerer/__init__.py`
 lists the program's layers.
 
@@ -266,6 +268,30 @@ Do not create releases or tags yourself, and do not push to `main`.
 - **pywebview 6 turned `FOLDER_DIALOG` into a deprecated function.** Passing it
   as the dialog type opens nothing; use `FileDialog.FOLDER` (with a fallback
   for 5.x), as `server.pick_folder` does.
+- **Sync and download are two jobs** (`sync.enqueue(mode=...)`, `_sync_artist`).
+  *Sync* (`refresh`) only looks: `_glance` reads at most `REFRESH_ITEMS` posts /
+  `REFRESH_PAGES` pages of each source, keeps them as the source's snapshot, and
+  `_looked` stores how many are not in the library (`artists.pending`, the card's
+  "N to download"); no walk through the history, nothing marked complete.
+  *Download* walks and downloads as before. With no mode asked for, the card
+  decides: `artists.auto_download` on = a sync (the button, Sync all, Automatic
+  sync) downloads too, off = it only looks. A download asked for while a look
+  waits in the queue makes the wait a download; a look never narrows one.
+  Download buttons (card, Download all, Browse's Download all, Create & download)
+  always send `mode: "download"`. **Existing cards keep downloading**: `db.init`
+  switches `auto_download` on once for every card that exists (setting
+  `auto_download_migrated`); a card made later starts with it off. A single
+  picture saved in Browse takes one off `pending`.
+- **Snapshots are the shared "newest posts"** (`snapshots.py`, table
+  `snapshots`, one row per source, at most `KEEP` posts, merged so a short look
+  does not throw away a longer one). Sync (`_scan` of a site that does not skip
+  known posts, `_glance`), the previews worker and Browse all write them;
+  Browse and the previews read them. They are **pickled `Media`** (pixiv's
+  `fetch` is a `functools.partial`; a closure or lambda would not pickle -- the
+  snapshot is then simply not kept), read back through an unpickler that builds
+  only `sourcerer.sources.*` and `functools.partial`, and dropped when `Media`'s
+  fields changed (`SHAPE`). Their URLs can be stale: Browse always checks the
+  site again and never trusts a snapshot more than for the first screen.
 - **The same picture from two sources** is found by a 64-bit difference hash
   (`imaging.py`, Pillow): ≤ 5 differing bits is one picture. Only *across*
   sources — two similar posts on one site are usually two versions the artist
@@ -337,8 +363,10 @@ Do not create releases or tags yourself, and do not push to `main`.
   timeline over every card (`gallery.open_gallery(None)`) -- right. The filter is
   **by site** (`G.hidden`, a label like "Pixiv"; kept across artists in
   localStorage): the page sends the ids of the switched-off sources as `off`
-  and the server does not list them. *Download all* is `/api/sync` with
-  `sources`: `sync.enqueue(only=...)` asks just those sources of that card.
+  and the server does not list them (the page also sends the hidden labels as
+  `hidden` when it opens, so they are not even seeded). *Download all* is
+  `/api/sync` with `sources` and `mode: "download"`: `sync.enqueue(only=...)`
+  asks just those sources of that card. A double-click on a card opens it here.
   Every item says its artist (`artist_id`): a download goes to *its* card's
   folder with *its* dedupe rules, in "All artists" too. The mockup's card grid
   stays the default view; Browse is the second one, never a replacement.
@@ -359,7 +387,28 @@ Do not create releases or tags yourself, and do not push to `main`.
   lane and without the login lane's reading break (the gaps between requests
   stay). Small pictures from a host with no login use `net.PREVIEW`'s own lane
   (4 at once, 0.08 s apart); originals and anything with a login keep
-  `HOSTS` and the login lane.
+  `HOSTS` and the login lane. A login lane's first request of such a download or
+  page keeps at least `net.INTERACTIVE_PACE` (0.5 s) instead of the 2-3 s of a
+  sync; an artist's gallery (not "All artists") runs its listings in
+  `net.interactive()` too -- somebody is waiting for them.
+- **Browse opens from snapshots and checks the site meanwhile**
+  (`gallery._Source.seed`, `_Gallery.start_checks`). A source with a snapshot
+  puts its posts in the buffer at once (`FAST` grace instead of `SLOW`: the first
+  screen is there in milliseconds), and `open_gallery` already starts its live
+  first page. The page shows **a spinner per site chip while `loading`**, a green
+  dot once `checked`, orange on an error, and polls `/api/gallery/state` (no site is
+  asked) while any source loads. What the live page has that the snapshot did not
+  is counted (`new`, only among the newest posts) and **never slipped into the open
+  gallery** -- the pictures would jump; the page offers "N new posts - show", which
+  opens the gallery again from the refreshed snapshot. The live page is saved as the
+  source's snapshot as soon as it arrives.
+- **Squares or Full** (`S.brFit`, localStorage `sourcerer.browse.fit`): *Squares*
+  is the CSS grid of square tiles; *Full* is TrackImage's "ratio" layout done in
+  `galLayout`: rows of whole pictures, each row scaled to fill the width, the last
+  row not stretched beyond `GAL_LAST` x the target height, shapes clamped to
+  0.3-4 (`galRatio`), a picture whose shape is unknown counts as square until it
+  loads (the grid listens for `load`, then re-lays out 150 ms later); a resize
+  re-lays out after 60 ms. Leaving Full clears the inline sizes.
 - **The card shows the 4 newest posts of its sources, downloaded or not**
   (`previews.py`). One card at a time in the background (`previews._loop`),
   the first page of each source through the same lanes as a sync, a small JPEG
@@ -368,10 +417,15 @@ Do not create releases or tags yourself, and do not push to `main`.
   the library's copy (`card_thumbs` merges both, newest first), so a fresh
   download appears at once. Sites that rest and logins that ran out are skipped;
   a card is looked at again after `REFRESH_HOURS` only (`artists.previews_at`).
-  A source behind a login is where an account gets locked: it is read only for
-  a card somebody just made or changed, or while automatic sync is on; not
-  within `sync.MIN_HOURS` of the card's last sync (the card shows those
-  downloads); and spaced like sync's cards (`sync.NEXT_CARD`). Posts are
+  Previews read the sources' **snapshots** first (`snapshots.py`): a snapshot
+  younger than `REFRESH_HOURS` costs no request, so a card that was synced or
+  browsed needs no look of its own. A source behind a login is where an account
+  gets locked: a card never looked at (or never synced and without a snapshot)
+  gets one first look, after that the site is read only for a card somebody just
+  made or changed, or while automatic sync is on -- otherwise the old snapshot
+  stands in. Cards of one login site are spaced like sync's (`sync.NEXT_CARD`):
+  `previews._ready` says no, `refresh` defers the card (about 45 s) and the worker
+  goes on to a card of another site instead of sleeping. Posts are
   ordered by their UTC time, not their text (`previews._order`). The page
   never asks a site for a card picture -- it only reads what is kept, and
   `previews.version` in `/api/sync` makes it reload its cards when that moves.

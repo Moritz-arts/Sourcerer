@@ -78,6 +78,7 @@ STOP_HOSTS = {"www.pixiv.net"}
 PREVIEW = (4, 0.08)
 
 LOGIN_PACE = 2.0            # seconds at least between two requests carrying a login
+INTERACTIVE_PACE = 0.5      # ... when somebody waits for the answer (interactive()): a click, not a scan
 JITTER = (1.0, 1.6)         # every gap times this, drawn anew: longer, never shorter
 READ_EVERY = (20, 40)       # a logged-in site gets a break after this many requests ...
 READ_BREAK = (15, 60)       # ... of this many seconds
@@ -328,6 +329,8 @@ class _Polite:
             limit, pace = min(_limits["per_host"], own[0]), max(_limits["pace"], own[1])
             if self.login:                       # Settings can make this gentler, never faster
                 limit, pace = 1, max(pace, LOGIN_PACE)
+                if self.first:                   # somebody waits: the gap of a person browsing, not of a scan
+                    pace = max(_limits["pace"], min(own[1], 1.0), INTERACTIVE_PACE)
             elif self.preview:
                 limit, pace = PREVIEW
             lane = (self.host, self.login, self.preview)

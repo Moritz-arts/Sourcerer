@@ -186,6 +186,21 @@ add the one that replaced it.
   picture of the layout; no code taken. Next: a cached timeline so "All
   artists" opens without asking every site (see below).
 
+- 2026-10-16 — **Sync is not download.** The user: downloading from galleries was
+  still slow, Browse took long to load, cards showed no pictures before a sync,
+  and "sync and download should be separated: download / auto-download downloads
+  the artist, sync is for refreshing". So: *Sync* looks at the newest posts of
+  every source and keeps them (snapshots); *Download* fetches what is missing;
+  each card has an **Auto-download** switch (a sync of it downloads too, so does
+  Automatic sync). Cards that exist when this arrives get it switched on once --
+  nothing they did before stops. Browse opens from the snapshots (instant) and
+  checks the sites meanwhile; the previews use them too and are allowed one first
+  look at a login site. A login's interactive requests may go at 0.5-1 s instead of
+  2-3 s (a person is waiting; sync keeps its pace). Squares / Full for the grid
+  follows TrackImage's justified rows. A card has sync, download, open folder and
+  delete; a double-click opens its Browse view (edit: Enter, right-click, or the
+  pencil in Browse).
+
 ## Done
 
 - [x] Repository workshop: CLAUDE.md, docs, version workflow
@@ -240,6 +255,12 @@ add the one that replaced it.
 - [x] Browse: artists left, their posts from every source right, "All artists"
       as one timeline, a site filter, download one picture or everything from
       the sites that are on
+- [x] Sync and download separated: sync only looks (and counts what is
+      waiting), download fetches; a per-card Auto-download switch decides whether
+      a sync downloads too; cards have four buttons and open Browse on a double-click
+- [x] Browse opens from snapshots at once and checks the sites meanwhile (spinner,
+      green chips, "N new posts"); Squares / Full picture layout; previews for cards
+      with login sources without a sync first
 
 ## Next
 
@@ -258,8 +279,7 @@ add the one that replaced it.
       newest pages again (gallery-dl's cursor).
 - [ ] Quiet hours: no automatic sync of a logged-in site at night.
 - [ ] Gallery: a filter by date.
-- [ ] Browse: "All artists" reads every source's first page live. A cached
-      timeline (the first pages kept by the background worker that already
-      fetches the cards' previews) would open at once and ask the login sites
-      less; downloads from it need the sites' `Media.fetch` rebuilt.
+- [ ] Browse: "All artists" reads a first page per source live when no snapshot
+      exists yet; a background timeline that refreshes snapshots of cards
+      nobody has opened would make even the first opening instant.
 - [ ] Browse: select several pictures and download them together.

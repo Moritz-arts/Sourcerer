@@ -76,6 +76,13 @@ CREATE TABLE IF NOT EXISTS previews (
     file        TEXT,
     PRIMARY KEY (artist_id, pos)
 );
+-- The newest posts of a source as the last look at it left them (snapshots.py): Browse opens
+-- from this at once and checks the site meanwhile; cards count what is new from it.
+CREATE TABLE IF NOT EXISTS snapshots (
+    source_id   INTEGER PRIMARY KEY REFERENCES sources(id) ON DELETE CASCADE,
+    fetched     TEXT NOT NULL,
+    data        BLOB NOT NULL
+);
 CREATE TABLE IF NOT EXISTS settings (
     key    TEXT PRIMARY KEY,
     value  TEXT NOT NULL
@@ -99,6 +106,10 @@ COLUMNS = {
         "avatar": "TEXT",                 # file name in Userdata/Avatars
         "avatar_checked": "TEXT",         # when the profile picture was last looked for
         "previews_at": "TEXT",            # when the sites were last asked for the card's newest pictures
+        # 1: a sync that finds new posts downloads them too (sync alone only refreshes: it looks at the
+        # sources and counts what is new). Cards made before this setting keep downloading: see init().
+        "auto_download": "INTEGER NOT NULL DEFAULT 0",
+        "pending": "INTEGER NOT NULL DEFAULT 0",   # new posts the last look found that are not downloaded
     },
     "sources": {
         # 'ok', 'warn' (works with a catch: login, bot check, slow down) or 'error'
@@ -131,6 +142,10 @@ def init():
             for name, decl in columns.items():
                 if name not in have:
                     con.execute("ALTER TABLE %s ADD COLUMN %s %s" % (table, name, decl))
+        # Sync used to download; cards that exist now keep doing it (auto-download on), once.
+        if not con.execute("SELECT 1 FROM settings WHERE key = 'auto_download_migrated'").fetchone():
+            con.execute("UPDATE artists SET auto_download = 1")
+            con.execute("INSERT INTO settings (key, value) VALUES ('auto_download_migrated', '1')")
 
 
 def get_setting(key, default=None):

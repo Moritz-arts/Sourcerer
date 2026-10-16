@@ -13,7 +13,10 @@ site -- X through gallery-dl, a forum -- no longer makes the fast ones wait),
 and a page that has something to show leaves after SLOW seconds without the
 sources that are not ready: their pictures come with the next page. A source
 whose waiting pictures run low gets its next page in the background, one page
-ahead, so scrolling does not stop at every page. A source the page has switched off
+ahead, so scrolling does not stop at every page. A source whose newest posts are kept
+(snapshots.py) shows them at once; the site is checked meanwhile -- the page shows a
+spinner on that source's chip until it has been, and a count of new posts it found, which
+join when the gallery is opened again. A source the page has switched off
 (the filter) is not asked at all. The listings of many cards run on a few threads
 (POOL), and a site that gallery-dl reads (X, forums) is asked for one source at a time.
 
@@ -40,7 +43,7 @@ import threading
 import time
 import uuid
 
-from . import accounts, db, imaging, net, sources, sync
+from . import accounts, db, imaging, net, snapshots, sources, sync
 
 log = logging.getLogger(__name__)
 MEMORY = 160 << 20           # bytes of fetched pictures kept, the oldest dropped first
@@ -49,6 +52,7 @@ MAX_GALLERIES = 3
 PAGE = 60                    # items a page asks for at a time
 SLOW = 2.5                   # seconds the first page waits for a source that is not ready, once something can be shown
 SLOW_LATER = 0.8             # ... and every later page: the sources are mid-way, a slow one must not hold the rest up
+FAST = 0.3                   # ... when snapshots show the first page at once
 AHEAD = 24                   # a source with fewer pictures waiting than this is asked for its next page already
 POOL = 6                     # listings running at once, all galleries together
 SERIAL = ("x", "xenforo")    # sites gallery-dl reads: one source at a time (_gdl._busy would turn the rest away)
@@ -115,6 +119,10 @@ class _Source:
         self.serial = bool(self.site) and (self.site.KIND in SERIAL or self.login)
         self.asked_at = 0.0                   # when it was last asked: the one asked longest ago goes next
         self.spaced = False                   # All artists: a login site's next card waits (CARD_GAP)
+        self.seeded, self.seed_len, self.known = False, 0, set()      # shown from the snapshot already
+        self.checked = False                  # the site has been asked for its first page
+        self.pages = 0
+        self.new = 0                          # posts the check found that the snapshot did not have
         self.listing = None
         self.buffer = collections.deque()
         self.done, self.error = self.site is None, ""
@@ -127,6 +135,22 @@ class _Source:
 
     def running(self):
         return self.future is not None and not self.future.done()
+
+    def loading(self):
+        """Still to be asked, or being asked, for its first page -- what the page's spinner shows."""
+        return not self.done and not self.off and (self.running() or not self.checked)
+
+    def seed(self):
+        """The newest posts of the last look, ready to show before any request."""
+        snap = snapshots.load(self.row["id"]) if self.site else None
+        if not snap:
+            return
+        for m in snap[1]:
+            when = _when(m.posted)
+            self.last = when if when is not None else self.last
+            self.buffer.append((self.last, m))
+        self.known = {m.remote_key for m in snap[1]}
+        self.seed_len, self.seeded = len(snap[1]), True
 
     def start_fill(self):
         """The next page, asked for in the background -- not twice at once, and not while another
@@ -150,7 +174,13 @@ class _Source:
         try:
             if self.closed or self.off:           # queued behind others while the page moved on
                 return
-            self.fill()
+            # One artist open: somebody is waiting for these pages, at the gap of a person browsing.
+            # All artists reads many accounts at once: the pace of a scan.
+            if self.spaced:
+                self.fill()
+            else:
+                with net.interactive():
+                    self.fill()
         finally:
             if self.serial and self.login and self.spaced:
                 with _lock:
@@ -170,15 +200,28 @@ class _Source:
                 self.listing = self.site.pages(self.row["url"])
             page = next(self.listing)
         except StopIteration:
-            self.done = True
+            self.done, self.checked = True, True
             return
         except Exception as e:
-            self.done, self.error = True, net.reason(e)
+            self.done, self.error, self.checked = True, net.reason(e), True
             log.info("gallery: %s stopped: %s", self.row["url"], self.error)
             return
         finally:
             if self.closed:
                 self._end()
+        self.pages += 1
+        if self.pages == 1:
+            snapshots.save(self.row["id"], page)          # the next opening starts from this
+            self.checked = True
+        if self.seeded:
+            # What the snapshot showed is not shown twice. The first page's posts that it did not
+            # have, among its newest, are new posts: counted, and shown when the gallery is
+            # opened again; the rest of the page goes on where the snapshot ended.
+            if self.pages == 1:
+                self.new = sum(1 for i, m in enumerate(page) if m.remote_key not in self.known and i < self.seed_len)
+                page = [m for i, m in enumerate(page) if m.remote_key not in self.known and i >= self.seed_len]
+            else:
+                page = [m for m in page if m.remote_key not in self.known]
         for m in page:
             when = _when(m.posted)
             self.last = when if when is not None else self.last
@@ -199,8 +242,9 @@ class _Source:
 
 
 class _Gallery:
-    def __init__(self, artist_id):
-        """artist_id: one card, or None for every card (All artists)."""
+    def __init__(self, artist_id, hidden=()):
+        """artist_id: one card, or None for every card (All artists). hidden: the sites the page's
+        filter has switched off."""
         self.id = uuid.uuid4().hex
         self.all = not artist_id
         self.lock = threading.Lock()
@@ -223,6 +267,16 @@ class _Gallery:
                         if r["artist_id"] in artists and sources.site_for(r["url"])]
         for s in self.sources:
             s.spaced = self.all
+            s.off = s.label in hidden
+            if not s.off:
+                s.seed()
+
+    def start_checks(self):
+        """Ask the sites that showed their snapshot for their first page now, so the page knows
+        they are up to date (and what is new); the others are asked by the first page."""
+        for s in sorted(self.sources, key=lambda s: s.asked_at):
+            if s.seeded and not s.checked and not s.off:
+                s.start_fill()
 
     def _library(self, pairs):
         """What the library has of these posts, asked once per post: a downloaded one shows
@@ -241,6 +295,7 @@ class _Gallery:
     def state(self):
         return [{"id": s.row["id"], "label": s.label, "url": s.row["url"],
                  "artist_id": s.artist["id"], "artist": s.artist["name"], "off": s.off,
+                 "loading": s.loading(), "checked": s.checked, "cached": s.seeded, "new": s.new,
                  # Items still waiting are more to show, whatever a later page did (a prefetch that failed).
                  "state": "more" if s.buffer else "error" if s.error else "done" if s.done else "more",
                  "error": s.error} for s in self.sources]
@@ -256,7 +311,10 @@ class _Gallery:
         for s in self.sources:
             s.off = s.row["id"] in off
         out, deadline = [], None
-        grace = SLOW if not self.items else SLOW_LATER
+        # Nothing shown yet and nothing kept to show: wait for the first source (SLOW for the rest).
+        # With snapshots to show at once there is nothing to wait for.
+        grace = SLOW if not self.items and not any(s.buffer and not s.off for s in self.sources) else \
+            (FAST if not self.items else SLOW_LATER)
         while len(out) < n:
             self._kick()
             if out and deadline is None:
@@ -341,10 +399,10 @@ def _reap():
         _forget(g.id)
 
 
-def open_gallery(artist_id=None):
+def open_gallery(artist_id=None, hidden=()):
     """A gallery of one card, or -- without an id -- of every card."""
     _reap()
-    g = _Gallery(artist_id)
+    g = _Gallery(artist_id, set(hidden or ()))
     with _lock:
         _galleries[g.id] = g
         extra = sorted(_galleries.values(), key=lambda x: x.seen)[:-MAX_GALLERIES]
@@ -353,7 +411,15 @@ def open_gallery(artist_id=None):
     for old in extra:
         old.close()
         _forget(old.id)
+    g.start_checks()
     return {"gallery": g.id, "name": g.name, "all": g.all, "sources": g.state()}
+
+
+def status(gallery_id):
+    """Where the sources of a gallery are: loading, checked, new posts found. Asks nobody."""
+    g = _get(gallery_id)
+    return {"sources": g.state(), "new_posts": sum(s.new for s in g.sources if not s.off),
+            "loading": any(s.loading() for s in g.sources)}
 
 
 def _get(gallery_id):
@@ -373,6 +439,8 @@ def more(gallery_id, n=PAGE, off=()):
         items = g.more(max(1, min(int(n), 200)), off)
         state = g.state()
     return {"items": items, "sources": state,
+            "new_posts": sum(s.new for s in g.sources if not s.off),
+            "loading": any(s.loading() for s in g.sources),
             "done": all((s.done and not s.buffer) or s.off for s in g.sources)}
 
 
@@ -459,6 +527,8 @@ def download(gallery_id, number):
     kept = bool(cur["new"] or cur["existing"])         # else the same picture was already there
     if cur["new"]:
         sync.event("done", "Saved from the gallery: %s" % (m.post_url or m.url), artist)
+        with db.connect() as con:                  # one post fewer waiting for a download
+            con.execute("UPDATE artists SET pending = MAX(pending - 1, 0) WHERE id = ?", (artist["id"],))
     return g.item(number), kept
 
 

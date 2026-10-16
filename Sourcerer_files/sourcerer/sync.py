@@ -1,9 +1,16 @@
 """Runs the sources of artists, downloads what is new, decides which copy of a picture stays.
 
-Artists wait in a queue and are synced one at a time in a background thread;
-the window polls status(). Each sync first asks every source what is new,
-then downloads it -- several files at once, within each site's limits (net.py)
--- so the card can say "87 / 240" and the activity bar a speed.
+Artists wait in a queue and are handled one at a time in a background thread;
+the window polls status(). There are two jobs, kept apart:
+
+    sync      (mode "refresh") looks at the newest posts of every source, keeps what it
+              saw (snapshots.py), counts what is new and not downloaded (artists.pending)
+              and lets the card's previews follow. Nothing is downloaded -- unless the
+              card has auto-download on: then the sync goes on to download what is new.
+    download  (mode "download") asks every source what is new, walking its history as
+              far as it takes, then downloads it -- several files at once, within each
+              site's limits (net.py) -- so the card can say "87 / 240" and the activity
+              bar a speed.
 
 A file is new when its remote key was never seen for the artist: a file the
 user deleted from the library is not fetched again. What happens to the same
@@ -33,7 +40,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import requests
 
-from . import accounts, config, db, imaging, net, sources
+from . import accounts, config, db, imaging, net, snapshots, sources
 
 log = logging.getLogger(__name__)
 
@@ -54,6 +61,9 @@ _save = threading.Lock()     # deciding and saving happen one file at a time
 _queue = []                  # artist ids waiting
 _auto = set()                # of those, queued by the automatic sync
 _only = {}                   # artist id -> ids of the only sources a queued sync asks (Browse: download these)
+_modes = {}                  # artist id -> "refresh" or "download" for a queued job (none: the card's auto-download decides)
+REFRESH_ITEMS = 120          # a sync (refresh) reads a source's newest pages until it has this many posts
+REFRESH_PAGES = 4            # ... or this many pages
 _used = {}                   # login site -> (artist id, when its last card was done with it)
 _current = None              # what the running sync is doing, for the window
 _worker = None
@@ -145,10 +155,11 @@ def _final_path(folder, media, ext, server_name, posted):
 
 # ---- queue ------------------------------------------------------------------
 
-def enqueue(artist_ids=None, auto=False, only=None):
+def enqueue(artist_ids=None, auto=False, only=None, mode=None):
     """Queue artists (all when None). Returns how many were added. only: the ids of the
     sources to ask -- the rest of the card is left alone this time (Browse: download what
-    the filter shows).
+    the filter shows). mode: "download" to download, "refresh" to only look; none lets the
+    card's auto-download decide (a sync that downloads what it finds, or not).
 
     The longest unsynced first, in a random order among equals: not the same
     cards in the same order every day."""
@@ -167,9 +178,15 @@ def enqueue(artist_ids=None, auto=False, only=None):
                 _only[i] = set(only)
             else:
                 _only.pop(i, None)
+            if mode:
+                _modes[i] = mode
+            else:
+                _modes.pop(i, None)
         for i in ids:
             if i in added or i not in _queue:
                 continue
+            if mode == "download":                 # a download asked for while a look waits: it is a download
+                _modes[i] = "download"
             # Asked for again while it waits: a full request makes the wait a full sync; a restricted
             # one adds its sources to a restricted wait and leaves a full one full.
             if not only:
@@ -194,6 +211,7 @@ def cancel(artist_id):
             _queue.remove(artist_id)
             _auto.discard(artist_id)
             _only.pop(artist_id, None)
+            _modes.pop(artist_id, None)
             return True
         if _current and _current["artist_id"] == artist_id:
             _cancel.set()
@@ -212,10 +230,11 @@ def _work():
             artist_id = _queue.pop(0)
             auto = artist_id in _auto
             only = _only.pop(artist_id, None)
+            mode = _modes.pop(artist_id, None)
             _auto.discard(artist_id)
             _cancel.clear()
         try:
-            _sync_artist(artist_id, auto, only)
+            _sync_artist(artist_id, auto, only, mode)
         except Exception as e:                       # never leave a card stuck as running
             log.exception("sync failed")
             event("error", "Sync failed: %s" % net.reason(e))
@@ -544,12 +563,14 @@ def _held(artist_id, keys):
                         [(artist_id, k) for k in keys])
 
 
-def _sync_artist(artist_id, auto=False, only=None):
+def _sync_artist(artist_id, auto=False, only=None, mode=None):
     global _current
     with db.connect() as con:
         artist = con.execute("SELECT * FROM artists WHERE id = ?", (artist_id,)).fetchone()
         if not artist:
             return
+        # No mode asked for: a card with auto-download downloads what it finds, any other only looks.
+        download = (mode or ("download" if artist["auto_download"] else "refresh")) == "download"
         rows = con.execute("SELECT * FROM sources WHERE artist_id = ? ORDER BY id",
                            (artist_id,)).fetchall()
         known = {r[0] for r in con.execute(
@@ -569,7 +590,8 @@ def _sync_artist(artist_id, auto=False, only=None):
                   key=lambda s: s["id"] != master)
     cur = {"artist_id": artist_id, "name": artist["name"], "phase": "scan", "done": 0, "total": 0,
            "first": any(not s["complete"] for s in srcs), "new": 0, "duplicates": 0,
-           "failed": 0, "existing": 0, "file": "", "size": 0, "found": 0}
+           "failed": 0, "existing": 0, "file": "", "size": 0, "found": 0,
+           "mode": "download" if download else "refresh"}
     with _lock:
         _current = cur
         _speed.clear()
@@ -597,7 +619,10 @@ def _sync_artist(artist_id, auto=False, only=None):
                 _space_out(where, artist_id)
                 logins.add(where)
             try:
-                fresh, walked[src["id"]], capped = _scan(src, site, known, cur, skip, bool(pending))
+                if download:
+                    fresh, walked[src["id"]], capped = _scan(src, site, known, cur, skip, bool(pending))
+                else:
+                    fresh, capped = _glance(src, site, known, cur), False
                 todo += [(src, site, m) for m in fresh]
                 if capped and src["complete"]:
                     # The early stop would skip the rest of this backlog: walk on next time.
@@ -615,6 +640,8 @@ def _sync_artist(artist_id, auto=False, only=None):
             con.execute("UPDATE sources SET last_checked = datetime('now'), last_error = ?, "
                         "last_level = ? WHERE id = ?", (error, level, src["id"]))
 
+    if not download:
+        return _looked(artist, todo, cur, logins, only)
     with _lock:
         cur.update(phase="download", total=len(todo))
     failed_sources = set()
@@ -654,9 +681,58 @@ def _sync_artist(artist_id, auto=False, only=None):
         con.execute("UPDATE artists SET last_sync = ?, last_new = ?, last_failed = ?, "
                     "last_activity = CASE WHEN ? THEN ? ELSE last_activity END WHERE id = ?",
                     (_now(), cur["new"], cur["failed"], cur["new"] > 0, _now(), artist_id))
+        if not only:                       # what is left to download: what failed (or was cut off)
+            con.execute("UPDATE artists SET pending = ? WHERE id = ?",
+                        (len({m.remote_key for _s, _site, m in todo}) - cur["new"] - cur["duplicates"] - cur["existing"]
+                         if cancelled else cur["failed"], artist_id))
     event("cancelled" if cancelled else ("done" if not cur["failed"] else "warn"),
            "Cancelled" if cancelled else "Finished", artist,
            new=cur["new"], duplicates=cur["duplicates"], failed=cur["failed"], existing=cur["existing"])
+
+
+def _glance(src, site, known, cur):
+    """The newest posts of a source -- REFRESH_ITEMS of them, or REFRESH_PAGES pages -- and which
+    of them are not downloaded. Kept as the source's snapshot. No walk through the history, no
+    skip list, nothing marked complete: this only looks."""
+    fresh, seen, items = [], set(), []
+    listing = site.pages(src["url"])
+    try:
+        for number, page in enumerate(listing, 1):
+            items += page
+            new = [m for m in page if m.remote_key not in known and m.remote_key not in seen]
+            seen.update(m.remote_key for m in new)
+            fresh += new
+            with _lock:
+                cur["found"] += len(new)
+            if len(items) >= REFRESH_ITEMS or number >= REFRESH_PAGES or _cancel.is_set():
+                break
+    finally:
+        close = getattr(listing, "close", None)
+        if close:
+            close()
+    snapshots.save(src["id"], items)
+    return fresh
+
+
+def _looked(artist, todo, cur, logins, only):
+    """The end of a sync that only looked: how many posts wait for a download, shown on the card;
+    the previews follow the new snapshots. A card with auto-download never comes here. A look only
+    reads the newest REFRESH_ITEMS posts of a source: a count above that is "at least"."""
+    artist_id = artist["id"]
+    waiting = len({m.remote_key for _src, _site, m in todo})
+    for where in logins:
+        _used[where] = (artist_id, time.monotonic())
+    cancelled = _cancel.is_set()
+    with db.connect() as con:
+        con.execute("UPDATE artists SET last_sync = ? WHERE id = ?", (_now(), artist_id))
+        if not only and not cancelled:
+            con.execute("UPDATE artists SET pending = ? WHERE id = ?", (waiting, artist_id))
+    from . import previews                 # here: previews imports this module
+    previews.soon(artist_id)
+    event("cancelled" if cancelled else "done",
+          "Cancelled" if cancelled else ("%d%s new post%s to download" % (waiting, "+" if waiting >= REFRESH_ITEMS else "",
+                                                                          "" if waiting == 1 else "s")
+                                         if waiting else "Up to date"), artist, new=0 if cancelled else waiting)
 
 
 def _walk_again(src, site):
@@ -682,6 +758,8 @@ def _scan(src, site, known, cur, skip=frozenset(), retry=False):
     skips = getattr(site, "SKIPS_KNOWN", False)
     listing = site.pages(src["url"], skip) if skips else site.pages(src["url"])
     for number, page in enumerate(listing, 1):
+        if number == 1 and not skips:        # (a site that skips what is saved lists only part of its first page)
+            snapshots.save(src["id"], page)
         new = [m for m in page if m.remote_key not in known and m.remote_key not in seen]
         seen.update(m.remote_key for m in new)
         fresh += new

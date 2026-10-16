@@ -124,7 +124,8 @@ def _clean(body):
     return {"name": name, "urls": urls, "master": sources.normalize(body.get("master") or ""),
             "folder": folder or None,
             "layout": body.get("layout") if body.get("layout") in LAYOUTS else "together",
-            "dedupe": body.get("dedupe") if body.get("dedupe") in DEDUPES else "best"}, None
+            "dedupe": body.get("dedupe") if body.get("dedupe") in DEDUPES else "best",
+            "auto_download": 1 if body.get("auto_download") else 0}, None
 
 
 def _save(con, artist_id, data):
@@ -141,8 +142,9 @@ def _save(con, artist_id, data):
     master = con.execute("SELECT id FROM sources WHERE artist_id = ? AND url = ?",
                          (artist_id, data["master"])).fetchone()
     con.execute("UPDATE artists SET name = ?, layout = ?, dedupe = ?, master_source_id = ?, "
-                "folder = ? WHERE id = ?", (data["name"], data["layout"], data["dedupe"],
-                                            master[0] if master else None, data["folder"], artist_id))
+                "folder = ?, auto_download = ? WHERE id = ?", (data["name"], data["layout"], data["dedupe"],
+                                                               master[0] if master else None, data["folder"],
+                                                               data["auto_download"], artist_id))
 
 
 def _open(path):
@@ -308,8 +310,8 @@ def create_artist():
         _save(con, artist_id, data)
     _background(sync.check_card, artist_id)
     previews.soon(artist_id)
-    if body.get("sync_now"):
-        sync.enqueue([artist_id])
+    if body.get("download_now"):
+        sync.enqueue([artist_id], mode="download")
     return jsonify(id=artist_id)
 
 
@@ -329,8 +331,8 @@ def update_artist(artist_id):
     sync.name_avatar(artist_id)                  # the picture's file is named after the artist
     _background(sync.check_card, artist_id)
     previews.soon(artist_id)                     # another source may have newer pictures
-    if body.get("sync_now"):
-        sync.enqueue([artist_id])
+    if body.get("download_now"):
+        sync.enqueue([artist_id], mode="download")
     return jsonify(ok=True)
 
 
@@ -390,9 +392,21 @@ def avatar(artist_id):
 def start_sync():
     body = request.get_json(silent=True) or {}
     ids = [int(body["artist_id"])] if body.get("artist_id") else None
-    # sources: only these of the card (Browse: download what the filter shows).
+    # sources: only these of the card (Browse: download what the filter shows). mode: "download" to
+    # download, "refresh" to only look; none: the card's auto-download decides.
     only = [int(i) for i in body.get("sources") or []] if ids else None
-    return jsonify(added=sync.enqueue(ids, only=only))
+    mode = body.get("mode") if body.get("mode") in ("download", "refresh") else None
+    return jsonify(added=sync.enqueue(ids, only=only, mode=mode))
+
+
+@app.post("/api/artists/<int:artist_id>/auto-download")
+def set_auto_download(artist_id):
+    """The card's switch: a sync that finds new posts downloads them too."""
+    on = 1 if (request.get_json(silent=True) or {}).get("on") else 0
+    with db.connect() as con:
+        if not con.execute("UPDATE artists SET auto_download = ? WHERE id = ?", (on, artist_id)).rowcount:
+            abort(404)
+    return jsonify(ok=True, auto_download=on)
 
 
 @app.post("/api/sync/cancel")
@@ -447,7 +461,8 @@ def _own_page():
 def gallery_open():
     try:
         # No artist: every card (All artists).
-        return jsonify(gallery.open_gallery(int((request.get_json(force=True) or {}).get("artist_id") or 0) or None))
+        body = request.get_json(force=True) or {}
+        return jsonify(gallery.open_gallery(int(body.get("artist_id") or 0) or None, body.get("hidden")))
     except KeyError:
         abort(404)
 
@@ -457,6 +472,15 @@ def gallery_more():
     body = request.get_json(force=True) or {}
     try:
         return jsonify(gallery.more(body.get("gallery") or "", body.get("n") or gallery.PAGE, body.get("off")))
+    except KeyError:
+        return jsonify(error="This gallery was closed; open it again."), 410
+
+
+@app.post("/api/gallery/state")
+def gallery_state():
+    """Which sources are still loading, which are up to date, how many new posts they found."""
+    try:
+        return jsonify(gallery.status((request.get_json(force=True) or {}).get("gallery") or ""))
     except KeyError:
         return jsonify(error="This gallery was closed; open it again."), 410
 
