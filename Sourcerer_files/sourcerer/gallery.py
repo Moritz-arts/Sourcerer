@@ -53,6 +53,7 @@ PAGE = 60                    # items a page asks for at a time
 SLOW = 2.5                   # seconds the first page waits for a source that is not ready, once something can be shown
 SLOW_LATER = 0.8             # ... and every later page: the sources are mid-way, a slow one must not hold the rest up
 FAST = 0.3                   # ... when snapshots show the first page at once
+SEED_PAGES = 3               # pages a seeded source reads looking for a post its snapshot has, before it gives up on it
 SEED_AGE = 7 * 86400         # a snapshot older than this is not shown (its links may have expired: Patreon's thumbnails)
 AHEAD = 24                   # a source with fewer pictures waiting than this is asked for its next page already
 POOL = 6                     # listings running at once, all galleries together
@@ -120,7 +121,8 @@ class _Source:
         self.serial = bool(self.site) and (self.site.KIND in SERIAL or self.login)
         self.asked_at = 0.0                   # when it was last asked: the one asked longest ago goes next
         self.spaced = False                   # All artists: a login site's next card waits (CARD_GAP)
-        self.seeded, self.seed_len, self.known = False, 0, set()      # shown from the snapshot already
+        self.seeded, self.known = False, set()                        # shown from the snapshot already
+        self.met = False                      # the live pages have reached a post the snapshot has
         self.live = {}                        # remote_key -> the site's own copy of a post the snapshot showed
         self.checked = False                  # the site has been asked for its first page
         self.pages = 0
@@ -139,20 +141,20 @@ class _Source:
         return self.future is not None and not self.future.done()
 
     def loading(self):
-        """Still to be asked, or being asked, for its first page -- what the page's spinner shows."""
-        return not self.done and not self.off and (self.running() or not self.checked)
+        """Its first page is still to come -- what the page's spinner shows. (A later page in flight is not.)"""
+        return not self.done and not self.off and not self.checked
 
     def seed(self):
         """The newest posts of the last look, ready to show before any request."""
         snap = snapshots.load(self.row["id"]) if self.site else None
-        if not snap or time.time() - snap[0] > SEED_AGE:
+        if not snap or time.time() - snap.tail > SEED_AGE:
             return
-        for m in snap[1]:
+        for m in snap.items:
             when = _when(m.posted)
             self.last = when if when is not None else self.last
             self.buffer.append((self.last, m))
-        self.known = {m.remote_key for m in snap[1]}
-        self.seed_len, self.seeded = len(snap[1]), True
+        self.known = {m.remote_key for m in snap.items}
+        self.seeded = True
 
     def start_fill(self):
         """The next page, asked for in the background -- not twice at once, and not while another
@@ -216,14 +218,23 @@ class _Source:
             snapshots.save(self.row["id"], page)          # the next opening starts from this
             self.checked = True
         if self.seeded:
-            if self.pages == 1:                    # the links of what the snapshot showed are renewed as they are handed out
-                self.live = {m.remote_key: m for m in page}
-            # What the snapshot showed is not shown twice. The first page's posts that it did not
-            # have, among its newest, are new posts: counted, and shown when the gallery is
-            # opened again; the rest of the page goes on where the snapshot ended.
-            if self.pages == 1:
-                self.new = sum(1 for i, m in enumerate(page) if m.remote_key not in self.known and i < self.seed_len)
-                page = [m for i, m in enumerate(page) if m.remote_key not in self.known and i >= self.seed_len]
+            # The snapshot's posts are shown already; their links are renewed as they are handed out.
+            self.live.update({m.remote_key: m for m in page if m.remote_key in self.known})
+            if not self.met:
+                # The live pages have not reached a post the snapshot has: the posts before the first
+                # one it has are new -- counted, and kept out of the open gallery (they would push
+                # the pictures about); offered when the gallery is opened again. Those after the last
+                # one it has are older than all it showed, and go on where it ended.
+                at = [i for i, m in enumerate(page) if m.remote_key in self.known]
+                if at:
+                    self.met = True
+                    self.new += at[0]
+                    page = [m for m in page[at[-1] + 1:] if m.remote_key not in self.known]
+                elif self.pages <= SEED_PAGES:
+                    self.new += len(page)        # nothing shared yet: the snapshot is behind by more than a page
+                    page = []
+                else:
+                    self.met = True              # never met: the snapshot is no use, show what comes
             else:
                 page = [m for m in page if m.remote_key not in self.known]
         for m in page:
@@ -276,10 +287,11 @@ class _Gallery:
                 s.seed()
 
     def start_checks(self):
-        """Ask the sites that showed their snapshot for their first page now, so the page knows
-        they are up to date (and what is new); the others are asked by the first page."""
+        """Ask the sources that have not been asked for their first page: the ones that showed a
+        snapshot, so the page knows they are up to date (and what is new), and any that could not
+        start before (their site's lane was busy, or another card was asked lately)."""
         for s in sorted(self.sources, key=lambda s: s.asked_at):
-            if s.seeded and not s.checked and not s.off:
+            if not s.checked and not s.done and not s.off:
                 s.start_fill()
 
     def _library(self, pairs):
@@ -534,9 +546,7 @@ def download(gallery_id, number):
     kept = bool(cur["new"] or cur["existing"])         # else the same picture was already there
     if cur["new"]:
         sync.event("done", "Saved from the gallery: %s" % (m.post_url or m.url), artist)
-        snap = snapshots.load(s.row["id"])         # a post of the newest ones: one fewer waits for a download
-        if snap and any(k.remote_key == m.remote_key for k in snap[1]):
-            sync.pending_down(artist["id"], s.row["id"])
+        sync.pending_down(artist["id"], s.row["id"], m.remote_key)    # when a look counted it as waiting: one fewer does
     return g.item(number), kept
 
 

@@ -29,6 +29,7 @@ import datetime
 import glob
 import hashlib
 import io
+import json
 import logging
 import os
 import pathlib
@@ -62,6 +63,8 @@ _queue = []                  # artist ids waiting
 _auto = set()                # of those, queued by the automatic sync
 _only = {}                   # artist id -> ids of the only sources a queued sync asks (Browse: download these)
 _modes = {}                  # artist id -> "refresh" or "download" for a queued job (none: the card's auto-download decides)
+_followup = {}               # artist id -> sources (None: all) of a download asked for while the card's own job could not take it
+PENDING_KEYS = 400           # posts per source whose keys are kept as "waiting for a download"
 REFRESH_ITEMS = 120          # a sync (refresh) reads a source's newest pages until it has this many posts
 REFRESH_PAGES = 4            # ... or this many pages
 _used = {}                   # login site -> (artist id, when its last card was done with it)
@@ -169,6 +172,7 @@ def enqueue(artist_ids=None, auto=False, only=None, mode=None):
         wanted = set(artist_ids)
         ids = [i for i in ids if i in wanted]
     global _worker
+    followed = 0
     with _lock:
         busy = _current["artist_id"] if _current else None
         # A download asked for while the same card is only being looked at follows it.
@@ -185,19 +189,30 @@ def enqueue(artist_ids=None, auto=False, only=None, mode=None):
             else:
                 _modes.pop(i, None)
         # Asked for again while it waits. A download for the whole card covers whatever waits; a
-        # restricted one joins a restricted wait. Nothing else changes a wait: a look is no reason
+        # restricted one joins a restricted download. Nothing else changes a wait: a look is no reason
         # to widen a restricted download (Browse's filter said which sources), and a restricted
         # download must not make a card's sync a download of every source.
         for i in ids:
-            if i in added or i not in _queue:
+            if i in added:
                 continue
-            if not only and mode == "download":
-                _only.pop(i, None)
-                _modes[i] = "download"
-            elif only and i in _only:
-                _only[i] |= set(only)
-                if mode == "download":
+            if i in _queue:
+                if not only and mode == "download":
+                    _only.pop(i, None)
                     _modes[i] = "download"
+                    continue
+                if only and i in _only:
+                    _only[i] |= set(only)
+                    if mode == "download":
+                        _modes[i] = "download"
+                    continue
+                if mode == "download" and _modes.get(i) == "download" and i not in _only:
+                    continue                           # a download of the whole card waits: it covers this
+            if mode == "download":
+                # A download the wait or the running job cannot take (a look, a restricted download of
+                # other sources): it comes after them -- asked for, not lost.
+                followed += 1
+                _followup[i] = None if (not only or (i in _followup and _followup[i] is None)) else \
+                    (_followup.get(i) or set()) | set(only)
         if auto:
             _auto.update(added)
         else:                              # somebody asked: not the careful automatic kind any more
@@ -207,7 +222,7 @@ def enqueue(artist_ids=None, auto=False, only=None, mode=None):
         if added and _worker is None:
             _worker = threading.Thread(target=_work, daemon=True, name="sync")
             _worker.start()
-    return len(added)
+    return len(added) + followed
 
 
 def cancel(artist_id):
@@ -217,8 +232,10 @@ def cancel(artist_id):
             _auto.discard(artist_id)
             _only.pop(artist_id, None)
             _modes.pop(artist_id, None)
+            _followup.pop(artist_id, None)
             return True
         if _current and _current["artist_id"] == artist_id:
+            _followup.pop(artist_id, None)
             _cancel.set()
             return True
     return False
@@ -246,6 +263,9 @@ def _work():
         finally:
             with _lock:
                 _current = None
+                later = _followup.pop(artist_id, False)
+        if later is not False and not _cancel.is_set():      # a download asked for meanwhile follows the job
+            enqueue([artist_id], only=later, mode="download")
 
 
 def scheduler():
@@ -653,6 +673,9 @@ def _sync_artist(artist_id, auto=False, only=None, mode=None):
         cur.update(phase="download", total=len(todo))
     failed_sources = set()
     remaining = collections.Counter(src["id"] for src, _site, _m in todo)   # per source: still to download
+    unsettled = collections.defaultdict(set)                                  # ... and which
+    for src, _site, m in todo:
+        unsettled[src["id"]].add(m.remote_key)
     net.configure(per_host=db.setting_int("per_host", 1, 8), pace_ms=db.setting_int("pace_ms", 0, 5000))
 
     def one(job):
@@ -672,6 +695,7 @@ def _sync_artist(artist_id, auto=False, only=None, mode=None):
             cur["done"] += 1
             if settled:
                 remaining[src["id"]] -= 1
+                unsettled[src["id"]].discard(media.remote_key)
 
     with ThreadPoolExecutor(max_workers=db.setting_int("parallel", 1, 16)) as pool:
         list(pool.map(one, todo))
@@ -695,7 +719,7 @@ def _sync_artist(artist_id, auto=False, only=None, mode=None):
                     (_now(), cur["new"], cur["failed"], cur["new"] > 0, _now(), artist_id))
         # What is left to download of each source that was read: what failed or was cut off. A source
         # that was not read (resting, an error, skipped, or outside this ask) keeps its count.
-        _set_pending(con, artist_id, {sid: max(0, remaining[sid]) for sid in looked})
+        _set_pending(con, artist_id, {sid: max(0, remaining[sid]) for sid in looked}, unsettled)
     event("cancelled" if cancelled else ("done" if not cur["failed"] else "warn"),
            "Cancelled" if cancelled else "Finished", artist,
            new=cur["new"], duplicates=cur["duplicates"], failed=cur["failed"], existing=cur["existing"])
@@ -725,10 +749,13 @@ def _glance(src, site, known, cur):
     return fresh
 
 
-def _set_pending(con, artist_id, counts):
-    """counts: source id -> how many of its newest posts are not in the library. The card's number
-    is the sum over its sources, so one that was not read this time keeps what it had."""
-    con.executemany("UPDATE sources SET pending = ? WHERE id = ?", [(n, sid) for sid, n in counts.items()])
+def _set_pending(con, artist_id, counts, keys=None):
+    """counts: source id -> how many of its newest posts are not in the library; keys: source id -> which
+    (the first PENDING_KEYS). The card's number is the sum over its sources, so one that was not read
+    this time keeps what it had."""
+    keys = keys or {}
+    con.executemany("UPDATE sources SET pending = ?, pending_keys = ? WHERE id = ?",
+                    [(n, json.dumps(sorted(keys.get(sid, ()))[:PENDING_KEYS]), sid) for sid, n in counts.items()])
     con.execute("UPDATE artists SET pending = (SELECT COALESCE(SUM(pending), 0) FROM sources WHERE artist_id = ?) "
                 "WHERE id = ?", (artist_id, artist_id))
 
@@ -745,7 +772,10 @@ def _looked(artist, todo, cur, logins, looked):
     with db.connect() as con:
         con.execute("UPDATE artists SET last_sync = ? WHERE id = ?", (_now(), artist_id))
         if not cancelled:
-            _set_pending(con, artist_id, {sid: found[sid] for sid in looked})
+            waits = collections.defaultdict(set)
+            for src, _site, m in todo:
+                waits[src["id"]].add(m.remote_key)
+            _set_pending(con, artist_id, {sid: found[sid] for sid in looked}, waits)
         waiting = con.execute("SELECT pending FROM artists WHERE id = ?", (artist_id,)).fetchone()[0]
     if looked:
         from . import previews                 # here: previews imports this module
@@ -759,10 +789,19 @@ def _looked(artist, todo, cur, logins, looked):
               if waiting else "Up to date", artist)
 
 
-def pending_down(artist_id, source_id):
-    """A post of this source was saved from Browse: one fewer waits for a download."""
+def pending_down(artist_id, source_id, key):
+    """A post of this source was saved from Browse: if the last look counted it as waiting, one fewer does."""
     with db.connect() as con:
-        con.execute("UPDATE sources SET pending = MAX(pending - 1, 0) WHERE id = ?", (source_id,))
+        row = con.execute("SELECT pending_keys FROM sources WHERE id = ?", (source_id,)).fetchone()
+        try:
+            keys = json.loads(row[0] or "[]") if row else []
+        except ValueError:
+            keys = []
+        if key not in keys:
+            return
+        keys.remove(key)
+        con.execute("UPDATE sources SET pending = MAX(pending - 1, 0), pending_keys = ? WHERE id = ?",
+                    (json.dumps(keys), source_id))
         _set_pending(con, artist_id, {})
 
 

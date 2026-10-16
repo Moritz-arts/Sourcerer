@@ -81,6 +81,9 @@ CREATE TABLE IF NOT EXISTS previews (
 CREATE TABLE IF NOT EXISTS snapshots (
     source_id   INTEGER PRIMARY KEY REFERENCES sources(id) ON DELETE CASCADE,
     fetched     TEXT NOT NULL,
+    -- when the oldest posts in it were last seen on the site (older than fetched once a merge carried
+    -- posts over): their links expire
+    tail        TEXT,
     data        BLOB NOT NULL
 );
 CREATE TABLE IF NOT EXISTS settings (
@@ -111,11 +114,13 @@ COLUMNS = {
         "auto_download": "INTEGER NOT NULL DEFAULT 0",
         "pending": "INTEGER NOT NULL DEFAULT 0",   # new posts the last look found that are not downloaded
     },
+    "snapshots": {"tail": "TEXT"},
     "sources": {
         # 'ok', 'warn' (works with a catch: login, bot check, slow down) or 'error'
         "last_level": "TEXT",
         "walked": "TEXT",                 # when a sync last went through all of it
         "pending": "INTEGER NOT NULL DEFAULT 0",   # its newest posts a look found that are not in the library
+        "pending_keys": "TEXT",            # JSON: the remote_keys of those (at most sync.PENDING_KEYS), so a download from Browse can tell
     },
     "files": {
         "phash": "TEXT",                  # imaging fingerprint; NULL for video

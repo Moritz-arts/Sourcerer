@@ -18,12 +18,15 @@ import io
 import logging
 import pickle
 import sqlite3
+import time
+import typing
 
 from . import db
 from .sources import Media
 
 log = logging.getLogger(__name__)
 KEEP = 60                    # posts kept per source
+TAIL_AGE = 7 * 86400         # posts carried over a merge are dropped when they were last seen longer ago than this
 SHAPE = ",".join(f.name for f in dataclasses.fields(Media))
 
 
@@ -40,30 +43,41 @@ class _Reader(pickle.Unpickler):
         raise pickle.UnpicklingError("%s.%s is not kept in a snapshot" % (module, name))
 
 
+class Snap(typing.NamedTuple):
+    fetched: float               # when the newest posts were seen (Unix time)
+    items: list                  # [Media], newest first
+    tail: float                  # when the oldest ones were: a merge carries posts over without seeing them again
+
+
 def save(source_id, items, merge=True):
     """Keep these (newest first) as the source's snapshot; nothing found keeps what was there.
     merge: a look at one short page does not throw away what an earlier, longer one kept -- the
-    older posts of the snapshot that lie beyond the page follow it, up to KEEP. A page that shares
+    older posts of the snapshot that lie beyond the page follow it, up to KEEP, for as long as they
+    are younger than TAIL_AGE (their links expire, and nothing sees them again). A page that shares
     no post with the snapshot replaces it (posts in between may be missing: no gap is kept), and a
     post of the snapshot that the page skips over was deleted on the site and goes."""
     items = list(items)
     if not items:
         return
     try:
+        now = time.time()
+        tail = now
         if merge:
             old = load(source_id)
             if old:
                 have = {m.remote_key for m in items}
-                deepest = max((i for i, m in enumerate(old[1]) if m.remote_key in have), default=None)
-                if deepest is not None:
-                    items += [m for m in old[1][deepest + 1:] if m.remote_key not in have]
+                deepest = max((i for i, m in enumerate(old.items) if m.remote_key in have), default=None)
+                carried = [m for m in old.items[deepest + 1:] if m.remote_key not in have] if deepest is not None else []
+                if carried and now - old.tail <= TAIL_AGE:
+                    items += carried
+                    tail = old.tail
         items = items[:KEEP]
         blob = pickle.dumps((SHAPE, items), protocol=4)
-        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        stamp = lambda t: datetime.datetime.fromtimestamp(t, datetime.timezone.utc).isoformat()
         with db.connect() as con:
-            con.execute("INSERT INTO snapshots (source_id, fetched, data) VALUES (?, ?, ?) "
-                        "ON CONFLICT (source_id) DO UPDATE SET fetched = excluded.fetched, data = excluded.data",
-                        (source_id, now, blob))
+            con.execute("INSERT INTO snapshots (source_id, fetched, tail, data) VALUES (?, ?, ?, ?) "
+                        "ON CONFLICT (source_id) DO UPDATE SET fetched = excluded.fetched, tail = excluded.tail, "
+                        "data = excluded.data", (source_id, stamp(now), stamp(tail), blob))
     except sqlite3.IntegrityError:               # the source was removed meanwhile
         pass
     except Exception as e:                       # a Media with something that cannot be kept, a busy database:
@@ -71,16 +85,18 @@ def save(source_id, items, merge=True):
 
 
 def load(source_id):
-    """(when it was made as a Unix time, [Media newest first]) or None."""
+    """A Snap (when it was made as a Unix time, [Media newest first], when its oldest posts were seen) or None."""
     try:
         with db.connect() as con:
-            row = con.execute("SELECT fetched, data FROM snapshots WHERE source_id = ?", (source_id,)).fetchone()
+            row = con.execute("SELECT fetched, tail, data FROM snapshots WHERE source_id = ?", (source_id,)).fetchone()
         if not row:
             return None
         shape, items = _Reader(io.BytesIO(row["data"])).load()
         if shape != SHAPE:
             return None
-        return datetime.datetime.fromisoformat(row["fetched"]).timestamp(), items
+        fetched = datetime.datetime.fromisoformat(row["fetched"]).timestamp()
+        tail = datetime.datetime.fromisoformat(row["tail"]).timestamp() if row["tail"] else fetched
+        return Snap(fetched, items, min(tail, fetched))
     except Exception as e:
         log.info("snapshot of source %s unreadable: %s", source_id, e)
         return None
