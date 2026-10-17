@@ -1,10 +1,11 @@
 """Paths, the version and the settings' defaults. Everything imports this; it imports nothing of ours."""
+import os
 import pathlib
 import sys
 
-# True in the standalone Windows build (PyInstaller): Python is inside Sourcerer.exe, there is no
-# venv, no launch.py and no pip. The bundle's folder is named Sourcerer_files too, so ROOT, USERDATA
-# and STATIC mean the same there as in the repository.
+# True in the standalone builds (PyInstaller: Sourcerer.exe, the macOS app, the Linux binary): Python
+# is inside, there is no venv, no launch.py and no pip. On Windows and in the Linux tar.gz the bundle's
+# folder is named Sourcerer_files too, so ROOT, USERDATA and STATIC mean the same there as in the repository.
 FROZEN = bool(getattr(sys, "frozen", False))
 ROOT = pathlib.Path(getattr(sys, "_MEIPASS", "") or pathlib.Path(__file__).resolve().parent.parent)  # Sourcerer_files/
 INSTALL = ROOT.parent                                           # the folder with the launchers (or Sourcerer.exe)
@@ -13,7 +14,16 @@ STATIC = ROOT / "static"
 REPO = "Moritz-arts/Sourcerer"
 
 # Machine state: never shipped, never replaced by an update.
-USERDATA = ROOT / "Userdata"
+# Beside the program wherever that is writable and ours (the repository, Windows, the Linux tar.gz).
+# Not inside a macOS .app (signed, and read-only when opened from the disk image) nor an AppImage
+# (a read-only mount): there it lives in the user's own data folder.
+APPIMAGE = os.environ.get("APPIMAGE") if sys.platform.startswith("linux") else None
+_HOME_DATA = None
+if FROZEN and sys.platform == "darwin":
+    _HOME_DATA = pathlib.Path.home() / "Library" / "Application Support" / "Sourcerer"
+elif FROZEN and APPIMAGE:
+    _HOME_DATA = pathlib.Path(os.environ.get("XDG_DATA_HOME") or pathlib.Path.home() / ".local" / "share") / "Sourcerer"
+USERDATA = (_HOME_DATA / "Userdata") if _HOME_DATA else ROOT / "Userdata"
 DB_PATH = USERDATA / "sourcerer.db"
 LOG_DIR = USERDATA / "Logs"
 AVATARS = USERDATA / "Avatars"
@@ -22,8 +32,9 @@ PREVIEWS = USERDATA / "Previews"     # the pictures cards show before anything i
 # across, so the install folder never shows a stray staging folder.
 UPDATE_DIR = USERDATA / "_update"
 # Where new files go until a folder is chosen in Settings -- inside the
-# installation, so nothing is written elsewhere without being asked.
-DEFAULT_LIBRARY = USERDATA / "Library"
+# installation, so nothing is written elsewhere without being asked. Where Userdata is out
+# of sight (macOS' Library, a hidden .local) the pictures go to a folder the user can find.
+DEFAULT_LIBRARY = (pathlib.Path.home() / "Pictures" / "Sourcerer") if _HOME_DATA else USERDATA / "Library"
 
 # The crawler convention (as Googlebot's): "Mozilla/5.0 (compatible; ...)" names
 # Sourcerer and where it comes from, and passes the CDNs that challenge any

@@ -78,10 +78,12 @@ Sourcerer/                        <- what Sourcerer.zip unpacks to; move it free
                                     another library folder is chosen in Settings
 ```
 
-The standalone Windows download (Sourcerer-Windows.zip, built by CI, not in the repository) is
-`Sourcerer.exe` + `Sourcerer_files/` -- the same folder name, with `static/`, `VERSION` and a
+The standalone downloads (built by CI, not in the repository: Sourcerer-Setup.exe and
+Sourcerer-Windows.zip, the macOS .dmg, the Linux AppImage and tar.gz) hold the program as
+`Sourcerer(.exe)` + `Sourcerer_files/` -- the same folder name, with `static/`, `VERSION` and a
 `Userdata/` made on first start inside, and Python, the packages and gallery-dl compiled in
-(no `launch.py`, no `venv/`, no `sourcerer/` sources). See CLAUDE.md, "Sourcerer.exe".
+(no `launch.py`, no `venv/`, no `sourcerer/` sources). The macOS app and the AppImage are read-only
+places, so there Userdata is in the user's data folder. See CLAUDE.md, "The standalone downloads".
 
 Only in the repository, never in the ZIP (`export-ignore` in `.gitattributes`):
 
@@ -92,10 +94,12 @@ Only in the repository, never in the ZIP (`export-ignore` in `.gitattributes`):
 │   ├─ workflows/version-bump.yml raises the version on every push to main,
 │   │                               and puts that build on the `beta` prerelease
 │   ├─ workflows/release-zip.yml  attaches Sourcerer.zip to a published release
-│   ├─ workflows/build-exe.yml    builds Sourcerer-Windows.zip (PyInstaller, Windows runner),
-│   │                               tests it, attaches it to a release / `beta`; also on PRs
-│   ├─ exe/build.py               the PyInstaller build; exe/smoke.py starts the result like a
-│   │                               user; exe/Sourcerer.ico is the logo as the exe's icon
+│   ├─ workflows/build-exe.yml    builds the standalone downloads on a Windows, a Linux and
+│   │                               two macOS runners, tests them, attaches them to a release /
+│   │                               `beta`; also on pull requests
+│   ├─ exe/build.py               the PyInstaller build and packaging; exe/smoke.py starts each
+│   │                               result like a user; exe/Sourcerer.iss is the Windows installer;
+│   │                               exe/Sourcerer.ico / .icns / .png are the logo as icons
 │   ├─ bump_version.py            rewrites the number everywhere it is written
 │   └─ changelog_entry.py         turns commit subjects into the changelog entry
 ├─ .gitattributes

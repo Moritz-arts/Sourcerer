@@ -48,29 +48,38 @@ goes under *Traps* below; a new folder goes into the folder map; a finished
 milestone or a decision goes into the roadmap. If it is only in a chat, it is
 lost.
 
-## Sourcerer.exe — the standalone Windows build
+## The standalone downloads — Sourcerer-Setup.exe, .dmg, .AppImage
 
-A second download beside Sourcerer.zip, for people without Python
-(`Sourcerer-Windows.zip`): PyInstaller, built by `.github/workflows/build-exe.yml` on a
-Windows runner (`.github/exe/build.py`; `.github/exe/smoke.py` starts the result like a user
-before anything is attached) -- on a release, on each new version for `beta`, and as a test on
-pull requests. It is **not** a replacement: the repository stays the program, and Sourcerer.zip
-(launchers, system Python, in-app updater) stays the main download. Nothing exe-only is added to
-the root; the build files live in `.github/exe/`, outside every archive.
+Beside Sourcerer.zip, for people without Python (Pikura's way: an installer or app per system, plus a
+portable one): PyInstaller, one runner per system, `.github/workflows/build-exe.yml` +
+`.github/exe/build.py`. Output (`build-exe/assets/`): **Windows** `Sourcerer-Setup.exe` (Inno Setup,
+`Sourcerer.iss`, per user, no admin) and `Sourcerer-Windows.zip`; **macOS** `Sourcerer-macOS-arm64.dmg` /
+`-x86_64.dmg`; **Linux** `Sourcerer-x86_64.AppImage` and `Sourcerer-Linux.tar.gz`. They are attached on a
+release, on each new version for `beta` (a job of `version-bump.yml` after Sourcerer.zip; it first deletes
+the previous version's files), and built and tested on pull requests. `.github/exe/smoke.py` starts every
+file like a user *before* it is attached -- a failing check keeps that system's files off the release
+(`fail-fast: false`: the other systems still publish). It is **not** a replacement: the repository stays the
+program, and Sourcerer.zip (launchers, system Python, in-app updater) the main download. Nothing exe-only is
+added to the root; the build files live in `.github/exe/`, outside every archive.
 
-How the code knows (`config.FROZEN`): the bundle is `Sourcerer.exe` + `Sourcerer_files/`
-(PyInstaller's `--contents-directory`), so `config.ROOT` (= `sys._MEIPASS`), `STATIC`,
-`VERSION` and `Userdata/` keep their meaning, and Userdata moves between the two downloads.
-Differences, all behind `config.FROZEN`: no launch.py, so `desktop.main` finds a running
-Sourcerer itself and `SOURCERER_DETACHED` is set in `app.py`; no venv, so gallery-dl is the exe
-started with `--gallery-dl` (dispatched first thing in `app.py`) and is upgraded only by a new
-build (`_gdl.upgrade` refuses, the weekly upgrade is skipped); no helper, so **updates are by
-hand** (`updater.check` returns `manual`, the page shows *Download*, install/reinstall refuse,
-the *venv* and *reinstall* repairs and gallery-dl's row are hidden) and *Restart* starts the
-exe with `--restart`, which waits until the old one stopped answering. The look for the exe's
-asset is `updater.ASSET`.
+How the code knows (`config.FROZEN`): Windows and the Linux tar.gz are the program + ONE folder,
+`Sourcerer_files/` (`--contents-directory`), so `config.ROOT` (= `sys._MEIPASS`), `STATIC`, `VERSION` and
+`Userdata/` keep their meaning there. **A macOS .app and an AppImage are read-only places** (signed
+bundle, squashfs mount): `config.USERDATA` is then `~/Library/Application Support/Sourcerer/Userdata` /
+`$XDG_DATA_HOME|~/.local/share/Sourcerer/Userdata` (the AppImage sets `APPIMAGE`), and the default library
+`~/Pictures/Sourcerer`. Further differences, all behind `config.FROZEN`: no launch.py, so `desktop.main`
+finds a running Sourcerer itself and `SOURCERER_DETACHED` is set in `app.py`; no venv, so gallery-dl is the
+program started with `--gallery-dl` (dispatched first thing in `app.py`) and is upgraded only by a new build
+(`_gdl.upgrade` refuses, the weekly upgrade is skipped); no helper, so **updates are by hand**
+(`updater.check` returns `manual`, the page shows *Download* for `updater.ASSET` of this system, install /
+reinstall refuse, the *venv* and *reinstall* repairs and gallery-dl's row are hidden) and *Restart* starts
+the program with `--restart`, which waits until the old one stopped answering (an AppImage restarts through
+`$APPIMAGE`, its inner binary dies with the mount).
 
 Traps:
+- **A publishing gate must not depend on a site we do not control.** The first smoke test failed the whole
+  `beta` build on GitHub's API rationing a shared runner address (502 from our own endpoint) and no file
+  was ever attached. Only a TLS failure ("cannot connect") fails the update check now.
 - **gallery-dl loads its extractors by name**, which PyInstaller's scan does not see:
   `--collect-submodules gallery_dl` and `--copy-metadata gallery-dl` (its `version()`) are in
   `build.py`; `smoke.py` runs `--list-extractors` to catch a missing module.
@@ -78,13 +87,18 @@ Traps:
   pywebview's .NET bridge on Windows); a source start never shows the gap, only `smoke.py`.
 - **`--noconsole` means `sys.stdout is None`**: `app.py` points both at `Userdata/Logs/console.log`
   first. The `--gallery-dl` run has real pipes (`_gdl._start`) and must keep them.
-- **Windows warns about, and some scanners remove, an unsigned PyInstaller exe.** The README says
-  so and points to Sourcerer.zip. Signing is a decision for the user.
-- **The in-app updater is the missing piece**: the swap helper is a Python script run by the
-  system's Python, which an exe user lacks. It needs a different helper (PowerShell or a second
-  small exe) -- do not copy HELPER blindly: it also deletes by name and keeps `venv/`.
-- **Only the Windows build is exercised in CI**; the Linux build used while developing proves
-  paths and the frozen start, not WebView2.
+- **Not signed, not notarised.** Windows SmartScreen and macOS Gatekeeper warn once (the README says
+  how to get past it), some scanners remove PyInstaller programs. Signing is a decision for the user.
+- **Linux has no app window**: pywebview needs GTK or Qt from the system, which a bundle cannot carry;
+  it falls back to the browser (`SOURCERER_DETACHED`: the page's Quit, or 15 minutes without a page).
+- **A smoke test that stops an AppImage must kill its process group**: the runtime waits for the program
+  as a child, so stopping only the runtime leaves the program and its port behind.
+- **The in-app updater is the missing piece**: the swap helper is a Python script run by the system's
+  Python, which these users lack. It needs a different helper (PowerShell / a second small program) -- do
+  not copy HELPER blindly: it also deletes by name and keeps `venv/`.
+- **Only what CI runs is tested**: Windows, Linux and macOS (both architectures) start the files; nobody
+  has looked at them on a real desktop yet. appimagetool is downloaded from its `continuous` release at
+  build time -- pin it if that ever bites.
 
 ## Layout
 

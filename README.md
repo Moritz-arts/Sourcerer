@@ -8,6 +8,48 @@ A portable app for Windows, Linux and macOS that keeps per-artist media collecti
 
 ## Install
 
+Two ways. **Without Python** (an installer or app for your system) is the easy one;
+**with Python** is the portable folder that updates itself.
+
+### Without Python — installer, app, AppImage
+
+Python is inside; nothing else to install. Every file is in
+[Releases](https://github.com/Moritz-arts/Sourcerer/releases) — until the first
+release is published, the **Beta** one (marked *Pre-release*, named `beta`) is the one to take.
+
+| | Installer | Portable |
+|---|---|---|
+| **Windows** | [Sourcerer-Setup.exe](https://github.com/Moritz-arts/Sourcerer/releases/download/beta/Sourcerer-Setup.exe) | [Sourcerer-Windows.zip](https://github.com/Moritz-arts/Sourcerer/releases/download/beta/Sourcerer-Windows.zip) — unpack, run `Sourcerer.exe` |
+| **macOS** (Apple silicon) | [Sourcerer-macOS-arm64.dmg](https://github.com/Moritz-arts/Sourcerer/releases/download/beta/Sourcerer-macOS-arm64.dmg) | — |
+| **macOS** (Intel) | [Sourcerer-macOS-x86_64.dmg](https://github.com/Moritz-arts/Sourcerer/releases/download/beta/Sourcerer-macOS-x86_64.dmg) | — |
+| **Linux** | [Sourcerer-x86_64.AppImage](https://github.com/Moritz-arts/Sourcerer/releases/download/beta/Sourcerer-x86_64.AppImage) | [Sourcerer-Linux.tar.gz](https://github.com/Moritz-arts/Sourcerer/releases/download/beta/Sourcerer-Linux.tar.gz) |
+
+These links are the **Beta** (every change, a few minutes after it is merged; untested). For
+the **Stable** ones, replace `download/beta` with `latest/download` once a release exists.
+
+- **Windows:** run *Sourcerer-Setup.exe* (it installs for you alone, no administrator
+  needed; the Start menu has Sourcerer). Windows says *Windows protected your PC* the first
+  time because the file is not signed: **More info › Run anyway**.
+- **macOS:** open the disk image, drag **Sourcerer** onto *Applications*. The app is not
+  notarised: the first time, Control-click it › **Open** › **Open** (macOS 15: start it once,
+  then **System Settings › Privacy & Security › Open Anyway**).
+- **Linux:** `chmod +x Sourcerer-x86_64.AppImage`, then double-click or run it (needs
+  FUSE 2: `sudo apt install libfuse2`, or start it with `--appimage-extract-and-run`). The
+  page opens in your browser — there is no app window on Linux yet, so quit with the
+  **Quit** button. The tar.gz is the same without the AppImage: unpack, run `Sourcerer/Sourcerer`.
+
+The window is Microsoft's WebView2 on Windows (in Windows 11 and current Windows 10; without
+it Sourcerer opens in your browser) and WebKit on macOS. Some virus scanners distrust every
+program built this way; if one removes the file, use the version with Python below.
+
+Where your data lives (cards, logins, settings, the default library): Windows — in the
+`Sourcerer_files/Userdata` folder of the program; macOS — `~/Library/Application Support/Sourcerer`
+(downloads go to `~/Pictures/Sourcerer` until you choose a folder); the Linux AppImage —
+`~/.local/share/Sourcerer`. **Updates are by hand** for now: Settings › Updates tells you when a
+version is out; install the new one over the old (close Sourcerer first) and your data stays.
+
+### With Python — Sourcerer.zip
+
 1. Download **Sourcerer.zip** and unpack it (Windows: right-click › **Extract
    All**). You get one folder, `Sourcerer`, with everything in it — move it
    wherever you like.
@@ -31,29 +73,8 @@ The first start sets up a Python environment inside `Sourcerer_files/`. Nothing
 is written outside the folder.
 
 Needs Python 3.10 or newer — on Windows from [python.org](https://www.python.org/downloads/),
-on macOS from python.org or Homebrew (`brew install python`).
-
-### Windows without Python: Sourcerer.exe
-
-**Sourcerer-Windows.zip** has Python inside: unpack it and double-click
-`Sourcerer.exe` — nothing to install, no console.
-
-| | |
-|---|---|
-| **Stable** | [Sourcerer-Windows.zip from the latest release](https://github.com/Moritz-arts/Sourcerer/releases/latest/download/Sourcerer-Windows.zip) |
-| **Beta** | [Sourcerer-Windows.zip, newest build](https://github.com/Moritz-arts/Sourcerer/releases/download/beta/Sourcerer-Windows.zip) — added a few minutes after each Sourcerer.zip |
-
-Windows says *Windows protected your PC* the first time (the file is not
-signed): **More info › Run anyway**. Some virus scanners distrust every program
-built this way; if one removes the file, use Sourcerer.zip instead.
-
-The window needs Microsoft's WebView2, which Windows 11 and current Windows 10
-already have; without it Sourcerer opens in your browser. Your data is in
-`Sourcerer_files/Userdata`, as with the other download — copy that folder
-between the two to move over. **Updates are by hand** for now: Settings ›
-Updates tells you when a version is out; close Sourcerer and copy `Sourcerer.exe`
-and `Sourcerer_files` from the new zip over the old ones (*Replace*) — `Userdata`
-stays.
+on macOS from python.org or Homebrew (`brew install python`). This version updates itself
+(Settings › Updates) and, on Linux, shows an app window when GTK or Qt is installed.
 
 **If an update does not go through** (Sourcerer closes and comes back as
 the old version): close every Explorer/Finder window showing a folder inside

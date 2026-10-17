@@ -1,20 +1,27 @@
-"""Start the built Sourcerer-Windows.zip the way a user would and check that it works.
+"""Start a built download the way a user would and check that it works.
 
-    python .github/exe/smoke.py Sourcerer-Windows.zip [--window]
+    python .github/exe/smoke.py <asset> [--window]
 
-What a source start never needed and the frozen one can get wrong: the static files
-and VERSION in the bundle, TLS certificates (the update check asks GitHub), gallery-dl
-as a second run of the exe (all its extractors present), the second start finding the
-first. --window also starts it as a user does and reports whether the app window came
-up -- reported, not enforced: a CI runner is no desktop.
+<asset> is what build.py made: Sourcerer-Windows.zip, Sourcerer-Setup.exe (installed silently),
+Sourcerer-Linux.tar.gz, Sourcerer-x86_64.AppImage or Sourcerer-macOS-<arch>.dmg.
+
+What a source start never needed and the frozen one can get wrong: the static files and VERSION
+in the bundle, where Userdata lands, TLS certificates (the update check asks GitHub), gallery-dl
+as a second run of the program (all its extractors present), the second start finding the first.
+--window also starts it as a user does and reports whether the app window came up -- reported,
+not enforced: a CI runner is no desktop.
 """
 import json
 import os
 import pathlib
+import shutil
+import signal
 import subprocess
 import sys
+import tarfile
 import tempfile
 import time
+import urllib.error
 import urllib.request
 import zipfile
 
@@ -45,61 +52,104 @@ def wait_for(port, seconds=90):
 
 
 def stop(proc):
-    proc.terminate()
+    # An AppImage's runtime starts the program as a child and waits for it: stopping only the
+    # runtime leaves the program (and its port) behind. POSIX starts are a process group of their own.
+    if os.name == "nt":
+        proc.terminate()
+    else:
+        os.killpg(proc.pid, signal.SIGTERM)
     try:
         proc.wait(timeout=20)
     except subprocess.TimeoutExpired:
         proc.kill()
 
 
-def start(exe, work, *args):
-    return subprocess.Popen([str(exe)] + list(args), cwd=str(work), stdin=subprocess.DEVNULL,
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+def unpack(asset, work, home):
+    """(program, where Userdata must land, environment) for an asset, unpacked or installed into work."""
+    env = dict(os.environ, HOME=str(home))
+    env.pop("XDG_DATA_HOME", None)
+    name = asset.name
+    if name.endswith(".zip"):
+        with zipfile.ZipFile(asset) as z:
+            z.extractall(work / "app")
+        exe = work / "app" / ("Sourcerer.exe" if os.name == "nt" else "Sourcerer")
+        return exe, work / "app" / "Sourcerer_files" / "Userdata", env
+    if name.endswith(".tar.gz"):
+        with tarfile.open(asset) as t:
+            t.extractall(work / "app")
+        return work / "app" / "Sourcerer" / "Sourcerer", work / "app" / "Sourcerer" / "Sourcerer_files" / "Userdata", env
+    if name.endswith(".AppImage"):
+        exe = work / name
+        shutil.copy(asset, exe)
+        exe.chmod(0o755)
+        env["APPIMAGE_EXTRACT_AND_RUN"] = "1"           # no FUSE on a CI machine
+        return exe, home / ".local" / "share" / "Sourcerer" / "Userdata", env
+    if name.endswith(".dmg"):
+        mount = work / "mnt"
+        mount.mkdir()
+        subprocess.check_call(["hdiutil", "attach", "-nobrowse", "-readonly", "-mountpoint", str(mount), str(asset)])
+        try:
+            shutil.copytree(mount / "Sourcerer.app", work / "app" / "Sourcerer.app", symlinks=True)
+        finally:
+            subprocess.call(["hdiutil", "detach", "-force", str(mount)])
+        return (work / "app" / "Sourcerer.app" / "Contents" / "MacOS" / "Sourcerer",
+                home / "Library" / "Application Support" / "Sourcerer" / "Userdata", env)
+    if name.endswith("Setup.exe"):
+        target = work / "app"
+        subprocess.check_call([str(asset), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER",
+                               "/NOICONS", "/DIR=" + str(target), "/LOG=" + str(work / "setup.log")])
+        return target / "Sourcerer.exe", target / "Sourcerer_files" / "Userdata", env
+    sys.exit("don't know how to test " + name)
 
 
 def main():
+    asset = pathlib.Path(sys.argv[1]).resolve()
     work = pathlib.Path(tempfile.mkdtemp(prefix="sourcerer-smoke-"))
-    with zipfile.ZipFile(sys.argv[1]) as z:
-        z.extractall(work)
-    exe = work / ("Sourcerer.exe" if os.name == "nt" else "Sourcerer")
-    if os.name != "nt":
-        exe.chmod(0o755)
-    logs = work / "Sourcerer_files" / "Userdata" / "Logs"
+    home = work / "home"
+    home.mkdir()
+    exe, data, env = unpack(asset, work, home)
+    check(exe.is_file(), "%s unpacks to a program" % asset.name, str(exe))
+    logs = data / "Logs"
 
-    # gallery-dl: the exe run again with --gallery-dl, output through pipes as _gdl reads it.
-    done = subprocess.run([str(exe), "--gallery-dl", "--version"], capture_output=True, timeout=120)
+    def start(*args):
+        return subprocess.Popen([str(exe)] + list(args), cwd=str(work), env=env, stdin=subprocess.DEVNULL,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                start_new_session=os.name != "nt")
+
+    # gallery-dl: the program run again with --gallery-dl, output through pipes as _gdl reads it.
+    done = subprocess.run([str(exe), "--gallery-dl", "--version"], capture_output=True, timeout=180, env=env)
     check(done.returncode == 0 and done.stdout.strip(), "gallery-dl --version", done.stdout.decode().strip())
-    done = subprocess.run([str(exe), "--gallery-dl", "--list-extractors"], capture_output=True, timeout=300)
+    done = subprocess.run([str(exe), "--gallery-dl", "--list-extractors"], capture_output=True, timeout=300, env=env)
     check(done.returncode == 0 and b"Twitter" in done.stdout and len(done.stdout.splitlines()) > 1000,
           "gallery-dl knows its extractors (X among them)", "%d lines" % len(done.stdout.splitlines()))
 
-    app = start(exe, work, "--no-open", "--port", str(PORT))
+    app = start("--no-open", "--port", str(PORT))
     try:
         ping = wait_for(PORT)
         check(bool(ping), "starts and answers", str(ping))
         if ping:
-            version = (work / "Sourcerer_files" / "VERSION").read_text().strip()
-            check(ping["version"] == version, "version is the bundled VERSION", ping["version"])
             status, body = get("/")
             check(status == 200 and b"Sourcerer" in body, "page is served")
             check(get("/static/app.js")[0] == 200 and get("/static/logo.svg")[0] == 200, "static files are served")
             info = json.loads(get("/api/info")[1])
             check(info["frozen"] and info["gallery_dl"], "info says frozen, gallery-dl present", info["gallery_dl"])
-            check((work / "Sourcerer_files" / "Userdata" / "sourcerer.db").is_file(),
-                  "Userdata is inside Sourcerer_files")
+            check(ping["version"] == info["version"] and (data / "sourcerer.db").is_file(),
+                  "version %s, Userdata where it belongs" % info["version"], info["userdata"])
             try:
                 upd = json.loads(get("/api/update/check?channel=stable")[1])
-                check(upd.get("manual") is True and "error" not in upd, "update check reaches GitHub (TLS)",
-                      str(upd.get("version")))
-            except OSError as e:
-                check(False, "update check reaches GitHub (TLS)", str(e))
-            second = subprocess.run([str(exe), "--no-open"], cwd=str(work), timeout=60)
+                check(upd.get("manual") is True, "update check reaches GitHub (TLS)", str(upd.get("version")))
+            except urllib.error.HTTPError as e:
+                # GitHub's API rations an address, and a runner's is shared: "refused access (403)" is the
+                # site talking, so TLS works. "cannot connect" is what a missing certificate looks like.
+                said = json.loads(e.read().decode("utf-8", "replace") or "{}").get("error", "")
+                check("cannot connect" not in said, "update check reaches GitHub (TLS)", said)
+            second = subprocess.run([str(exe), "--no-open"], cwd=str(work), env=env, timeout=60)
             check(second.returncode == 0, "a second start leaves at once")
     finally:
         stop(app)
 
     if "--window" in sys.argv:
-        shown = start(exe, work, "--port", str(PORT + 1))
+        shown = start("--port", str(PORT + 1))
         try:
             check(bool(wait_for(PORT + 1)), "starts as a user starts it")
             time.sleep(8)                                         # pywebview gives up, if it will, by now

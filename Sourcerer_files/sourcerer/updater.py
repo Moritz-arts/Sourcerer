@@ -18,6 +18,7 @@ step goes to Userdata/Logs/update.log, which the next start shows.
 import logging
 import os
 import pathlib
+import platform
 import re
 import shutil
 import subprocess
@@ -34,8 +35,16 @@ API = "https://api.github.com/repos/%s" % config.REPO
 STAGE_REL = "Userdata/_update/new"             # relative to Sourcerer_files
 REQUIRED = ("Sourcerer_files/VERSION", "Sourcerer_files/launch.py",
             "Sourcerer_files/app.py", "start-windows.bat")
-# The standalone exe is updated by hand (see install): its own download, its own name.
-ASSET = "Sourcerer-Windows.zip" if config.FROZEN else "Sourcerer.zip"
+# The standalone builds are updated by hand (see install): the installer, disk image or AppImage
+# of this system -- a portable copy takes the same version from the same release.
+if not config.FROZEN:
+    ASSET = "Sourcerer.zip"
+elif sys.platform == "win32":
+    ASSET = "Sourcerer-Setup.exe"
+elif sys.platform == "darwin":
+    ASSET = "Sourcerer-macOS-%s.dmg" % ("arm64" if platform.machine() == "arm64" else "x86_64")
+else:
+    ASSET = "Sourcerer-x86_64.AppImage" if config.APPIMAGE else "Sourcerer-Linux.tar.gz"
 
 
 def version_tuple(v):
@@ -95,7 +104,8 @@ def restart():
             kwargs["creationflags"] = 0x00000008 | 0x00000200       # detached, own process group
         else:
             kwargs["start_new_session"] = True
-        subprocess.Popen([sys.executable, "--restart"], **kwargs)
+        # An AppImage's inner binary vanishes with its mount once this process is gone.
+        subprocess.Popen([config.APPIMAGE or sys.executable, "--restart"], **kwargs)
         return
     _launch_helper(swap=False)
 

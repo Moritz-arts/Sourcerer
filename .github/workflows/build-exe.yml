@@ -1,17 +1,21 @@
-# Sourcerer-Windows.zip: Sourcerer.exe with Python inside, for people without one.
+# The standalone downloads: Sourcerer with Python inside, for people without one.
 #
-# Built with PyInstaller on a Windows runner (.github/exe/build.py), then started
-# the way a user starts it (.github/exe/smoke.py) before anything is published.
-# It is the *second* download beside Sourcerer.zip, not a replacement: that one
+#   Windows   Sourcerer-Setup.exe (installer) and Sourcerer-Windows.zip (portable)
+#   macOS     Sourcerer-macOS-arm64.dmg and Sourcerer-macOS-x86_64.dmg
+#   Linux     Sourcerer-x86_64.AppImage and Sourcerer-Linux.tar.gz (portable)
+#
+# Built with PyInstaller, one runner per system (.github/exe/build.py), then each file is
+# started the way a user starts it (.github/exe/smoke.py) before anything is published.
+# They are the *second* kind of download beside Sourcerer.zip, not a replacement: that one
 # stays the program itself (the launchers, a system Python, the in-app updater).
 #
 # Three ways in:
-#   - a release is published   -> Sourcerer-Windows.zip is attached to it, next to Sourcerer.zip
-#   - a new version on main    -> called by version-bump.yml, replaces the one on the 'beta' prerelease
-#   - a pull request           -> built and tested, kept as a workflow artifact only
-# Run it by hand (Actions > Build Sourcerer.exe > Run workflow) to rebuild the file
-# for an existing release tag.
-name: Build Sourcerer.exe
+#   - a release is published   -> the files are attached to it, next to Sourcerer.zip
+#   - a new version on main    -> called by version-bump.yml, replaces the ones on the 'beta' prerelease
+#   - a pull request           -> built and tested, kept as workflow artifacts only
+# Run it by hand (Actions > Build standalone Sourcerer > Run workflow) to rebuild the files
+# for an existing release tag, or for 'beta'.
+name: Build standalone Sourcerer
 
 on:
   pull_request:
@@ -28,22 +32,34 @@ on:
         type: string
         required: true
       release:
-        description: Release to attach Sourcerer-Windows.zip to, e.g. beta
+        description: Release to attach the files to, e.g. beta
         type: string
         required: true
   workflow_dispatch:
     inputs:
       tag:
-        description: Tag of the release to (re)build Sourcerer-Windows.zip for, e.g. v0.18
+        description: Tag of the release to (re)build the files for, e.g. v0.18 or beta
         required: true
 
 jobs:
-  exe:
-    runs-on: windows-latest
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false             # one system failing must not keep the others from publishing
+      matrix:
+        include:
+          - { name: Windows, os: windows-latest }
+          - { name: Linux, os: ubuntu-22.04 }          # the oldest glibc on offer: runs on more systems
+          - { name: macOS (Apple silicon), os: macos-latest }
+          - { name: macOS (Intel), os: macos-15-intel }
     permissions:
       contents: write
+    defaults:
+      run:
+        shell: bash
     concurrency:
-      group: build-exe-${{ inputs.release || inputs.tag || github.event.release.tag_name || github.ref }}
+      group: build-exe-${{ matrix.os }}-${{ inputs.release || inputs.tag || github.event.release.tag_name || github.ref }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     env:
       # Through the environment, never interpolated into a script. Empty on a pull request.
@@ -62,33 +78,43 @@ jobs:
           cache-dependency-path: Sourcerer_files/requirements.txt
 
       - name: Install the packages Sourcerer needs, and PyInstaller
-        run: |
-          python -m pip install -r Sourcerer_files/requirements.txt pyinstaller
+        run: python -m pip install -r Sourcerer_files/requirements.txt pyinstaller
 
-      - name: Build Sourcerer-Windows.zip
+      - name: Install Inno Setup (the Windows installer)
+        if: runner.os == 'Windows'
+        run: |
+          if ! command -v iscc >/dev/null 2>&1 && [ ! -f "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" ]; then
+            choco install innosetup -y --no-progress
+          fi
+
+      - name: Build
         run: python .github/exe/build.py build-exe
 
-      - name: Start it the way a user does
-        run: python .github/exe/smoke.py build-exe/Sourcerer-Windows.zip --window
+      - name: Start every file the way a user does
+        run: |
+          for f in build-exe/assets/*; do
+            echo "::group::$f"
+            python .github/exe/smoke.py "$f" --window
+            echo "::endgroup::"
+          done
 
-      - name: Keep it as a workflow artifact (pull requests)
+      - name: Keep the files as a workflow artifact (pull requests)
         if: ${{ env.RELEASE == '' }}
         uses: actions/upload-artifact@v4
         with:
-          name: Sourcerer-Windows
-          path: build-exe/Sourcerer-Windows.zip
+          name: Sourcerer-${{ matrix.os }}
+          path: build-exe/assets/*
 
-      - name: Attach it to the release
+      - name: Attach them to the release
         if: ${{ env.RELEASE != '' }}
-        shell: bash
         run: |
           # Two versions close together: the build of the older one may finish last.
           # beta holds the newest only, so a build whose commit is no longer beta's is dropped.
           if [ "$RELEASE" = beta ]; then
             head=$(git ls-remote origin refs/tags/beta | cut -f1)
             if [ "$head" != "$(git rev-parse HEAD)" ]; then
-              echo "beta has moved on to a newer build -- not replacing its exe with this one."
+              echo "beta has moved on to a newer build -- not replacing its files with these."
               exit 0
             fi
           fi
-          gh release upload "$RELEASE" build-exe/Sourcerer-Windows.zip --clobber
+          gh release upload "$RELEASE" build-exe/assets/* --clobber
