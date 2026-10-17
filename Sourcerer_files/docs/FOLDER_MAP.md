@@ -91,14 +91,14 @@ Only in the repository, never in the ZIP (`export-ignore` in `.gitattributes`):
 ├─ .claude/CLAUDE.md              rules and traps for whoever works on it
 ├─ .claude/design/                the original design mockups the window follows
 ├─ .github/
-│   ├─ workflows/version-bump.yml raises the version on every push to main,
-│   │                               and puts that build on the `beta` prerelease
+│   ├─ workflows/version-bump.yml raises the version on every push to main, writes the
+│   │                               changelog line and tags it (no release, no beta download)
 │   ├─ workflows/release-zip.yml  attaches Sourcerer.zip to a published release
 │   ├─ workflows/publish.yml      on command (Run workflow): merges a branch's pull request,
 │   │                               raises the version, and if asked publishes the Stable release
 │   ├─ workflows/build-exe.yml    builds the standalone downloads on a Windows, a Linux and
-│   │                               two macOS runners, tests them, attaches them to a release /
-│   │                               `beta`; also on pull requests
+│   │                               two macOS runners, tests them, attaches them to a release;
+│   │                               also on pull requests
 │   ├─ exe/build.py               the PyInstaller build and packaging; exe/smoke.py starts each
 │   │                               result like a user; exe/Sourcerer.iss is the Windows installer;
 │   │                               exe/Sourcerer.ico / .icns / .png are the logo as icons

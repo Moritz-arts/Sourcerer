@@ -1700,6 +1700,7 @@ function loadInfo() {
     $$('#btn-gdl, [data-repair="venv"], [data-repair="reinstall"]').forEach(function (b) {
       b.closest(".row").classList.toggle("hidden", S.frozen);
     });
+    $$('[data-set="channel"]')[0].closest(".field").classList.toggle("hidden", S.frozen);   // releases only: no binary of main exists
     $("upd-hint").textContent = S.frozen
       ? "Download the new version for your system and install it over this one (Windows: run Sourcerer-Setup.exe; macOS: drag the app into Applications again; the portable zip / tar.gz: copy its files over the old ones). Close Sourcerer first. Your cards, settings and library stay."
       : "An update replaces the program files and keeps your cards, settings and library. Sourcerer restarts by itself.";
@@ -1719,7 +1720,7 @@ function showUpdate() {
   if (u.error) $("upd-status").textContent = u.error;
   else if (has) $("upd-status").textContent = "v" + u.version + " is available.";
   else if (!u.version) $("upd-status").textContent = "Nothing published on this channel yet.";
-  else $("upd-status").textContent = "Up to date. Newest " + (u.channel === "beta" ? "build" : "release") + ": v" + u.version + ".";
+  else $("upd-status").textContent = "Up to date. Newest " + (u.channel === "beta" ? "version on the main branch" : "release") + ": v" + u.version + ".";
   $("btn-install").querySelector("span").textContent = has ? (u.manual ? "Download v" : "Install v") + u.version : "Install";
   $("upd-notes").textContent = has ? u.notes : "";
   $("upd-notes").classList.toggle("hidden", !has || !u.notes);

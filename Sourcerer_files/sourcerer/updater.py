@@ -3,7 +3,8 @@
 Two channels, chosen in Settings:
 
     stable   the newest published release and its Sourcerer.zip
-    beta     the newest build of main: Sourcerer.zip on the 'beta' prerelease
+    beta     the main branch: GitHub's own archive of its newest commit (nothing is
+             uploaded for it; GitHub's releases hold the Stable version only)
 
 A new version cannot be put in place while Sourcerer runs -- on Windows a
 running program locks its folder, and the venv's python.exe lives inside it.
@@ -15,6 +16,7 @@ one in place, carries Userdata/ and venv/ across, replaces the launchers, and
 starts Sourcerer again. When anything fails it puts the old version back. Every
 step goes to Userdata/Logs/update.log, which the next start shows.
 """
+import base64
 import logging
 import os
 import pathlib
@@ -53,19 +55,34 @@ def version_tuple(v):
 
 def check(channel):
     """What the channel offers: {"version", "available", "url", "notes", "page"}."""
+    # The standalone apps are built for releases only; there is no binary of the main branch.
+    return _check_main() if channel == "beta" and not config.FROZEN else _check_release()
+
+
+def _check_main():
+    """Beta: the newest commit of main. Asked by commit, not by branch -- a branch URL is cached
+    for minutes -- and the version is read from that same commit's VERSION."""
+    head = net.get_json(API + "/commits/main")
+    sha = head["sha"]
+    found = net.get_json(API + "/contents/Sourcerer_files/VERSION", {"ref": sha})
+    version = base64.b64decode(found["content"]).decode("utf-8").strip()
+    message = ((head.get("commit") or {}).get("message") or "").strip().splitlines()
+    return {"channel": "beta", "current": config.VERSION, "version": version,
+            "available": version_tuple(version) > version_tuple(config.VERSION),
+            "url": "https://codeload.github.com/%s/zip/%s" % (config.REPO, sha),
+            "notes": message[0] if message else "", "page": head.get("html_url") or "", "manual": False}
+
+
+def _check_release():
     try:
-        rel = net.get_json(API + ("/releases/tags/beta" if channel == "beta" else "/releases/latest"))
+        rel = net.get_json(API + "/releases/latest")
     except requests.HTTPError as e:
         if e.response is None or e.response.status_code != 404:
             raise
-        rel = {}                                   # nothing published on this channel yet
-    if channel == "beta":
-        m = re.search(r"\(v([\d.]+)\)", rel.get("name") or "")
-        version = m.group(1) if m else ""
-    else:
-        version = (rel.get("tag_name") or "").lstrip("vV")
+        rel = {}                                   # nothing published yet
+    version = (rel.get("tag_name") or "").lstrip("vV")
     asset = next((a for a in rel.get("assets") or [] if a.get("name") == ASSET), None)
-    return {"channel": channel, "current": config.VERSION, "version": version,
+    return {"channel": "stable", "current": config.VERSION, "version": version,
             "available": bool(asset and version_tuple(version) > version_tuple(config.VERSION)),
             "url": asset["browser_download_url"] if asset else "",
             "notes": rel.get("body") or "", "page": rel.get("html_url") or "", "manual": config.FROZEN}

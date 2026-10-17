@@ -99,9 +99,9 @@ add the one that replaced it.
 - 2026-10-10 — HTTP with `requests`: one session per thread, connections kept
   alive. — Parallel downloads and reused connections are what made syncing
   fast; the standard library opened a new TLS connection per file.
-- 2026-10-10 — Every new version also replaces Sourcerer.zip on the prerelease
+- ~~2026-10-10 — Every new version also replaces Sourcerer.zip on the prerelease
   `beta`. — A clean download of the newest build without publishing a release
-  by hand; Stable stays what was published deliberately.
+  by hand; Stable stays what was published deliberately.~~ Replaced 2026-10-17 (below).
 - 2026-10-11 — X and XenForo are listed by gallery-dl, run as a separate
   process; Sourcerer downloads the files itself. — X's web API changes
   almost weekly and gallery-dl follows it; a copy of our own would stay
@@ -249,6 +249,14 @@ add the one that replaced it.
   `version-bump.yml` made callable, and the README's download table links to
   `releases/latest` as Pikura's does, not to files that may not exist yet. TrackImage has no
   such workflow -- its release is still drafted by hand -- so this is new, not copied.
+
+- 2026-10-17 — **GitHub's releases hold the Stable version only; Beta is the main branch.**
+  The user: a "beta" entry among the releases is not wanted, one stable release is, and the
+  Beta version is taken from `main`, not from releases (as TrackImage's *Latest* does). So the
+  `beta` prerelease and every upload to it are gone; the updater's Beta channel reads the
+  newest commit of `main` and installs GitHub's archive of it; the standalone apps follow
+  releases only. The README's download table is compact, as Pikura's: one row per system,
+  installer and portable, every link the latest release, the first-start notes folded away.
 
 ## Done
 
