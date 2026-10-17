@@ -53,7 +53,7 @@ DEFAULTS = {
     "parallel": "4",            # downloads at once, all sites together
     "per_host": "2",            # downloads at once from one site
     "pace_ms": "250",           # pause between two requests to one site
-    "channel": "stable",        # updates: 'stable' (releases) or 'beta' (newest build)
+    "channel": "stable",        # updates: 'stable' (the latest release) or 'beta' (the main branch)
     "gdl_updated": "",          # when gallery-dl was last brought up to date (weekly)
     "update_seen": "",          # the update helper's last run that was already reported
 }

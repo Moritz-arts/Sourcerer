@@ -1,11 +1,13 @@
 # One push to main is one version of Sourcerer.
 #
 # This raises the number, writes the line that says what changed, and tags it.
-# It does NOT publish a release on its own: whether a version is good enough to
-# hand to people is a judgement, and a judgement is not something a push gets to
-# make. When you decide one is, the tag is already sitting there -- run
-# Actions > Publish with "release" ticked (publish.yml), or draft a release from
-# it by hand and paste its section out of CHANGELOG.md.
+# It does NOT publish a release: whether a version is good enough to hand to
+# people is a judgement, and a judgement is not something a push gets to make.
+# The Beta channel is simply main (the updater reads the branch), and GitHub's
+# releases hold the Stable version only. When you decide a version is ready, the
+# tag is already sitting there -- run Actions > Publish with "release" ticked
+# (publish.yml), or draft a release from it by hand and paste its section out of
+# CHANGELOG.md.
 #
 # The commit it makes keeps the work's own subject line and adds the version to
 # it, so the front page reads "what changed (v0.4)" rather than a column of
@@ -42,6 +44,16 @@ jobs:
     outputs:
       version: ${{ steps.bump.outputs.version }}
     steps:
+      # Until v0.20 every version also went onto a prerelease called "beta". Beta is the main
+      # branch now -- the updater reads it, nothing is uploaded -- and GitHub's releases hold
+      # the Stable version only. This removes what the old arrangement left behind (the release
+      # and its tag); nothing makes them again, so after the first run it finds nothing.
+      - name: Retire the old beta release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release delete beta --cleanup-tag --yes 2>/dev/null || true
+
       - uses: actions/checkout@v4
         with:
           ref: main
@@ -102,47 +114,3 @@ jobs:
           done
           echo "main kept moving; the next push raises the version."
           exit 1
-
-      # The newest build as a download that unpacks to one folder. GitHub's
-      # "Code > Download ZIP" wraps everything in Sourcerer-main/ and cannot be
-      # told not to; Sourcerer.zip has the launchers at its top. One release,
-      # "beta", always holds it: its tag moves to the version just made and its
-      # Sourcerer.zip is replaced. A prerelease, so releases/latest -- the
-      # stable download -- stays whatever was published by hand.
-      - name: Publish the newest build as Sourcerer.zip (beta)
-        if: steps.bump.outputs.version
-        env:
-          VER: ${{ steps.bump.outputs.version }}
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          git archive --format=zip -o Sourcerer.zip "v$VER"
-          unzip -l Sourcerer.zip | grep -q ' start-windows\.bat$'
-          git tag -f beta "v$VER^{commit}"
-          git push -f origin refs/tags/beta
-          TITLE="Beta - newest build (v$VER)"
-          NOTES="Every change, minutes after it is merged -- untested, so bugs are part of the deal. Download Sourcerer.zip below and unpack it: you get one folder, Sourcerer. Without Python: Sourcerer-Setup.exe (Windows), Sourcerer-macOS-*.dmg, Sourcerer-x86_64.AppImage (Linux) and their portable zips, added a few minutes later. The stable download is the latest release."
-          if gh release view beta >/dev/null 2>&1; then
-            gh release edit beta --prerelease --title "$TITLE" --notes "$NOTES"
-          else
-            gh release create beta --prerelease --verify-tag --title "$TITLE" --notes "$NOTES"
-          fi
-          # The standalone files of the previous version must not sit under this version's
-          # name until the new ones are built (build-exe.yml, below).
-          for old in $(gh release view beta --json assets --jq '.assets[].name' | grep -v '^Sourcerer\.zip$'); do
-            gh release delete-asset beta "$old" --yes
-          done
-          gh release upload beta Sourcerer.zip --clobber
-
-  # The standalone files (installer, disk image, AppImage...) of the same version go onto the
-  # same 'beta' release, a few minutes after Sourcerer.zip: they take longer. A call, not a
-  # trigger of its own: this workflow's pushes use GITHUB_TOKEN, which starts no runs.
-  exe:
-    needs: bump
-    if: ${{ needs.bump.outputs.version }}
-    permissions:
-      contents: write
-    uses: ./.github/workflows/build-exe.yml
-    with:
-      ref: v${{ needs.bump.outputs.version }}
-      release: beta

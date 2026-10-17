@@ -9,12 +9,14 @@
 # They are the *second* kind of download beside Sourcerer.zip, not a replacement: that one
 # stays the program itself (the launchers, a system Python, the in-app updater).
 #
-# Three ways in:
+# Ways in -- only ever a Stable release gets files; GitHub's releases hold the Stable
+# version and nothing else (Beta is the main branch, read by the updater):
 #   - a release is published   -> the files are attached to it, next to Sourcerer.zip
-#   - a new version on main    -> called by version-bump.yml, replaces the ones on the 'beta' prerelease
+#   - publish.yml made a release -> calls this for that tag (a release made with GITHUB_TOKEN
+#                                 does not start the "published" run above)
 #   - a pull request           -> built and tested, kept as workflow artifacts only
 # Run it by hand (Actions > Build standalone Sourcerer > Run workflow) to rebuild the files
-# for an existing release tag, or for 'beta'.
+# for an existing release tag.
 name: Build standalone Sourcerer
 
 on:
@@ -32,13 +34,13 @@ on:
         type: string
         required: true
       release:
-        description: Release to attach the files to, e.g. beta
+        description: Release to attach the files to, e.g. v0.20
         type: string
         required: true
   workflow_dispatch:
     inputs:
       tag:
-        description: Tag of the release to (re)build the files for, e.g. v0.18 or beta
+        description: Tag of the release to (re)build the files for, e.g. v0.20
         required: true
 
 jobs:
@@ -108,13 +110,4 @@ jobs:
       - name: Attach them to the release
         if: ${{ env.RELEASE != '' }}
         run: |
-          # Two versions close together: the build of the older one may finish last.
-          # beta holds the newest only, so a build whose commit is no longer beta's is dropped.
-          if [ "$RELEASE" = beta ]; then
-            head=$(git ls-remote origin refs/tags/beta | cut -f1)
-            if [ "$head" != "$(git rev-parse HEAD)" ]; then
-              echo "beta has moved on to a newer build -- not replacing its files with these."
-              exit 0
-            fi
-          fi
           gh release upload "$RELEASE" build-exe/assets/* --clobber

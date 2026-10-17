@@ -55,8 +55,8 @@ portable one): PyInstaller, one runner per system, `.github/workflows/build-exe.
 `.github/exe/build.py`. Output (`build-exe/assets/`): **Windows** `Sourcerer-Setup.exe` (Inno Setup,
 `Sourcerer.iss`, per user, no admin) and `Sourcerer-Windows.zip`; **macOS** `Sourcerer-macOS-arm64.dmg` /
 `-x86_64.dmg`; **Linux** `Sourcerer-x86_64.AppImage` and `Sourcerer-Linux.tar.gz`. They are attached on a
-release, on each new version for `beta` (a job of `version-bump.yml` after Sourcerer.zip; it first deletes
-the previous version's files), and built and tested on pull requests. `.github/exe/smoke.py` starts every
+release (by hand, or `publish.yml` calls it for the release it made), and built and tested on pull
+requests -- never for the main branch: there is no beta download (below). `.github/exe/smoke.py` starts every
 file like a user *before* it is attached -- a failing check keeps that system's files off the release
 (`fail-fast: false`: the other systems still publish). It is **not** a replacement: the repository stays the
 program, and Sourcerer.zip (launchers, system Python, in-app updater) the main download. Nothing exe-only is
@@ -78,7 +78,7 @@ the program with `--restart`, which waits until the old one stopped answering (a
 
 Traps:
 - **A publishing gate must not depend on a site we do not control.** The first smoke test failed the whole
-  `beta` build on GitHub's API rationing a shared runner address (502 from our own endpoint) and no file
+  build on GitHub's API rationing a shared runner address (502 from our own endpoint) and no file
   was ever attached. Only a TLS failure ("cannot connect") fails the update check now.
 - **gallery-dl loads its extractors by name**, which PyInstaller's scan does not see:
   `--collect-submodules gallery_dl` and `--copy-metadata gallery-dl` (its `version()`) are in
@@ -172,10 +172,14 @@ stays with the diff.
    `Sourcerer_files/docs/CHANGELOG.md`; publishing it starts `release-zip.yml`,
    which attaches **Sourcerer.zip**, and `build-exe.yml`, which attaches the
    installers) or **on command through `.github/workflows/publish.yml`**.
-   Independently, every new version replaces Sourcerer.zip and the standalone
-   files on the prerelease `beta`; its tag `beta` is moved by the workflow and
-   by nothing else (and is gone when somebody turns that release into a real
-   one -- the next version makes it again).
+   **GitHub's releases hold the Stable version and nothing else -- no prerelease, no
+   `beta`.** Beta is the main branch: the updater's Beta channel asks the API for the newest
+   commit of `main`, reads its `VERSION` and installs GitHub's own archive of that commit
+   (`updater._check_main`; `extract` accepts the `Sourcerer-<sha>/` wrapper and
+   `export-ignore` keeps the workshop out of it). Nothing is uploaded for it. The standalone
+   apps follow releases only (no binary of `main` exists; the page hides the channel choice).
+   `version-bump.yml` still carries a step that deletes the old `beta` release and tag (once,
+   from v0.21; remove it when nobody can have one any more).
 
 **On command -- Actions > Publish (`publish.yml`, `workflow_dispatch`).** Inputs: `branch`
 (its open pull request is merged, rebased so every commit stays one changelog line; a
@@ -189,8 +193,7 @@ workflow of its own, so it runs `version-bump.yml` (a `workflow_call`) after the
 this workflow) is a normal push to `main` and needs none of that.
 
 Do not create tags yourself, and do not push to `main`. A release only on the user's
-word, and then through `publish.yml` -- not by editing the beta release into one (that
-deleted `beta` and left its links dead).
+word, and then through `publish.yml`.
 
 ## Traps
 
@@ -240,9 +243,9 @@ deleted `beta` and left its links dead).
   ZIP" and "Source code (zip)" both do, and it cannot be switched off:
   unpacked into a folder, that gave `Sourcerer/Sourcerer-main/`. So people get
   Sourcerer.zip instead, built by `git archive` with no prefix, which has the
-  launchers at its top — from the latest release (Stable) or from the `beta`
-  prerelease (Beta). The updater should use these two files too, not GitHub's
-  archives.
+  launchers at its top — from the latest release. The updater uses it for
+  Stable; its Beta channel (the main branch) has no such file and takes GitHub's
+  archive of the newest commit instead, which the unpacking already accepts.
 - **Everything here is written in English — file and folder names included.**
 
 ### Launchers
