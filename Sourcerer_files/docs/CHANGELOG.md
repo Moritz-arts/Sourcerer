@@ -5,6 +5,10 @@ automatically -- one line per change, newest first. A release is drafted by hand
 from the tag of whichever version is judged ready, and this is the text to paste
 into it.
 
+## v0.19 — 2026-10-17
+
+- Downloads without Python for Windows, macOS and Linux: Sourcerer-Setup.exe, .dmg, .AppImage and portable zips
+
 ## v0.18 — 2026-10-16
 
 - Windows: Sourcerer.exe, a standalone build with Python inside, as Sourcerer-Windows.zip
