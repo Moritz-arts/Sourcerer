@@ -157,7 +157,11 @@ def main():
                   "version %s, Userdata where it belongs" % info["version"], info["userdata"])
             try:
                 upd = json.loads(get("/api/update/check?channel=stable")[1])
-                check(upd.get("manual") is True, "update check reaches GitHub (TLS)", str(upd.get("version")))
+                # An installed Windows copy updates itself; every other standalone copy is updated by hand.
+                installed = asset.name.endswith("Setup.exe")
+                check(upd.get("manual") is (not installed) and info["updatable"] is installed,
+                      "update check reaches GitHub (TLS); %s" % ("updates itself" if installed else "updated by hand"),
+                      str(upd.get("version")))
             except urllib.error.HTTPError as e:
                 # GitHub's API rations an address, and a runner's is shared: "refused access (403)" is the
                 # site talking, so TLS works. "cannot connect" is what a missing certificate looks like.
