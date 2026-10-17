@@ -1759,7 +1759,7 @@ function restarting(title, text) {
 $("btn-install").addEventListener("click", function () {
   var u = S.update;
   if (u && u.available && u.manual) return api("POST", "/api/open-url", { url: u.url }).catch(fail);   // the exe: by hand
-  if (!u || !u.available || !confirm("Install v" + u.version + " and restart Sourcerer?")) return;
+  if (!u || !u.available) return;      // pressing Install is the decision: no second question
   $("btn-install").disabled = true;
   $("upd-status").textContent = "Downloading v" + u.version + "…";
   api("POST", "/api/update/install", { channel: u.channel }).then(function () {
