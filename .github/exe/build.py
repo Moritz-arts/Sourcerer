@@ -66,8 +66,14 @@ def freeze(out, onefile):
     if sys.platform in ("win32", "darwin"):
         # The window: pywebview on WebView2 (through pythonnet) or WKWebView; their libraries are
         # found by hooks only when asked for. Without them Sourcerer still starts, in the browser.
-        # Linux has no such bridge in the bundle (GTK/Qt come from the system): browser only.
         for pkg in ("webview",) + (("pythonnet", "clr_loader") if sys.platform == "win32" else ()):
+            args += ["--collect-all", pkg]
+    elif sys.platform == "linux":
+        # The window on Linux: pywebview's Qt backend, which imports qtpy and then PyQt6 and its
+        # QtWebEngine. Bundled from pip (requirements.txt) so the AppImage carries its own Qt and
+        # needs no system GTK/Qt; PyInstaller's PyQt6 hooks pull in the Qt libraries, plugins and
+        # the QtWebEngine process. Without them Sourcerer still starts, in the browser.
+        for pkg in ("webview", "qtpy", "PyQt6"):
             args += ["--collect-all", pkg]
     # Through a spec file, because the command line cannot drop a binary from the bundle.
     spec_dir.mkdir(parents=True)

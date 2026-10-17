@@ -6,4 +6,7 @@ flask>=3.0          # the local web server the window talks to
 requests>=2.31      # downloads over kept-open connections: many files, one handshake per site
 pillow>=10.0        # fingerprints to find the same picture from another site; thumbnails
 pywebview>=5.0      # the app window itself; without it Sourcerer opens in the browser  # optional
+qtpy>=1.11         # Qt shim that pywebview's Qt backend imports  # optional
+PyQt6>=6.6          # Qt bindings: pywebview's window backend on Linux  # optional
+PyQt6-WebEngine>=6.6 # the QtWebEngine view that renders the window on Linux  # optional
 gallery-dl>=1.32    # lists X and forums; Settings > Updates upgrades it between releases  # optional
