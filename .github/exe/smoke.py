@@ -54,10 +54,13 @@ def wait_for(port, seconds=90):
 def stop(proc):
     # An AppImage's runtime starts the program as a child and waits for it: stopping only the
     # runtime leaves the program (and its port) behind. POSIX starts are a process group of their own.
-    if os.name == "nt":
-        proc.terminate()
-    else:
-        os.killpg(proc.pid, signal.SIGTERM)
+    try:
+        if os.name == "nt":
+            proc.terminate()
+        else:
+            os.killpg(proc.pid, signal.SIGTERM)
+    except OSError:                                         # already gone (a restart ends the first one)
+        pass
     try:
         proc.wait(timeout=20)
     except subprocess.TimeoutExpired:
@@ -72,12 +75,12 @@ def unpack(asset, work, home):
     if name.endswith(".zip"):
         with zipfile.ZipFile(asset) as z:
             z.extractall(work / "app")
-        exe = work / "app" / ("Sourcerer.exe" if os.name == "nt" else "Sourcerer")
-        return exe, work / "app" / "Sourcerer_files" / "Userdata", env
+        # One file; Userdata is made beside it on the first start.
+        return work / "app" / "Sourcerer.exe", work / "app" / "Userdata", env
     if name.endswith(".tar.gz"):
         with tarfile.open(asset) as t:
             t.extractall(work / "app")
-        return work / "app" / "Sourcerer" / "Sourcerer", work / "app" / "Sourcerer" / "Sourcerer_files" / "Userdata", env
+        return work / "app" / "Sourcerer" / "Sourcerer", work / "app" / "Sourcerer" / "Userdata", env
     if name.endswith(".AppImage"):
         exe = work / name
         shutil.copy(asset, exe)
@@ -98,26 +101,70 @@ def unpack(asset, work, home):
         target = work / "app"
         subprocess.check_call([str(asset), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER",
                                "/NOICONS", "/DIR=" + str(target), "/LOG=" + str(work / "setup.log")])
-        return target / "Sourcerer.exe", target / "Sourcerer_files" / "Userdata", env
+        return target / "Sourcerer.exe", target / "Userdata", env
     sys.exit("don't know how to test " + name)
 
 
 def update_over(asset, exe, data):
-    """The installer over an existing install -- what an update is. Files the new version does not
-    have must be gone, the user's Userdata must be untouched, and the program must still be there."""
+    """The installer over an existing install -- what an update is.
+
+    First over a copy laid out as up to v0.21 (a Sourcerer_files folder with Userdata inside): the old
+    program files must be gone, the user's data moved beside the executable. Then over the new layout:
+    the data must stay put. The install folder itself is never cleared."""
     folder = exe.parent / "Sourcerer_files"
-    stale_file, stale_dir, mine = folder / "old_module.pyd", folder / "old_package", data / "mine.txt"
+    stale_file, stale_dir = folder / "old_module.pyd", folder / "old_package"
+    stale_file.parent.mkdir(parents=True, exist_ok=True)
     stale_file.write_bytes(b"old")
     (stale_dir / "deep").mkdir(parents=True)
     (stale_dir / "deep" / "x.py").write_text("old")
+    (folder / "Userdata").mkdir()
+    (folder / "Userdata" / "mine.txt").write_text("my cards")
+    neighbour = exe.parent / "somebody-elses-file.txt"        # an install folder may be anything
+    neighbour.write_text("not ours")
     check((exe.parent / "unins000.exe").is_file(), "the install has its uninstaller (that is what lets it update itself)")
-    mine.parent.mkdir(parents=True, exist_ok=True)
-    mine.write_text("my cards")
-    subprocess.check_call([str(asset), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER",
-                           "/NOICONS", "/DIR=" + str(exe.parent), "/LOG=" + str(exe.parent.parent / "update.log")])
+
+    def run_setup(tag):
+        subprocess.check_call([str(asset), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER",
+                               "/NOICONS", "/DIR=" + str(exe.parent), "/LOG=" + str(exe.parent.parent / (tag + ".log"))])
+
+    run_setup("update-1")
     check(not stale_file.exists() and not stale_dir.exists(), "an update removes what the new version no longer has")
-    check(mine.is_file() and mine.read_text() == "my cards", "an update keeps Userdata")
-    check(exe.is_file() and (folder / "VERSION").is_file(), "the program is in place after the update")
+    check((data / "mine.txt").is_file() and (data / "mine.txt").read_text() == "my cards",
+          "an update moves an old Userdata beside the executable and keeps it")
+    check(not folder.exists(), "the old program folder is gone")
+    check(neighbour.is_file(), "an update never clears the install folder itself")
+    check(exe.is_file(), "the program is in place after the update")
+    run_setup("update-2")
+    check((data / "mine.txt").read_text() == "my cards" and exe.is_file(), "a second update keeps Userdata where it is")
+
+
+def restart_works(data, old_pid):
+    """Settings > Repair > Restart: the old one goes, a new one answers on its own. In a one-file build the
+    new one has to unpack a folder of its own (the old one's goes with it)."""
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    opener.open(urllib.request.Request("http://127.0.0.1:%d/api/repair" % PORT,
+                                       data=json.dumps({"action": "restart"}).encode(),
+                                       headers={"Content-Type": "application/json"}), timeout=30).close()
+    end = time.time() + 90
+    while time.time() < end:
+        try:
+            info = json.loads((data / "running.json").read_text(encoding="utf-8"))
+            if info["pid"] != old_pid and wait_for(info["port"], 2):
+                return info
+        except (OSError, ValueError, KeyError):
+            pass
+        time.sleep(1)
+    return None
+
+
+def kill(pid):
+    if os.name == "nt":
+        subprocess.call(["taskkill", "/F", "/T", "/PID", str(pid)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    else:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            pass
 
 
 def main():
@@ -143,10 +190,11 @@ def main():
     check(done.returncode == 0 and b"Twitter" in done.stdout and len(done.stdout.splitlines()) > 1000,
           "gallery-dl knows its extractors (X among them)", "%d lines" % len(done.stdout.splitlines()))
 
+    began = time.time()
     app = start("--no-open", "--port", str(PORT))
     try:
         ping = wait_for(PORT)
-        check(bool(ping), "starts and answers", str(ping))
+        check(bool(ping), "starts and answers", "in %.1f s %s" % (time.time() - began, ping))
         if ping:
             status, body = get("/")
             check(status == 200 and b"Sourcerer" in body, "page is served")
@@ -169,6 +217,11 @@ def main():
                 check("cannot connect" not in said, "update check reaches GitHub (TLS)", said)
             second = subprocess.run([str(exe), "--no-open"], cwd=str(work), env=env, timeout=60)
             check(second.returncode == 0, "a second start leaves at once")
+            began = time.time()
+            again = restart_works(data, ping["pid"])
+            check(bool(again), "Restart brings Sourcerer back", "in %.1f s" % (time.time() - began))
+            if again:
+                kill(again["pid"])
     finally:
         stop(app)
 

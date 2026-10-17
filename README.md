@@ -37,17 +37,18 @@ The window is Microsoft's WebView2 on Windows (in Windows 11 and current Windows
 Sourcerer opens in your browser) and WebKit on macOS. Some virus scanners distrust every program
 built this way; if one removes the file, use the version with Python.
 
-Your data (cards, logins, settings, the default library): Windows — the `Sourcerer_files/Userdata`
-folder of the program; macOS — `~/Library/Application Support/Sourcerer` (downloads go to
+Windows and the Linux tar.gz are **one file** (`Sourcerer.exe`, `Sourcerer`) that unpacks itself while it
+runs; the first start makes a `Userdata` folder next to it, nothing else. Your data (cards, logins,
+settings, the default library): Windows and tar.gz — that `Userdata` folder; macOS — `~/Library/Application Support/Sourcerer` (downloads go to
 `~/Pictures/Sourcerer` until you choose a folder); the Linux AppImage — `~/.local/share/Sourcerer`.
 
 **Updates:** *Settings › Updates* tells you when a release is out.
 - **Windows, installed:** **Install** does it all — it downloads the new setup, closes Sourcerer, replaces
-  the program files (the old ones that are no longer needed are removed), keeps your data and starts
-  Sourcerer again.
-- **macOS:** drag the new app onto *Applications*, replacing the old one. **Linux AppImage:** replace the
-  file. **Portable zip / tar.gz:** delete the old program files (everything except
-  `Sourcerer_files/Userdata`) and unpack the new ones. Your data stays in every case.
+  `Sourcerer.exe`, keeps your data and starts Sourcerer again. (A copy from v0.19–v0.21, a folder with
+  `Sourcerer_files` inside: run the new *Sourcerer-Setup.exe* once; it moves your `Userdata` out and removes
+  the old folder.)
+- **macOS:** drag the new app onto *Applications*, replacing the old one. **Linux AppImage, portable zip /
+  tar.gz:** replace the one file. Your data stays in every case.
 
 </details>
 

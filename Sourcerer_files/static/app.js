@@ -1703,7 +1703,7 @@ function loadInfo() {
     $$('[data-set="channel"]')[0].closest(".field").classList.toggle("hidden", S.frozen);   // releases only: no binary of main exists
     $("upd-hint").textContent = !S.frozen || S.updatable
       ? "An update replaces the program files, removes the ones the new version no longer has, and keeps your cards, settings and library. Sourcerer restarts by itself."
-      : "Download the new version for your system. macOS: drag the app into Applications again, replacing the old one. Linux AppImage: replace the file. Portable zip or tar.gz: delete the old program files (everything except Sourcerer_files/Userdata) and unpack the new ones. Close Sourcerer first; your cards, settings and library stay.";
+      : "Download the new version for your system. macOS: drag the app into Applications again, replacing the old one. Linux AppImage, portable zip or tar.gz: replace the one file. Close Sourcerer first; your cards, settings and library stay.";
     $("upd-log-box").classList.toggle("hidden", !d.update_log.length);
     $("upd-log").textContent = d.update_log.join("\n");
   }).catch(fail);

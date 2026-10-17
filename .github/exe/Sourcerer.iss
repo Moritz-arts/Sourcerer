@@ -1,14 +1,15 @@
 ; The Windows installer, compiled by build.py (Inno Setup 6): Sourcerer-Setup.exe.
 ;
-; Per user, no admin rights: it lands in %LOCALAPPDATA%\Programs\Sourcerer (or where the user
-; says), which the user may write to -- Userdata\ lives inside (Sourcerer_files\Userdata), as in
-; the portable zip.
-;
-; Installing a newer version over an older one IS the update, and it is what Settings > Updates
-; runs (silently) in an installed copy. Inno never removes a file the new version no longer has,
-; so [Code] clears the program's folder first -- everything in Sourcerer_files except Userdata,
-; which holds the user's cards, logins and downloads and is never touched, here or by the
+; Per user, no admin rights: it lands in %LOCALAPPDATA%\Programs\Sourcerer (or where the user says),
+; which the user may write to. The program is ONE file, Sourcerer.exe; Userdata\ -- the user's cards,
+; logins and downloads -- is made beside it on the first start and is never touched, here or by the
 ; uninstaller.
+;
+; Installing a newer version over an older one IS the update, and it is what Settings > Updates runs
+; (silently) in an installed copy. The new Sourcerer.exe replaces the old one. Up to v0.21 the
+; program was a folder, Sourcerer_files\, with Userdata inside it: [Code] moves that Userdata out
+; beside the executable and clears the rest of the old folder. Only that one folder of ours is
+; ever cleared -- never the install folder itself, which a user may have pointed at anything.
 #ifndef Version
   #define Version "0"
 #endif
@@ -46,7 +47,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "Create a desktop shortcut"; Flags: unchecked
 
 [Files]
-Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#Exe}"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\Sourcerer"; Filename: "{app}\Sourcerer.exe"
@@ -63,35 +64,41 @@ begin
   Result := WizardSilent and (ExpandConstant('{param:START|0}') = '1');
 end;
 
-procedure CleanProgramFolder;
+procedure RetireOldProgramFolder;
 var
-  Dir: String;
+  Old, Mine: String;
   Found: TFindRec;
 begin
-  Dir := ExpandConstant('{app}\Sourcerer_files');
-  if not DirExists(Dir) then
+  Old := ExpandConstant('{app}\Sourcerer_files');
+  Mine := ExpandConstant('{app}\Userdata');
+  if not DirExists(Old) then
     Exit;
-  if FindFirst(Dir + '\*', Found) then
+  { The user's data first: beside the executable, where this version looks for it. If that cannot
+    be done it stays where it is, and Sourcerer still finds it there. }
+  if DirExists(Old + '\Userdata') and not DirExists(Mine) then
+    RenameFile(Old + '\Userdata', Mine);
+  if FindFirst(Old + '\*', Found) then
   begin
     try
       repeat
         if (Found.Name <> '.') and (Found.Name <> '..') and (CompareText(Found.Name, 'Userdata') <> 0) then
         begin
           if (Found.Attributes and FILE_ATTRIBUTE_DIRECTORY) <> 0 then
-            DelTree(Dir + '\' + Found.Name, True, True, True)
+            DelTree(Old + '\' + Found.Name, True, True, True)
           else
-            DeleteFile(Dir + '\' + Found.Name);
+            DeleteFile(Old + '\' + Found.Name);
         end;
       until not FindNext(Found);
     finally
       FindClose(Found);
     end;
   end;
+  RemoveDir(Old);   { only when empty: a Userdata that could not be moved keeps its folder }
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
-  { ssInstall: the running Sourcerer is closed, the new files are not copied yet. }
+  { ssInstall: the running Sourcerer is closed, the new file is not copied yet. }
   if CurStep = ssInstall then
-    CleanProgramFolder;
+    RetireOldProgramFolder;
 end;

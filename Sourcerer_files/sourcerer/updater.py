@@ -90,6 +90,12 @@ def _check_release():
             "manual": config.FROZEN and not installed()}
 
 
+# A one-file build unpacks itself to a temp folder, and a program it starts from the same file shares
+# that folder (that is what keeps every gallery-dl run quick). A *new* Sourcerer -- the restarted one,
+# the one the installer starts -- must unpack its own: the old folder goes with the old process.
+INDEPENDENT = {"PYINSTALLER_RESET_ENVIRONMENT": "1"}
+
+
 def installed():
     """A copy that Sourcerer-Setup.exe put in place -- its uninstaller sits beside the program.
 
@@ -119,7 +125,7 @@ def _install_setup(channel):
     # The installer clears the program's folder -- never Userdata, which holds this very file.
     # Run from the temp folder, not from a folder it is about to empty.
     kwargs = {"cwd": tempfile.gettempdir(), "stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL,
-              "stderr": subprocess.DEVNULL, "close_fds": True,
+              "stderr": subprocess.DEVNULL, "close_fds": True, "env": dict(os.environ, **INDEPENDENT),
               "creationflags": 0x00000008 | 0x00000200}              # detached, own process group
     subprocess.Popen([str(setup), "/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS",
                       "/START=1"], **kwargs)
@@ -155,7 +161,7 @@ def restart():
         # The new one waits (--restart) until this one no longer answers; started at once it
         # would find this one running and leave. No shell, no helper script: the exe is enough.
         kwargs = {"cwd": str(config.INSTALL), "stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL,
-                  "stderr": subprocess.DEVNULL, "close_fds": True}
+                  "stderr": subprocess.DEVNULL, "close_fds": True, "env": dict(os.environ, **INDEPENDENT)}
         if os.name == "nt":
             kwargs["creationflags"] = 0x00000008 | 0x00000200       # detached, own process group
         else:

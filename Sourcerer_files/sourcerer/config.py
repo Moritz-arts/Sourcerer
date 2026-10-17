@@ -4,26 +4,39 @@ import pathlib
 import sys
 
 # True in the standalone builds (PyInstaller: Sourcerer.exe, the macOS app, the Linux binary): Python
-# is inside, there is no venv, no launch.py and no pip. On Windows and in the Linux tar.gz the bundle's
-# folder is named Sourcerer_files too, so ROOT, USERDATA and STATIC mean the same there as in the repository.
+# is inside, there is no venv, no launch.py and no pip. Windows and the Linux tar.gz are ONE executable
+# that unpacks itself to a temp folder (ROOT is that folder: static files and VERSION, read only);
+# the AppImage and the macOS app hold the unpacked program (ROOT is inside them).
 FROZEN = bool(getattr(sys, "frozen", False))
 ROOT = pathlib.Path(getattr(sys, "_MEIPASS", "") or pathlib.Path(__file__).resolve().parent.parent)  # Sourcerer_files/
-INSTALL = ROOT.parent                                           # the folder with the launchers (or Sourcerer.exe)
+# The folder with the launchers -- or the one Sourcerer.exe is in.
+INSTALL = pathlib.Path(sys.executable).resolve().parent if FROZEN else ROOT.parent
 VERSION = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
 STATIC = ROOT / "static"
 REPO = "Moritz-arts/Sourcerer"
 
 # Machine state: never shipped, never replaced by an update.
-# Beside the program wherever that is writable and ours (the repository, Windows, the Linux tar.gz).
-# Not inside a macOS .app (signed, and read-only when opened from the disk image) nor an AppImage
-# (a read-only mount): there it lives in the user's own data folder.
+# Beside the program wherever that is ours and writable: the repository (Sourcerer_files/Userdata) and
+# the one-file builds (Userdata/ next to the executable). Not inside a macOS .app (signed, and read-only
+# when opened from the disk image) nor an AppImage (a read-only mount): there it lives in the user's own
+# data folder.
 APPIMAGE = os.environ.get("APPIMAGE") if sys.platform.startswith("linux") else None
 _HOME_DATA = None
 if FROZEN and sys.platform == "darwin":
     _HOME_DATA = pathlib.Path.home() / "Library" / "Application Support" / "Sourcerer"
 elif FROZEN and APPIMAGE:
     _HOME_DATA = pathlib.Path(os.environ.get("XDG_DATA_HOME") or pathlib.Path.home() / ".local" / "share") / "Sourcerer"
-USERDATA = (_HOME_DATA / "Userdata") if _HOME_DATA else ROOT / "Userdata"
+if _HOME_DATA:
+    USERDATA = _HOME_DATA / "Userdata"
+elif FROZEN:
+    USERDATA = INSTALL / "Userdata"
+    # Up to v0.21 the Windows and Linux builds were a folder with Userdata inside Sourcerer_files/.
+    # Somebody who unpacks the new one-file build over it keeps their data where it is.
+    _OLD = INSTALL / "Sourcerer_files" / "Userdata"
+    if _OLD.is_dir() and not USERDATA.exists():
+        USERDATA = _OLD
+else:
+    USERDATA = ROOT / "Userdata"
 DB_PATH = USERDATA / "sourcerer.db"
 LOG_DIR = USERDATA / "Logs"
 AVATARS = USERDATA / "Avatars"
