@@ -242,6 +242,14 @@ add the one that replaced it.
   only a TLS failure fails that check. macOS and the AppImage keep Userdata in the user's data
   folder (read-only places); Linux has no app window (browser). Unsigned, un-notarised.
 
+- 2026-10-17 — **Publishing on command.** The user, comparing with TrackImage and Pikura:
+  Sourcerer should be automated on GitHub -- a branch merged into main on command, and
+  when wanted released as the Stable version -- and its download buttons should work like
+  Pikura's. So: `publish.yml` (Run workflow: `branch`, `release`; Claude starts it too),
+  `version-bump.yml` made callable, and the README's download table links to
+  `releases/latest` as Pikura's does, not to files that may not exist yet. TrackImage has no
+  such workflow -- its release is still drafted by hand -- so this is new, not copied.
+
 ## Done
 
 - [x] Repository workshop: CLAUDE.md, docs, version workflow

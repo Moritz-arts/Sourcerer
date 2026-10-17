@@ -4,7 +4,7 @@
 
 A portable app for Windows, Linux and macOS that keeps per-artist media collections in sync across sites — XenForo Media Gallery, Mastodon, Patreon, Bluesky, X, Pixiv, boorus and more — and drops every new file, de-duplicated across sources, straight into a [TrackImage](https://github.com/Moritz-arts/TrackImage) library.
 
-**Status:** early development. There is no release yet.
+**Status:** early development.
 
 ## Install
 
@@ -13,19 +13,18 @@ Two ways. **Without Python** (an installer or app for your system) is the easy o
 
 ### Without Python — installer, app, AppImage
 
-Python is inside; nothing else to install. Every file is in
-[Releases](https://github.com/Moritz-arts/Sourcerer/releases) — until the first
-release is published, the **Beta** one (marked *Pre-release*, named `beta`) is the one to take.
+Python is inside; nothing else to install. **Pick your system** (every link opens the latest
+release, where all the files are):
 
 | | Installer | Portable |
 |---|---|---|
-| **Windows** | [Sourcerer-Setup.exe](https://github.com/Moritz-arts/Sourcerer/releases/download/beta/Sourcerer-Setup.exe) | [Sourcerer-Windows.zip](https://github.com/Moritz-arts/Sourcerer/releases/download/beta/Sourcerer-Windows.zip) — unpack, run `Sourcerer.exe` |
-| **macOS** (Apple silicon) | [Sourcerer-macOS-arm64.dmg](https://github.com/Moritz-arts/Sourcerer/releases/download/beta/Sourcerer-macOS-arm64.dmg) | — |
-| **macOS** (Intel) | [Sourcerer-macOS-x86_64.dmg](https://github.com/Moritz-arts/Sourcerer/releases/download/beta/Sourcerer-macOS-x86_64.dmg) | — |
-| **Linux** | [Sourcerer-x86_64.AppImage](https://github.com/Moritz-arts/Sourcerer/releases/download/beta/Sourcerer-x86_64.AppImage) | [Sourcerer-Linux.tar.gz](https://github.com/Moritz-arts/Sourcerer/releases/download/beta/Sourcerer-Linux.tar.gz) |
+| **Windows** | [Sourcerer-Setup.exe](https://github.com/Moritz-arts/Sourcerer/releases/latest) | [Sourcerer-Windows.zip](https://github.com/Moritz-arts/Sourcerer/releases/latest) |
+| **macOS** (Apple silicon) | [Sourcerer-macOS-arm64.dmg](https://github.com/Moritz-arts/Sourcerer/releases/latest) | — |
+| **macOS** (Intel) | [Sourcerer-macOS-x86_64.dmg](https://github.com/Moritz-arts/Sourcerer/releases/latest) | — |
+| **Linux** | [Sourcerer-x86_64.AppImage](https://github.com/Moritz-arts/Sourcerer/releases/latest) | [Sourcerer-Linux.tar.gz](https://github.com/Moritz-arts/Sourcerer/releases/latest) |
 
-These links are the **Beta** (every change, a few minutes after it is merged; untested). For
-the **Stable** ones, replace `download/beta` with `latest/download` once a release exists.
+Want the newest build before it is released? The [**Beta**](https://github.com/Moritz-arts/Sourcerer/releases/tag/beta)
+(a pre-release, replaced by every change, untested) has the same files.
 
 - **Windows:** run *Sourcerer-Setup.exe* (it installs for you alone, no administrator
   needed; the Start menu has Sourcerer). Windows says *Windows protected your PC* the first
@@ -56,8 +55,8 @@ version is out; install the new one over the old (close Sourcerer first) and you
 
    | | |
    |---|---|
-   | **Stable** | [Sourcerer.zip from the latest release](https://github.com/Moritz-arts/Sourcerer/releases/latest/download/Sourcerer.zip) — versions declared finished (from the first release on) |
-   | **Beta** | [Sourcerer.zip, newest build](https://github.com/Moritz-arts/Sourcerer/releases/download/beta/Sourcerer.zip) — every change, minutes after it is merged; untested |
+   | **Stable** | [Sourcerer.zip from the latest release](https://github.com/Moritz-arts/Sourcerer/releases/latest/download/Sourcerer.zip) — versions declared finished |
+   | **Beta** | [Sourcerer.zip, newest build](https://github.com/Moritz-arts/Sourcerer/releases/tag/beta) — every change, minutes after it is merged; untested |
 
    Not the green **Code › Download ZIP** button: GitHub wraps that one in an
    extra `Sourcerer-main` folder.

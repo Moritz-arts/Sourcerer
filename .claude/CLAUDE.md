@@ -167,16 +167,30 @@ stays with the diff.
    (`v0.1`), and pushes commit and tag together. It does **not** publish a
    release. Two merges close together become one version listing both; when
    `main` moves while it runs, it starts over on top of the new state.
-4. When the user judges a version ready, they draft a release from its tag by
-   hand and paste that version's section out of
-   `Sourcerer_files/docs/CHANGELOG.md`. Publishing it starts
-   `.github/workflows/release-zip.yml`, which attaches **Sourcerer.zip**
-   (`releases/latest/download/Sourcerer.zip`, the Stable download).
-   Independently, every new version replaces Sourcerer.zip on the prerelease
-   `beta` (`releases/download/beta/Sourcerer.zip`, the Beta download); its tag
-   `beta` is moved by the workflow and by nothing else.
+4. When the user judges a version ready, they release it -- by hand (draft a
+   release from its tag, paste that version's section out of
+   `Sourcerer_files/docs/CHANGELOG.md`; publishing it starts `release-zip.yml`,
+   which attaches **Sourcerer.zip**, and `build-exe.yml`, which attaches the
+   installers) or **on command through `.github/workflows/publish.yml`**.
+   Independently, every new version replaces Sourcerer.zip and the standalone
+   files on the prerelease `beta`; its tag `beta` is moved by the workflow and
+   by nothing else (and is gone when somebody turns that release into a real
+   one -- the next version makes it again).
 
-Do not create releases or tags yourself, and do not push to `main`.
+**On command -- Actions > Publish (`publish.yml`, `workflow_dispatch`).** Inputs: `branch`
+(its open pull request is merged, rebased so every commit stays one changelog line; a
+pull request with a failing check is refused) and `release` (also publish the result as a
+Stable release: Sourcerer.zip + notes from the changelog, then the standalone files built and
+tested for that tag). The user can press it in the Actions tab or the GitHub app; Claude starts
+the same workflow with `actions_run_trigger` when told "merge it" / "merge and release it".
+Why it calls the next step itself: a merge or release made with `GITHUB_TOKEN` starts no
+workflow of its own, so it runs `version-bump.yml` (a `workflow_call`) after the merge and
+`build-exe.yml` after the release. Merging a pull request through the GitHub tool (not
+this workflow) is a normal push to `main` and needs none of that.
+
+Do not create tags yourself, and do not push to `main`. A release only on the user's
+word, and then through `publish.yml` -- not by editing the beta release into one (that
+deleted `beta` and left its links dead).
 
 ## Traps
 

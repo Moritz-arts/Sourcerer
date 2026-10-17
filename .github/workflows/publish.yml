@@ -1,0 +1,139 @@
+# Publish on command: merge a branch into main and, if you want, release the result as Stable.
+#
+# Actions > Publish > Run workflow (the GitHub app has it too) -- or tell Claude "merge it" /
+# "merge it and release it", who starts this same workflow. Nothing here runs by itself: that a
+# version is good enough to hand to people stays a decision somebody makes.
+#
+#   branch    the branch to merge. Its open pull request is merged (rebased onto main, so every
+#             commit's subject stays one line of the changelog); a pull request with a failing
+#             check is not. Empty: nothing to merge.
+#   release   also publish the new version as a Stable release: Sourcerer.zip, then the installer,
+#             disk images, AppImage and portable files (build-exe.yml, tested before they are
+#             attached). Becomes "releases/latest", which is what the Stable links and the
+#             in-app Stable channel read. Without a branch it releases the newest version as it is.
+#
+# Why a workflow and not a button press: a merge or a release made with GITHUB_TOKEN starts no
+# workflow of its own (GitHub's rule against runs triggering runs), so this one calls the next
+# step itself -- the version bump after the merge, the files after the release -- and the push
+# and release workflows still do their work when somebody merges or publishes by hand.
+name: Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: Branch to merge into main (its open pull request); empty = merge nothing
+        required: false
+        default: ""
+      release:
+        description: Also publish the resulting version as a Stable release
+        type: boolean
+        default: false
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    if: ${{ inputs.branch != '' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Merge the pull request of the branch
+        env:
+          # Through the environment, never interpolated into the script.
+          BRANCH: ${{ inputs.branch }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -eu
+          n=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+          if [ -z "$n" ]; then
+            echo "::error::No open pull request for '$BRANCH' -- open one first."
+            exit 1
+          fi
+          bad=$(gh pr view "$n" --json statusCheckRollup --jq '[.statusCheckRollup[]? | select((.conclusion // .state) as $c | ["FAILURE","ERROR","TIMED_OUT","CANCELLED","ACTION_REQUIRED","STARTUP_FAILURE"] | index($c))] | length')
+          if [ "$bad" != 0 ]; then
+            echo "::error::Pull request #$n has $bad failing check(s) -- not merged."
+            exit 1
+          fi
+          # Rebase keeps each commit's subject as a changelog line; the others are for a
+          # repository that has switched that kind of merge off.
+          gh pr merge "$n" --rebase || gh pr merge "$n" --squash || gh pr merge "$n" --merge
+          echo "Merged pull request #$n (\`$BRANCH\`) into main." >> "$GITHUB_STEP_SUMMARY"
+
+  bump:
+    needs: merge
+    # Runs also when nothing was merged (merge skipped), never after a failed or cancelled merge.
+    if: ${{ !cancelled() && needs.merge.result != 'failure' }}
+    permissions:
+      contents: write
+    uses: ./.github/workflows/version-bump.yml
+
+  release:
+    needs: bump
+    if: ${{ inputs.release && !cancelled() && needs.bump.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.make.outputs.tag }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Create the release with Sourcerer.zip
+        id: make
+        env:
+          NEW_VERSION: ${{ needs.bump.outputs.version }}
+        run: |
+          set -eu
+          git fetch -q --tags origin
+          VER="$NEW_VERSION"
+          # Main was already versioned (nothing merged, or merged by hand earlier): release the newest.
+          [ -n "$VER" ] || VER=$(git tag --list 'v*' --sort=-v:refname | head -1 | sed 's/^v//')
+          if [ -z "$VER" ]; then
+            echo "::error::There is no version tag to release."
+            exit 1
+          fi
+          TAG="v$VER"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::error::$TAG is already released."
+            exit 1
+          fi
+          # The version's own section of the changelog, then what to download.
+          git show "$TAG:Sourcerer_files/docs/CHANGELOG.md" \
+            | awk -v h="## $TAG " 'index($0,h)==1{f=1; print; next} f&&/^## v/{exit} f' > notes.md
+          [ -s notes.md ] || printf '## %s\n' "$TAG" > notes.md
+          cat >> notes.md <<'NOTES'
+
+          **Download for your system** (the files are not signed; the README says how to get past the first-start warning):
+
+          - Windows: Sourcerer-Setup.exe (installer) or Sourcerer-Windows.zip (portable)
+          - macOS: Sourcerer-macOS-arm64.dmg (Apple silicon) or Sourcerer-macOS-x86_64.dmg (Intel)
+          - Linux: Sourcerer-x86_64.AppImage or Sourcerer-Linux.tar.gz (opens in your browser)
+          - With Python, any system, updates itself: Sourcerer.zip
+          NOTES
+          git archive --format=zip -o Sourcerer.zip "$TAG"
+          # The launchers must sit at the top -- that is the whole point of this file.
+          unzip -l Sourcerer.zip | grep -q ' start-windows\.bat$'
+          gh release create "$TAG" --verify-tag --latest --title "$TAG" --notes-file notes.md Sourcerer.zip
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Released $TAG: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$TAG -- the other files follow in a few minutes." >> "$GITHUB_STEP_SUMMARY"
+
+  files:
+    needs: release
+    permissions:
+      contents: write
+    uses: ./.github/workflows/build-exe.yml
+    with:
+      ref: ${{ needs.release.outputs.tag }}
+      release: ${{ needs.release.outputs.tag }}
