@@ -52,7 +52,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-        run: gh release delete beta --cleanup-tag --yes 2>/dev/null || true
+        run: |
+          gh release delete beta --cleanup-tag --yes 2>/dev/null || true
+          # The release may be gone already (deleted by hand) with its tag left behind, and
+          # --cleanup-tag only works through a release that still exists.
+          gh api -X DELETE "repos/$GH_REPO/git/refs/tags/beta" 2>/dev/null || true
 
       - uses: actions/checkout@v4
         with:
