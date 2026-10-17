@@ -62,10 +62,12 @@ file like a user *before* it is attached -- a failing check keeps that system's 
 program, and Sourcerer.zip (launchers, system Python, in-app updater) the main download. Nothing exe-only is
 added to the root; the build files live in `.github/exe/`, outside every archive.
 
-How the code knows (`config.FROZEN`): Windows and the Linux tar.gz are the program + ONE folder,
-`Sourcerer_files/` (`--contents-directory`), so `config.ROOT` (= `sys._MEIPASS`), `STATIC`, `VERSION` and
-`Userdata/` keep their meaning there. **A macOS .app and an AppImage are read-only places** (signed
-bundle, squashfs mount): `config.USERDATA` is then `~/Library/Application Support/Sourcerer/Userdata` /
+How the code knows (`config.FROZEN`): **Windows and the Linux tar.gz are ONE executable** (PyInstaller
+`--onefile`, as few files as Pikura's install folder): it unpacks itself to a temp folder on every start,
+so `config.ROOT` (= `sys._MEIPASS`) is that folder -- `static/` and `VERSION`, read only -- and `Userdata/`
+is made **beside the executable** (`config.INSTALL / "Userdata"`; an old `INSTALL/Sourcerer_files/Userdata`
+from the folder builds up to v0.21 is used where it exists). **A macOS .app and an AppImage are read-only
+places** (signed bundle, squashfs mount) holding the unpacked program, so they start without unpacking: `config.USERDATA` is then `~/Library/Application Support/Sourcerer/Userdata` /
 `$XDG_DATA_HOME|~/.local/share/Sourcerer/Userdata` (the AppImage sets `APPIMAGE`), and the default library
 `~/Pictures/Sourcerer`. Further differences, all behind `config.FROZEN`: no launch.py, so `desktop.main`
 finds a running Sourcerer itself and `SOURCERER_DETACHED` is set in `app.py`; no venv, so gallery-dl is the
@@ -73,8 +75,7 @@ program started with `--gallery-dl` (dispatched first thing in `app.py`) and is 
 (`_gdl.upgrade` refuses, the weekly upgrade is skipped); no Python for the swap helper, so **an installed
 Windows copy updates through its own installer** (`updater.installed()`: `unins000.exe` beside the program;
 `_install_setup` downloads the latest `Sourcerer-Setup.exe`, checks GitHub's SHA-256 of the asset and runs
-it silently with `/START=1`; the Inno `[Code]` clears `Sourcerer_files` except `Userdata` before it copies,
-so stale files go and data stays) while every other standalone copy is **updated by hand** (`check` returns
+it silently with `/START=1`; the new `Sourcerer.exe` replaces the old one and Userdata stays beside it) while every other standalone copy is **updated by hand** (`check` returns
 `manual`, the page shows *Download* for `updater.ASSET`, install / reinstall refuse; macOS: drag the app over
 the old one, AppImage: replace the file, portable zip / tar.gz: delete all but `Userdata`, unpack). The
 *venv* and *reinstall* repairs and gallery-dl's row are hidden, and *Restart* starts the program with `--restart`, which waits until the old one stopped answering (an AppImage restarts through
@@ -97,17 +98,26 @@ Traps:
   it falls back to the browser (`SOURCERER_DETACHED`: the page's Quit, or 15 minutes without a page).
 - **A smoke test that stops an AppImage must kill its process group**: the runtime waits for the program
   as a child, so stopping only the runtime leaves the program and its port behind.
-- **The installer must clear the old program files itself**: Inno never removes a file the new version no
-  longer has, so `Sourcerer.iss` deletes everything in `Sourcerer_files` but `Userdata` at `ssInstall`
-  (`smoke.py` plants stale files, installs again and checks they are gone and Userdata is not). Never
-  `[InstallDelete]` a wildcard there -- it would take Userdata with it. Per user only
-  (`PrivilegesRequired=lowest`, no override): Userdata lives in the program's folder and must stay
-  writable. The setup file the updater downloads sits inside Userdata, which is what keeps it alive.
+- **The installer never clears the install folder.** A user may point it at any folder, so a wipe of
+  `{app}` would delete their things (`smoke.py` plants a neighbour file and checks it survives). It only
+  retires the one folder of ours that can be stale: `{app}\Sourcerer_files` of v0.19-v0.21, whose `Userdata`
+  it first moves out to `{app}\Userdata` (`RenameFile`; if that fails it stays and the app still finds it)
+  -- `smoke.py` installs over such a layout, then over the new one, and checks both. Never
+  `[InstallDelete]` a wildcard: it would take Userdata with it. Per user only (`PrivilegesRequired=lowest`,
+  no override): Userdata lives beside the program and must stay writable. The setup file the updater
+  downloads sits inside Userdata, which is what keeps it alive.
+- **One file means one unpacking per start -- and a shared folder for children.** A program the one-file
+  build starts from its own file (gallery-dl: `Sourcerer.exe --gallery-dl`) shares the parent's unpacked
+  folder, which is why each listing starts in a blink. A *new* Sourcerer must not share it -- the folder
+  goes with the old process -- so `updater.restart()` and the installer the updater starts get
+  `PYINSTALLER_RESET_ENVIRONMENT=1` (`updater.INDEPENDENT`) and `_gdl._start` strips it again.
+  `smoke.py` presses Restart and waits for the new process. Some scanners distrust one-file programs
+  more; the README says what to do.
 - **Fewer files, on purpose** (`build.py`): Windows 10+ has the C runtime, so the ~40 `api-ms-win-*.dll`
-  forwarders and `ucrtbase.dll` are dropped through the spec (the command line cannot drop a binary),
-  `setuptools`/`pkg_resources` are excluded, and the Windows build says its file count. The installer is
-  Windows 10+ only (`MinVersion=10.0`). One-file builds were weighed and refused: every start unpacks to
-  a temp folder, scanners distrust them more, and every gallery-dl listing is another start of the program.
+  forwarders and `ucrtbase.dll` are dropped through the spec (the command line cannot drop a binary) and
+  `setuptools`/`pkg_resources` are excluded -- a smaller file that unpacks faster. The installer is Windows
+  10+ only (`MinVersion=10.0`). The AppImage and the macOS app keep the unpacked program inside (one item
+  each, no unpacking at start).
 - **English everywhere, installer included** (`[Languages]` lists English only). The German words seen
   in Explorer ("Dateiordner", "Anwendungserweiterung") are Windows' own labels for file types, not names
   of ours; no tracked or built file has a non-English name.

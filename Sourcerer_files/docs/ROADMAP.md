@@ -265,8 +265,16 @@ add the one that replaced it.
   installed Windows copy downloads the new setup, checks its checksum and runs it silently; the
   C-runtime forwarders and setuptools are left out of the bundle; Windows 10+ only; the installer is
   English only. macOS, the AppImage and portable copies are replaced as a whole by hand (one app / one
-  file / delete-all-but-Userdata). A one-file build was refused (slower start, more scanner trouble,
-  every gallery-dl run unpacks again).
+  file / delete-all-but-Userdata). ~~A one-file build was refused (slower start, more scanner trouble,
+  every gallery-dl run unpacks again).~~ Reversed by the next entry.
+
+- 2026-10-17 — **One file, like Pikura.** The user showed Pikura's install folder (a handful of
+  files) beside Sourcerer's ~125: so Windows and the Linux tar.gz are now a single executable
+  (PyInstaller `--onefile`) with `Userdata/` beside it; the AppImage and the macOS app stay one item
+  with the program unpacked inside. Replaces the same day's refusal of one-file builds -- the costs
+  (a start that unpacks, scanners' distrust) are accepted for a download that is one file; gallery-dl
+  runs share the parent's unpacked folder so they stay quick, and a restart unpacks its own. Old
+  copies (a folder with `Sourcerer_files/Userdata`) keep working and the installer moves the data out.
 
 ## Done
 

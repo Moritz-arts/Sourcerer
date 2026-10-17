@@ -115,8 +115,11 @@ def _command(conf, args, url):
 
 
 def _start(cmd):
+    # In the one-file build gallery-dl is the program itself again; it shares the parent's unpacked
+    # folder unless told otherwise, so it must not be told otherwise (see updater.INDEPENDENT).
+    env = {k: v for k, v in os.environ.items() if k != "PYINSTALLER_RESET_ENVIRONMENT"}
     kwargs = {"stdout": subprocess.PIPE, "stderr": subprocess.PIPE, "stdin": subprocess.DEVNULL,
-              "cwd": str(DIR), "env": dict(os.environ, PYTHONIOENCODING="utf-8")}
+              "cwd": str(DIR), "env": dict(env, PYTHONIOENCODING="utf-8")}
     if os.name == "nt":
         kwargs["creationflags"] = 0x08000000           # CREATE_NO_WINDOW
     return subprocess.Popen(cmd, **kwargs)

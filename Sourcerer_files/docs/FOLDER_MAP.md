@@ -79,11 +79,12 @@ Sourcerer/                        <- what Sourcerer.zip unpacks to; move it free
 ```
 
 The standalone downloads (built by CI, not in the repository: Sourcerer-Setup.exe and
-Sourcerer-Windows.zip, the macOS .dmg, the Linux AppImage and tar.gz) hold the program as
-`Sourcerer(.exe)` + `Sourcerer_files/` -- the same folder name, with `static/`, `VERSION` and a
-`Userdata/` made on first start inside, and Python, the packages and gallery-dl compiled in
-(no `launch.py`, no `venv/`, no `sourcerer/` sources). The macOS app and the AppImage are read-only
-places, so there Userdata is in the user's data folder. See CLAUDE.md, "The standalone downloads".
+Sourcerer-Windows.zip, the macOS .dmg, the Linux AppImage and tar.gz) are ONE file each on Windows and
+in the tar.gz -- `Sourcerer.exe` / `Sourcerer`, with Python, the packages, `static/`, `VERSION` and
+gallery-dl inside (no `launch.py`, no `venv/`, no `sourcerer/` sources) -- and `Userdata/` made beside
+it on the first start (an install folder holds `Sourcerer.exe`, `Userdata/` and the uninstaller). The
+macOS app and the AppImage hold the unpacked program and are read-only places, so there Userdata is in
+the user's data folder. See CLAUDE.md, "The standalone downloads".
 
 Only in the repository, never in the ZIP (`export-ignore` in `.gitattributes`):
 
