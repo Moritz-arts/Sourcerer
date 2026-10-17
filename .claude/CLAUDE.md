@@ -220,6 +220,12 @@ this workflow) is a normal push to `main` and needs none of that.
 Do not create tags yourself, and do not push to `main`. A release only on the user's
 word, and then through `publish.yml`.
 
+Trap: **a job without its own `if` is skipped when ANY ancestor in its `needs` chain was skipped**
+(the implicit `success()` is not "my direct needs succeeded"). `publish.yml`'s `merge` job is skipped
+when no branch is given, which skipped `files` too: v0.23 was released with Sourcerer.zip only, and
+the files had to be built by hand (Actions > Build standalone Sourcerer > Run workflow, tag `v0.23`).
+Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.result == 'success' }}`.
+
 ## Traps
 
 ### Sourcerer's own

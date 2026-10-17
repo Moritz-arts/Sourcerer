@@ -131,6 +131,9 @@ jobs:
 
   files:
     needs: release
+    # Explicit, or the implicit success() looks at every ancestor in the chain: the skipped merge job
+    # (no branch given) made this one skip too, and v0.23 was released without its files.
+    if: ${{ !cancelled() && needs.release.result == 'success' }}
     permissions:
       contents: write
     uses: ./.github/workflows/build-exe.yml
