@@ -113,6 +113,16 @@ Traps:
   `PYINSTALLER_RESET_ENVIRONMENT=1` (`updater.INDEPENDENT`) and `_gdl._start` strips it again.
   `smoke.py` presses Restart and waits for the new process. Some scanners distrust one-file programs
   more; the README says what to do.
+- **The installer must not meet the dying program.** The in-app update first ran Setup at once and
+  then quit (`_shutdown`, ~4 s later): Setup's restart manager hit the still-running one-file build
+  (two `Sourcerer.exe` processes, window already destroyed), sat on "Closing applications..." and
+  rolled the update back -- v0.23 -> v0.25 never happened. `updater._setup_after_exit` now starts a
+  hidden cmd (`SETUP_CMD`, paths only through the environment) that waits until no `Sourcerer.exe`
+  runs (60 s at most), runs Setup with `/FORCECLOSEAPPLICATIONS` and its own log
+  `Userdata/Logs/setup.log`, and starts the old program again when Setup fails (block in
+  `update.log`, reported by `desktop._after_update`). Success writes nothing there: the new
+  Sourcerer starts inside Setup and would read the log before the script got to it. Not run on a
+  real Windows desktop yet -- CI never installs over a *running* copy.
 - **Fewer files, on purpose** (`build.py`): Windows 10+ has the C runtime, so the ~40 `api-ms-win-*.dll`
   forwarders and `ucrtbase.dll` are dropped through the spec (the command line cannot drop a binary) and
   `setuptools`/`pkg_resources` are excluded -- a smaller file that unpacks faster. The installer is Windows
