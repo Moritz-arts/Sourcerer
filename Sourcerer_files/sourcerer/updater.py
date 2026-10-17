@@ -17,6 +17,7 @@ starts Sourcerer again. When anything fails it puts the old version back. Every
 step goes to Userdata/Logs/update.log, which the next start shows.
 """
 import base64
+import datetime
 import logging
 import os
 import pathlib
@@ -82,8 +83,11 @@ def _check_release():
         rel = {}                                   # nothing published yet
     version = (rel.get("tag_name") or "").lstrip("vV")
     asset = next((a for a in rel.get("assets") or [] if a.get("name") == ASSET), None)
+    newer = version_tuple(version) > version_tuple(config.VERSION)
+    # "newer" without "available": the release is out, its files are still being attached (the
+    # installers come after Sourcerer.zip) -- "up to date" would be a lie.
     return {"channel": "stable", "current": config.VERSION, "version": version,
-            "available": bool(asset and version_tuple(version) > version_tuple(config.VERSION)),
+            "newer": newer, "available": bool(asset and newer),
             "url": asset["browser_download_url"] if asset else "",
             "sha256": (asset.get("digest") or "").removeprefix("sha256:") if asset else "",
             "notes": rel.get("body") or "", "page": rel.get("html_url") or "",
@@ -106,6 +110,56 @@ def installed():
     return config.FROZEN and sys.platform == "win32" and (config.INSTALL / "unins000.exe").is_file()
 
 
+# Run by a hidden cmd, paths only through the environment (a user name may not survive the console's
+# code page). No ( ) blocks, ping is the sleep (see the update helper); the new Sourcerer is started by
+# the installer itself (/START=1), the old one only when Setup failed -- and then the failure is a
+# block in update.log, which the next start reports (desktop._after_update). Success writes nothing:
+# the new Sourcerer would read the log before this script got to it.
+SETUP_CMD = "\r\n".join([
+    "@echo off",
+    "set n=0",
+    ":wait",
+    "set /a n+=1",
+    "if %n% gtr 60 goto go",
+    'tasklist /FI "IMAGENAME eq %SOURCERER_IMAGE%" /NH 2>nul | find /I "%SOURCERER_IMAGE%" >nul',
+    'if not "%errorlevel%"=="0" goto go',
+    "ping -n 2 127.0.0.1 >nul",
+    "goto wait",
+    ":go",
+    'start "" /wait "%SOURCERER_SETUP%" /SILENT /SUPPRESSMSGBOXES /NORESTART /FORCECLOSEAPPLICATIONS /START=1 /LOG="%SOURCERER_SETUP_LOG%"',
+    "set code=%errorlevel%",
+    'if "%code%"=="0" goto end',
+    'echo %SOURCERER_STAMP%  waiting for Sourcerer to close>>"%SOURCERER_UPDATE_LOG%"',
+    'echo setup failed (code %code%); Sourcerer starts again>>"%SOURCERER_UPDATE_LOG%"',
+    'start "" "%SOURCERER_EXE%" --restart',
+    ":end",
+    '(goto) 2>nul & del "%~f0"',
+    "",
+])
+
+
+def _setup_after_exit(setup):
+    """Windows, installed: run the installer once no Sourcerer.exe is left.
+
+    Started at once, Setup reached "Closing applications..." while this program was still going
+    down -- the one-file build is two processes, the window already gone -- and its restart
+    manager sat there until it gave up and rolled the update back. So a hidden cmd waits for every
+    Sourcerer.exe to end (60 s at most), runs Setup with its own log (Userdata/Logs/setup.log) and,
+    when Setup fails, starts the old Sourcerer again: no exit path leaves the program closed."""
+    exe = pathlib.Path(sys.executable)
+    config.LOG_DIR.mkdir(parents=True, exist_ok=True)
+    fd, script = tempfile.mkstemp(prefix="sourcerer-update-", suffix=".cmd")
+    with os.fdopen(fd, "w", encoding="ascii", newline="") as f:
+        f.write(SETUP_CMD)
+    env = dict(os.environ, SOURCERER_IMAGE=exe.name, SOURCERER_EXE=str(exe), SOURCERER_SETUP=str(setup),
+               SOURCERER_SETUP_LOG=str(config.LOG_DIR / "setup.log"),
+               SOURCERER_UPDATE_LOG=str(config.LOG_DIR / "update.log"),
+               SOURCERER_STAMP=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), **INDEPENDENT)
+    subprocess.Popen(["cmd.exe", "/c", script], cwd=tempfile.gettempdir(), stdin=subprocess.DEVNULL,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True, env=env,
+                     creationflags=0x08000000 | 0x00000200)              # no window, own process group
+
+
 def _install_setup(channel):
     """Windows, installed: download the newest Sourcerer-Setup.exe and run it silently."""
     if not installed():
@@ -122,13 +176,7 @@ def _install_setup(channel):
     # GitHub states each asset's SHA-256; what came down must be exactly that file, not an error page.
     if info.get("sha256") and sha != info["sha256"]:
         raise RuntimeError("The download does not match the release's checksum.")
-    # The installer clears the program's folder -- never Userdata, which holds this very file.
-    # Run from the temp folder, not from a folder it is about to empty.
-    kwargs = {"cwd": tempfile.gettempdir(), "stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL,
-              "stderr": subprocess.DEVNULL, "close_fds": True, "env": dict(os.environ, **INDEPENDENT),
-              "creationflags": 0x00000008 | 0x00000200}              # detached, own process group
-    subprocess.Popen([str(setup), "/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS",
-                      "/START=1"], **kwargs)
+    _setup_after_exit(setup)
     log.info("update to v%s started: %s", info["version"], setup)
     return info
 
