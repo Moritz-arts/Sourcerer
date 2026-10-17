@@ -5,6 +5,12 @@ automatically -- one line per change, newest first. A release is drafted by hand
 from the tag of whichever version is judged ready, and this is the text to paste
 into it.
 
+## v0.22 — 2026-10-17
+
+- The old beta tag is deleted even when its release was already gone
+- An update installs cleanly and removes what is gone; the Windows build has fewer files; the installer is English only
+- The smoke test expects an installed Windows copy to update itself, and prints the bundle's top-level count
+
 ## v0.21 — 2026-10-17
 
 - Releases hold only the Stable version, Beta is the main branch; the README download table is compact like Pikura's
