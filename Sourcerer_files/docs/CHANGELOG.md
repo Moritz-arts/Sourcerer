@@ -5,6 +5,10 @@ automatically -- one line per change, newest first. A release is drafted by hand
 from the tag of whichever version is judged ready, and this is the text to paste
 into it.
 
+## v0.23 — 2026-10-17
+
+- Windows and the Linux portable are one file, like Pikura's: Sourcerer.exe with Userdata beside it
+
 ## v0.22 — 2026-10-17
 
 - The old beta tag is deleted even when its release was already gone
