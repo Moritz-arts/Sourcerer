@@ -418,9 +418,17 @@ def _oauth_code(window, host):
 
 def _watch(key, window, ok, closed, extra, finish):
     deadline = time.monotonic() + LOGIN_MINUTES * 60
-    found = code = None
+    found = code = at = None
     while not closed.is_set() and time.monotonic() < deadline:
         time.sleep(1.5)
+        try:        # where the window is, for the log: a forum's 403 page has no address bar to read
+            here = urllib.parse.urlparse(window.get_current_url() or "")
+            here = here.netloc + here.path          # never the query: an oauth code sits there
+        except Exception:
+            here = at
+        if here != at:
+            at = here
+            log.info("%s: login window at %s", key, at)
         if finish:
             code = _oauth_code(window, key.split(":", 1)[1])
             if code:

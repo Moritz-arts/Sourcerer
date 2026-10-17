@@ -1414,7 +1414,8 @@ function accBox(a, win) {
     } else {
       btns += '<button type="button" data-acc="drop" title="Forget this attempt">Remove</button>';   // a login that failed or was closed
     }
-    if (a.kind === "window" && !win) btns += '<button type="button" data-acc="import" title="Import a cookies.txt">Import&hellip;</button>';
+    // A forum may refuse the embedded window (403): its cookies.txt from a normal browser is the way in.
+    if (a.kind === "window" && (!win || a.key.indexOf("xenforo:") === 0)) btns +='<button type="button" data-acc="import" title="Import a cookies.txt">Import&hellip;</button>';
   }
   return '<form class="accbox' + (expired ? " expired" : "") + (a.key === S.accFocus ? " focus" : "") + '" data-key="' + key + '" data-kind="' + a.kind + '">' +
     accId(a.key.split(":")[0], dot, a.group || a.label, a.group ? a.label : "", accState(a), dot === "warn" ? "warn" : expired ? "bad" : "") +
@@ -1467,7 +1468,7 @@ function accAdd(d) {
   var needsWindow = window_ && !S.window;
   var btns = '<button type="submit" class="primary"' + (!go || S.accBusy.add || needsWindow ? " disabled" : "") +
     (needsWindow ? ' title="Needs Sourcerer\'s own window"' : "") + ">Log in</button>";
-  if (t && t.kind === "window" && !S.window) btns += '<button type="button" data-acc="import-add" title="Import a cookies.txt">Import&hellip;</button>';
+  if (t && t.kind === "window" && (!S.window || t.type === "xenforo")) btns +='<button type="button" data-acc="import-add" title="Import a cookies.txt">Import&hellip;</button>';
   btns += '<button type="button" data-acc="cancel">Cancel</button>';
   return '<form class="accbox adding' + (S.accFocus === "add" ? " focus" : "") + '" data-key="add" data-add="1" data-kind="' + (t ? t.kind : "") + '">' +
     '<div class="acc-id">' + accMark(t ? t.type : "", "blank") + '<div class="acc-text"><div class="acc-top"><b>Add account</b></div>' +
@@ -1487,6 +1488,7 @@ function openAccounts(key) {
   closeMenu();
   S.accWant = key || "";
   S.accHtml = "";
+  if (!key && !S.accAdding) { S.accAdding = true; S.accType = ""; }    // opens on the add row: nothing to press first
   $("acc-browser").classList.toggle("hidden", S.window);
   if (!$("dlg-accounts").open) $("dlg-accounts").showModal();
   loadAccounts();

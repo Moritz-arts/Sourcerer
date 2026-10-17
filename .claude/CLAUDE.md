@@ -349,7 +349,10 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   booru (it is chosen from a list before its fields appear); only a card's link
   that names its site fills it in. The dot: green works, orange works but the
   site rests (`rest` in `/api/accounts`, from `net.paused`), red ran out, hollow
-  not logged in. Settings has no Accounts pane. The toolbar button shows
+  not logged in. The dialog **opens with the add row already open** (`openAccounts`, type empty),
+  Cancel turns it back into the button. A forum may answer the embedded login window with a bare
+  nginx 403 (the log says where the window was: `login window at <host><path>`): XenForo rows
+  offer *Import…* (cookies.txt of a normal browser) in the app window too. Settings has no Accounts pane. The toolbar button shows
   `S.logins` (the ones that ran out) as a red count.
 - **The card dialog lists a site only when a login of it is saved**
   (`fields[].logged_in` in `/api/state`, an expired one counts) -- plus
