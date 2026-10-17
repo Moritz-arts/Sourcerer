@@ -228,13 +228,19 @@ add the one that replaced it.
   once. The mockups' card grid is superseded by the user's decision; the card dialog,
   the activity bar and the toolbar stay as in them.
 
-- 2026-10-16 — **Sourcerer.exe, a standalone Windows build** beside Sourcerer.zip, not
-  instead of it: PyInstaller on a Windows runner, `Sourcerer-Windows.zip` attached to every
-  release and to `beta`, tested by starting it before it is published. The bundle's folder
-  is named `Sourcerer_files` so paths and Userdata mean what they do in the repository.
-  Updates of the exe are **by hand** for now. -- The user asked for an .exe; the earlier
-  decision for a system Python and a venv stands for everybody who has one, and the
-  launcher download keeps the in-app updater, which an exe cannot use as it is.
+- 2026-10-16 — **A standalone Windows build** beside Sourcerer.zip, not instead of it:
+  PyInstaller, tested by starting it before it is published. The bundle's folder is named
+  `Sourcerer_files` so paths and Userdata mean what they do in the repository. Updates are
+  **by hand** for now. -- The user asked for an .exe; the earlier decision for a system Python
+  and a venv stands for everybody who has one, and the launcher download keeps the in-app
+  updater, which an exe cannot use as it is.
+- 2026-10-17 — **Downloads like Pikura's, for all three systems:** `Sourcerer-Setup.exe`
+  (installer, per user) + `Sourcerer-Windows.zip`, `Sourcerer-macOS-<arch>.dmg`,
+  `Sourcerer-x86_64.AppImage` + `Sourcerer-Linux.tar.gz`, built on a runner per system and put
+  on every release and on `beta`. The first version's smoke test failed on GitHub's API
+  rationing the runner and kept every file off `beta`; the user found no .exe anywhere. Now
+  only a TLS failure fails that check. macOS and the AppImage keep Userdata in the user's data
+  folder (read-only places); Linux has no app window (browser). Unsigned, un-notarised.
 
 ## Done
 
@@ -305,10 +311,10 @@ add the one that replaced it.
 
 ## Next
 
-- [ ] Sourcerer.exe: update inside the program (a helper that does not need Python:
-      PowerShell or a second small exe), then gallery-dl between releases (its wheel
-      next to the exe); look at the first real runs on Windows; sign the exe if the
-      warnings turn out to scare people off
+- [ ] Standalone builds: update inside the program (a helper that does not need Python),
+      then gallery-dl between releases (its wheel next to the program); look at the first
+      real runs on all three systems; an app window on Linux (Qt?); sign / notarise if the
+      warnings scare people off
 
 - [ ] Forums behind a Cloudflare challenge without a login: fetch their
       pages through the login window's browser engine. (VerticalScope's

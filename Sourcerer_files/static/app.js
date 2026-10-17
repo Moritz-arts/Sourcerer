@@ -1701,7 +1701,7 @@ function loadInfo() {
       b.closest(".row").classList.toggle("hidden", S.frozen);
     });
     $("upd-hint").textContent = S.frozen
-      ? "Download the new Sourcerer-Windows.zip, close Sourcerer and copy Sourcerer.exe and the folder Sourcerer_files from it over the old ones (Replace). Your cards, settings and library stay."
+      ? "Download the new version for your system and install it over this one (Windows: run Sourcerer-Setup.exe; macOS: drag the app into Applications again; the portable zip / tar.gz: copy its files over the old ones). Close Sourcerer first. Your cards, settings and library stay."
       : "An update replaces the program files and keeps your cards, settings and library. Sourcerer restarts by itself.";
     $("upd-log-box").classList.toggle("hidden", !d.update_log.length);
     $("upd-log").textContent = d.update_log.join("\n");
