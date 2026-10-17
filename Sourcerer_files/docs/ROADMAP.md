@@ -258,6 +258,16 @@ add the one that replaced it.
   releases only. The README's download table is compact, as Pikura's: one row per system,
   installer and portable, every link the latest release, the first-start notes folded away.
 
+- 2026-10-17 — **An update leaves nothing stale behind, and the standalone Windows build has as few
+  files as it can.** The user, after looking at an installed copy: too many files (~125 beside the
+  program), nothing German, and an update must update everything and remove what is gone. So: the
+  installer clears the program's folder (never Userdata) before copying, and the in-app update of an
+  installed Windows copy downloads the new setup, checks its checksum and runs it silently; the
+  C-runtime forwarders and setuptools are left out of the bundle; Windows 10+ only; the installer is
+  English only. macOS, the AppImage and portable copies are replaced as a whole by hand (one app / one
+  file / delete-all-but-Userdata). A one-file build was refused (slower start, more scanner trouble,
+  every gallery-dl run unpacks again).
+
 ## Done
 
 - [x] Repository workshop: CLAUDE.md, docs, version workflow
@@ -327,10 +337,10 @@ add the one that replaced it.
 
 ## Next
 
-- [ ] Standalone builds: update inside the program (a helper that does not need Python),
-      then gallery-dl between releases (its wheel next to the program); look at the first
-      real runs on all three systems; an app window on Linux (Qt?); sign / notarise if the
-      warnings scare people off
+- [ ] Standalone builds: an in-program update for macOS, the AppImage and the portable copies
+      (an installed Windows copy has it), gallery-dl between releases (its wheel next to the
+      program); look at the first real runs on all three systems; an app window on Linux (Qt?);
+      sign / notarise if the warnings scare people off
 
 - [ ] Forums behind a Cloudflare challenge without a login: fetch their
       pages through the login window's browser engine. (VerticalScope's

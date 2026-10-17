@@ -70,10 +70,14 @@ bundle, squashfs mount): `config.USERDATA` is then `~/Library/Application Suppor
 `~/Pictures/Sourcerer`. Further differences, all behind `config.FROZEN`: no launch.py, so `desktop.main`
 finds a running Sourcerer itself and `SOURCERER_DETACHED` is set in `app.py`; no venv, so gallery-dl is the
 program started with `--gallery-dl` (dispatched first thing in `app.py`) and is upgraded only by a new build
-(`_gdl.upgrade` refuses, the weekly upgrade is skipped); no helper, so **updates are by hand**
-(`updater.check` returns `manual`, the page shows *Download* for `updater.ASSET` of this system, install /
-reinstall refuse, the *venv* and *reinstall* repairs and gallery-dl's row are hidden) and *Restart* starts
-the program with `--restart`, which waits until the old one stopped answering (an AppImage restarts through
+(`_gdl.upgrade` refuses, the weekly upgrade is skipped); no Python for the swap helper, so **an installed
+Windows copy updates through its own installer** (`updater.installed()`: `unins000.exe` beside the program;
+`_install_setup` downloads the latest `Sourcerer-Setup.exe`, checks GitHub's SHA-256 of the asset and runs
+it silently with `/START=1`; the Inno `[Code]` clears `Sourcerer_files` except `Userdata` before it copies,
+so stale files go and data stays) while every other standalone copy is **updated by hand** (`check` returns
+`manual`, the page shows *Download* for `updater.ASSET`, install / reinstall refuse; macOS: drag the app over
+the old one, AppImage: replace the file, portable zip / tar.gz: delete all but `Userdata`, unpack). The
+*venv* and *reinstall* repairs and gallery-dl's row are hidden, and *Restart* starts the program with `--restart`, which waits until the old one stopped answering (an AppImage restarts through
 `$APPIMAGE`, its inner binary dies with the mount).
 
 Traps:
@@ -93,9 +97,20 @@ Traps:
   it falls back to the browser (`SOURCERER_DETACHED`: the page's Quit, or 15 minutes without a page).
 - **A smoke test that stops an AppImage must kill its process group**: the runtime waits for the program
   as a child, so stopping only the runtime leaves the program and its port behind.
-- **The in-app updater is the missing piece**: the swap helper is a Python script run by the system's
-  Python, which these users lack. It needs a different helper (PowerShell / a second small program) -- do
-  not copy HELPER blindly: it also deletes by name and keeps `venv/`.
+- **The installer must clear the old program files itself**: Inno never removes a file the new version no
+  longer has, so `Sourcerer.iss` deletes everything in `Sourcerer_files` but `Userdata` at `ssInstall`
+  (`smoke.py` plants stale files, installs again and checks they are gone and Userdata is not). Never
+  `[InstallDelete]` a wildcard there -- it would take Userdata with it. Per user only
+  (`PrivilegesRequired=lowest`, no override): Userdata lives in the program's folder and must stay
+  writable. The setup file the updater downloads sits inside Userdata, which is what keeps it alive.
+- **Fewer files, on purpose** (`build.py`): Windows 10+ has the C runtime, so the ~40 `api-ms-win-*.dll`
+  forwarders and `ucrtbase.dll` are dropped through the spec (the command line cannot drop a binary),
+  `setuptools`/`pkg_resources` are excluded, and the Windows build says its file count. The installer is
+  Windows 10+ only (`MinVersion=10.0`). One-file builds were weighed and refused: every start unpacks to
+  a temp folder, scanners distrust them more, and every gallery-dl listing is another start of the program.
+- **English everywhere, installer included** (`[Languages]` lists English only). The German words seen
+  in Explorer ("Dateiordner", "Anwendungserweiterung") are Windows' own labels for file types, not names
+  of ours; no tracked or built file has a non-English name.
 - **Only what CI runs is tested**: Windows, Linux and macOS (both architectures) start the files; nobody
   has looked at them on a real desktop yet. appimagetool is downloaded from its `continuous` release at
   build time -- pin it if that ever bites.

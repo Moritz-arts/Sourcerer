@@ -85,12 +85,51 @@ def _check_release():
     return {"channel": "stable", "current": config.VERSION, "version": version,
             "available": bool(asset and version_tuple(version) > version_tuple(config.VERSION)),
             "url": asset["browser_download_url"] if asset else "",
-            "notes": rel.get("body") or "", "page": rel.get("html_url") or "", "manual": config.FROZEN}
+            "sha256": (asset.get("digest") or "").removeprefix("sha256:") if asset else "",
+            "notes": rel.get("body") or "", "page": rel.get("html_url") or "",
+            "manual": config.FROZEN and not installed()}
+
+
+def installed():
+    """A copy that Sourcerer-Setup.exe put in place -- its uninstaller sits beside the program.
+
+    Only such a copy updates itself: the installer does the swap (closes Sourcerer, clears the old
+    program files, keeps Userdata, starts the new one). A portable copy, a macOS app and an
+    AppImage are replaced by hand -- the app, or the one file, as a whole.
+    """
+    return config.FROZEN and sys.platform == "win32" and (config.INSTALL / "unins000.exe").is_file()
+
+
+def _install_setup(channel):
+    """Windows, installed: download the newest Sourcerer-Setup.exe and run it silently."""
+    if not installed():
+        raise RuntimeError("The standalone Sourcerer is updated by hand: download %s." % ASSET)
+    info = _check_release()
+    if not info["url"]:
+        raise RuntimeError("The latest release has no %s." % ASSET)
+    if not info["available"]:
+        raise RuntimeError("Sourcerer is up to date.")
+    shutil.rmtree(config.UPDATE_DIR, ignore_errors=True)
+    part, sha, _ext, _name = net.download(info["url"], config.UPDATE_DIR)
+    setup = config.UPDATE_DIR / ASSET
+    os.replace(part, setup)
+    # GitHub states each asset's SHA-256; what came down must be exactly that file, not an error page.
+    if info.get("sha256") and sha != info["sha256"]:
+        raise RuntimeError("The download does not match the release's checksum.")
+    # The installer clears the program's folder -- never Userdata, which holds this very file.
+    # Run from the temp folder, not from a folder it is about to empty.
+    kwargs = {"cwd": tempfile.gettempdir(), "stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL,
+              "stderr": subprocess.DEVNULL, "close_fds": True,
+              "creationflags": 0x00000008 | 0x00000200}              # detached, own process group
+    subprocess.Popen([str(setup), "/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS",
+                      "/START=1"], **kwargs)
+    log.info("update to v%s started: %s", info["version"], setup)
+    return info
 
 
 def install(channel):
     if config.FROZEN:
-        raise RuntimeError("The standalone Sourcerer is updated by hand: download %s." % ASSET)
+        return _install_setup(channel)
     info = check(channel)
     if not info["url"]:
         raise RuntimeError("This channel has no Sourcerer.zip to install.")

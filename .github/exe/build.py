@@ -36,17 +36,24 @@ HERE = pathlib.Path(__file__).resolve().parent
 APPIMAGETOOL = "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
 
 
+# Files PyInstaller copies that the system already has. Windows 10 and newer ship the Universal C
+# Runtime; its ~40 forwarder DLLs (api-ms-win-*) and ucrtbase.dll are only for Windows 7 and 8, which
+# Python 3.12 and WebView2 have left behind. Not in the bundle = not a file somebody has to look at.
+DROP = {"win32": ("api-ms-win-", "ucrtbase.dll")}
+
+
 def freeze(out):
     sep = os.pathsep
     args = [
-        str(FILES / "app.py"), "--noconfirm", "--clean",
+        str(FILES / "app.py"),
         "--name", "Sourcerer", "--windowed",
-        "--distpath", str(out / "dist"), "--workpath", str(out / "work"), "--specpath", str(out),
-        "--paths", str(FILES),
+        "--specpath", str(out), "--paths", str(FILES),
         "--add-data", "%s%sstatic" % (FILES / "static", sep),
         "--add-data", "%s%s." % (FILES / "VERSION", sep),
         # gallery-dl loads its extractors by name at run time, which no import scan sees.
         "--collect-submodules", "gallery_dl", "--copy-metadata", "gallery-dl",
+        # Pulled in by libraries that only mention them; a build tool is not part of a program.
+        "--exclude-module", "setuptools", "--exclude-module", "pkg_resources",
     ]
     if sys.platform == "darwin":
         args += ["--icon", str(HERE / "Sourcerer.icns"), "--osx-bundle-identifier", "io.github.moritz-arts.sourcerer"]
@@ -60,7 +67,17 @@ def freeze(out):
         # Linux has no such bridge in the bundle (GTK/Qt come from the system): browser only.
         for pkg in ("webview",) + (("pythonnet", "clr_loader") if sys.platform == "win32" else ()):
             args += ["--collect-all", pkg]
-    PyInstaller.__main__.run(args)
+    # Through a spec file, because the command line cannot drop a binary from the bundle.
+    subprocess.check_call([sys.executable, "-m", "PyInstaller.utils.cliutils.makespec"] + args)
+    spec = out / "Sourcerer.spec"
+    text = spec.read_text(encoding="utf-8")
+    drop = DROP.get(sys.platform)
+    if drop:
+        keep = "a.binaries = [b for b in a.binaries if not b[0].lower().startswith(%r)]\npyz = PYZ(a.pure)" % (drop,)
+        assert "pyz = PYZ(a.pure)" in text
+        spec.write_text(text.replace("pyz = PYZ(a.pure)", keep), encoding="utf-8")
+    PyInstaller.__main__.run([str(spec), "--noconfirm", "--clean",
+                              "--distpath", str(out / "dist"), "--workpath", str(out / "work")])
     return out / "dist"
 
 
@@ -130,6 +147,8 @@ def main():
     dist = freeze(out)
     if sys.platform != "darwin":
         assert (dist / "Sourcerer" / "Sourcerer_files" / "VERSION").read_text(encoding="utf-8").strip() == version
+        files = [p for p in (dist / "Sourcerer").rglob("*") if p.is_file()]
+        print("bundle: %d files, %.1f MB" % (len(files), sum(p.stat().st_size for p in files) / 1e6))
     {"win32": windows, "darwin": macos}.get(sys.platform, linux)(dist, assets, version)
     for p in sorted(assets.iterdir()):
         print("built %s (v%s, %.1f MB)" % (p, version, p.stat().st_size / 1e6))

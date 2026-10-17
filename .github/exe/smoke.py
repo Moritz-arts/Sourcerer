@@ -102,6 +102,24 @@ def unpack(asset, work, home):
     sys.exit("don't know how to test " + name)
 
 
+def update_over(asset, exe, data):
+    """The installer over an existing install -- what an update is. Files the new version does not
+    have must be gone, the user's Userdata must be untouched, and the program must still be there."""
+    folder = exe.parent / "Sourcerer_files"
+    stale_file, stale_dir, mine = folder / "old_module.pyd", folder / "old_package", data / "mine.txt"
+    stale_file.write_bytes(b"old")
+    (stale_dir / "deep").mkdir(parents=True)
+    (stale_dir / "deep" / "x.py").write_text("old")
+    check((exe.parent / "unins000.exe").is_file(), "the install has its uninstaller (that is what lets it update itself)")
+    mine.parent.mkdir(parents=True, exist_ok=True)
+    mine.write_text("my cards")
+    subprocess.check_call([str(asset), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER",
+                           "/NOICONS", "/DIR=" + str(exe.parent), "/LOG=" + str(exe.parent.parent / "update.log")])
+    check(not stale_file.exists() and not stale_dir.exists(), "an update removes what the new version no longer has")
+    check(mine.is_file() and mine.read_text() == "my cards", "an update keeps Userdata")
+    check(exe.is_file() and (folder / "VERSION").is_file(), "the program is in place after the update")
+
+
 def main():
     asset = pathlib.Path(sys.argv[1]).resolve()
     work = pathlib.Path(tempfile.mkdtemp(prefix="sourcerer-smoke-"))
@@ -109,6 +127,8 @@ def main():
     home.mkdir()
     exe, data, env = unpack(asset, work, home)
     check(exe.is_file(), "%s unpacks to a program" % asset.name, str(exe))
+    if asset.name.endswith("Setup.exe"):
+        update_over(asset, exe, data)
     logs = data / "Logs"
 
     def start(*args):
