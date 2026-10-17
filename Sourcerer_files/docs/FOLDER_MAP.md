@@ -94,6 +94,8 @@ Only in the repository, never in the ZIP (`export-ignore` in `.gitattributes`):
 │   ├─ workflows/version-bump.yml raises the version on every push to main,
 │   │                               and puts that build on the `beta` prerelease
 │   ├─ workflows/release-zip.yml  attaches Sourcerer.zip to a published release
+│   ├─ workflows/publish.yml      on command (Run workflow): merges a branch's pull request,
+│   │                               raises the version, and if asked publishes the Stable release
 │   ├─ workflows/build-exe.yml    builds the standalone downloads on a Windows, a Linux and
 │   │                               two macOS runners, tests them, attaches them to a release /
 │   │                               `beta`; also on pull requests

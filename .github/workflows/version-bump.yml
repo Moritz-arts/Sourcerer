@@ -1,10 +1,11 @@
 # One push to main is one version of Sourcerer.
 #
 # This raises the number, writes the line that says what changed, and tags it.
-# It does NOT publish a release: whether a version is good enough to hand to
-# people is a judgement, and a judgement is not something a workflow gets to
-# make. When you decide one is, the tag is already sitting there -- draft a
-# release from it and paste its section out of CHANGELOG.md.
+# It does NOT publish a release on its own: whether a version is good enough to
+# hand to people is a judgement, and a judgement is not something a push gets to
+# make. When you decide one is, the tag is already sitting there -- run
+# Actions > Publish with "release" ticked (publish.yml), or draft a release from
+# it by hand and paste its section out of CHANGELOG.md.
 #
 # The commit it makes keeps the work's own subject line and adds the version to
 # it, so the front page reads "what changed (v0.4)" rather than a column of
@@ -19,14 +20,22 @@ name: Raise the version
 on:
   push:
     branches: [main]
-
-concurrency:
-  group: version-bump
-  cancel-in-progress: false
+  # Called by publish.yml after it merged a branch: a merge made with GITHUB_TOKEN starts no
+  # push run (GitHub's rule against workflows triggering workflows), so nothing would raise
+  # the version otherwise.
+  workflow_call:
+    outputs:
+      version:
+        description: The version just raised; empty when main was already versioned
+        value: ${{ jobs.bump.outputs.version }}
 
 jobs:
   bump:
     if: ${{ !contains(github.event.head_commit.message, '[skip version]') }}
+    # On the job, not the workflow: a called workflow's own top-level concurrency is not honoured.
+    concurrency:
+      group: version-bump
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     permissions:
       contents: write
