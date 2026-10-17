@@ -148,7 +148,8 @@ def main():
     if sys.platform != "darwin":
         assert (dist / "Sourcerer" / "Sourcerer_files" / "VERSION").read_text(encoding="utf-8").strip() == version
         files = [p for p in (dist / "Sourcerer").rglob("*") if p.is_file()]
-        print("bundle: %d files, %.1f MB" % (len(files), sum(p.stat().st_size for p in files) / 1e6))
+        top = len(list((dist / "Sourcerer" / "Sourcerer_files").iterdir()))
+        print("bundle: %d files, %d entries in Sourcerer_files, %.1f MB" % (len(files), top, sum(p.stat().st_size for p in files) / 1e6))
     {"win32": windows, "darwin": macos}.get(sys.platform, linux)(dist, assets, version)
     for p in sorted(assets.iterdir()):
         print("built %s (v%s, %.1f MB)" % (p, version, p.stat().st_size / 1e6))
