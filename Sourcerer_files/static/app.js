@@ -1696,14 +1696,14 @@ function loadInfo() {
     $("gdl-version").textContent = d.gallery_dl ? "v" + d.gallery_dl : "(not installed)";
     // The standalone exe has no Python environment to rebuild, no pip for gallery-dl and no helper
     // to swap its files: those three rows are not offered there.
-    S.frozen = !!d.frozen;
+    S.frozen = !!d.frozen; S.updatable = !!d.updatable;
     $$('#btn-gdl, [data-repair="venv"], [data-repair="reinstall"]').forEach(function (b) {
       b.closest(".row").classList.toggle("hidden", S.frozen);
     });
     $$('[data-set="channel"]')[0].closest(".field").classList.toggle("hidden", S.frozen);   // releases only: no binary of main exists
-    $("upd-hint").textContent = S.frozen
-      ? "Download the new version for your system and install it over this one (Windows: run Sourcerer-Setup.exe; macOS: drag the app into Applications again; the portable zip / tar.gz: copy its files over the old ones). Close Sourcerer first. Your cards, settings and library stay."
-      : "An update replaces the program files and keeps your cards, settings and library. Sourcerer restarts by itself.";
+    $("upd-hint").textContent = !S.frozen || S.updatable
+      ? "An update replaces the program files, removes the ones the new version no longer has, and keeps your cards, settings and library. Sourcerer restarts by itself."
+      : "Download the new version for your system. macOS: drag the app into Applications again, replacing the old one. Linux AppImage: replace the file. Portable zip or tar.gz: delete the old program files (everything except Sourcerer_files/Userdata) and unpack the new ones. Close Sourcerer first; your cards, settings and library stay.";
     $("upd-log-box").classList.toggle("hidden", !d.update_log.length);
     $("upd-log").textContent = d.update_log.join("\n");
   }).catch(fail);

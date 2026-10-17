@@ -14,7 +14,7 @@ A portable app for Windows, Linux and macOS that keeps per-artist media collecti
 | **macOS** | [Apple silicon .dmg](https://github.com/Moritz-arts/Sourcerer/releases/latest) · [Intel .dmg](https://github.com/Moritz-arts/Sourcerer/releases/latest) | — |
 | **Linux** | [.AppImage](https://github.com/Moritz-arts/Sourcerer/releases/latest) | [.tar.gz](https://github.com/Moritz-arts/Sourcerer/releases/latest) |
 
-Python is inside — nothing else to install. Every link opens the latest release, the only one
+Python is inside — nothing else to install (Windows 10 or newer). Every link opens the latest release, the only one
 there is: GitHub's releases hold the Stable version, nothing else. The newest state of the
 `main` branch is the **Beta**: *Settings › Updates › Beta* in the version with Python (below)
 follows it.
@@ -41,8 +41,13 @@ Your data (cards, logins, settings, the default library): Windows — the `Sourc
 folder of the program; macOS — `~/Library/Application Support/Sourcerer` (downloads go to
 `~/Pictures/Sourcerer` until you choose a folder); the Linux AppImage — `~/.local/share/Sourcerer`.
 
-**Updates are by hand** for now: *Settings › Updates* tells you when a release is out; install the
-new one over the old (close Sourcerer first) and your data stays.
+**Updates:** *Settings › Updates* tells you when a release is out.
+- **Windows, installed:** **Install** does it all — it downloads the new setup, closes Sourcerer, replaces
+  the program files (the old ones that are no longer needed are removed), keeps your data and starts
+  Sourcerer again.
+- **macOS:** drag the new app onto *Applications*, replacing the old one. **Linux AppImage:** replace the
+  file. **Portable zip / tar.gz:** delete the old program files (everything except
+  `Sourcerer_files/Userdata`) and unpack the new ones. Your data stays in every case.
 
 </details>
 

@@ -645,7 +645,7 @@ def info():
                    system="%s %s" % (platform.system(), platform.release()),
                    program=str(config.INSTALL), userdata=str(config.USERDATA),
                    library=sync.library(), repo="https://github.com/%s" % config.REPO,
-                   update_log=lines, window=WINDOW is not None, frozen=config.FROZEN)
+                   update_log=lines, window=WINDOW is not None, frozen=config.FROZEN, updatable=updater.installed())
 
 
 # ---- accounts -----------------------------------------------------------------------
