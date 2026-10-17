@@ -5,6 +5,10 @@ automatically -- one line per change, newest first. A release is drafted by hand
 from the tag of whichever version is judged ready, and this is the text to paste
 into it.
 
+## v0.21 — 2026-10-17
+
+- Releases hold only the Stable version, Beta is the main branch; the README download table is compact like Pikura's
+
 ## v0.20 — 2026-10-17
 
 - Publish workflow: merge a branch into main and release it as Stable on command; README downloads link to the latest release
