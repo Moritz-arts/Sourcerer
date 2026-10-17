@@ -82,8 +82,11 @@ def _check_release():
         rel = {}                                   # nothing published yet
     version = (rel.get("tag_name") or "").lstrip("vV")
     asset = next((a for a in rel.get("assets") or [] if a.get("name") == ASSET), None)
+    newer = version_tuple(version) > version_tuple(config.VERSION)
+    # "newer" without "available": the release is out, its files are still being attached (the
+    # installers come after Sourcerer.zip) -- "up to date" would be a lie.
     return {"channel": "stable", "current": config.VERSION, "version": version,
-            "available": bool(asset and version_tuple(version) > version_tuple(config.VERSION)),
+            "newer": newer, "available": bool(asset and newer),
             "url": asset["browser_download_url"] if asset else "",
             "sha256": (asset.get("digest") or "").removeprefix("sha256:") if asset else "",
             "notes": rel.get("body") or "", "page": rel.get("html_url") or "",

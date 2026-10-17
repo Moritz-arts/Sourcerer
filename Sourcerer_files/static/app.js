@@ -1722,6 +1722,7 @@ function showUpdate() {
   if (u.error) $("upd-status").textContent = u.error;
   else if (has) $("upd-status").textContent = "v" + u.version + " is available.";
   else if (!u.version) $("upd-status").textContent = "Nothing published on this channel yet.";
+  else if (u.newer) $("upd-status").textContent = "v" + u.version + " is out, but its file for this system is still being attached. Check again in a few minutes.";
   else $("upd-status").textContent = "Up to date. Newest " + (u.channel === "beta" ? "version on the main branch" : "release") + ": v" + u.version + ".";
   $("btn-install").querySelector("span").textContent = has ? (u.manual ? "Download v" : "Install v") + u.version : "Install";
   $("upd-notes").textContent = has ? u.notes : "";
