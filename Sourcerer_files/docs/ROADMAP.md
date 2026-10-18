@@ -240,7 +240,9 @@ add the one that replaced it.
   on every release and on `beta`. The first version's smoke test failed on GitHub's API
   rationing the runner and kept every file off `beta`; the user found no .exe anywhere. Now
   only a TLS failure fails that check. macOS and the AppImage keep Userdata in the user's data
-  folder (read-only places); Linux has no app window (browser). Unsigned, un-notarised.
+  folder (read-only places); Linux: the AppImage and the launcher's venv open a Qt window
+  (PyQt6 from pip; browser when Qt cannot start), the one-file tar.gz stays browser-only.
+  Unsigned, un-notarised.
 
 - 2026-10-17 — **Publishing on command.** The user, comparing with TrackImage and Pikura:
   Sourcerer should be automated on GitHub -- a branch merged into main on command, and

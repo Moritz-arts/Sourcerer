@@ -10,11 +10,14 @@ In the browser there is then no console to close: the page's Quit button ends
 Sourcerer, and so does a page that has not been open for IDLE_MINUTES.
 """
 import argparse
+import importlib.util
 import json
 import logging
 import logging.handlers
 import os
 import shutil
+import subprocess
+import sys
 import threading
 import time
 import urllib.request
@@ -106,6 +109,39 @@ def _running(focus=False):
         return False
 
 
+def window_check():
+    """The child of `_window_ok`: exit 0 only if Qt can open a window here."""
+    from qtpy.QtWidgets import QApplication
+    from qtpy.QtWebEngineWidgets import QWebEngineView  # noqa: F401 -- Qt wants it before the application
+    QApplication([])
+    return 0
+
+
+def _window_ok():
+    """Whether pywebview can open a window. Only Linux needs asking: its Qt does not raise when it
+    cannot start (no display, no xcb-cursor library) -- it aborts the process, server included.
+    So a child tries first, and the browser is the answer when it dies."""
+    if not sys.platform.startswith("linux") or importlib.util.find_spec("gi"):
+        return True                                         # GTK from the system, as ever
+    if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+        return False
+    cmd = [sys.executable, "--window-check"] if config.FROZEN else \
+        [sys.executable, "-c", "import sys; from sourcerer import desktop; sys.exit(desktop.window_check())"]
+    try:
+        done = subprocess.run(cmd, cwd=None if config.FROZEN else str(config.ROOT),
+                              capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError) as e:
+        log.info("Window check did not run: %s", e)
+        return False
+    if done.returncode:
+        lines = (done.stderr or "").strip().splitlines()
+        log.info("Qt cannot open a window here (%s)", lines[-1] if lines else "code %s" % done.returncode)
+        return False
+    if os.geteuid() == 0:                                   # Chromium refuses to start as root otherwise
+        os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS", "--no-sandbox")
+    return True
+
+
 def _serve_until_idle():
     """Browser mode without a console: run while a page is open, or a sync is."""
     while True:
@@ -151,6 +187,8 @@ def main(argv=None):
     try:
         if not (args.browser or args.no_open):
             try:
+                if not _window_ok():
+                    raise RuntimeError("no Qt or GTK window possible")
                 import webview
                 server.WINDOW = webview.create_window(
                     "Sourcerer v%s" % config.VERSION, url, width=1280, height=860, min_size=(760, 520))

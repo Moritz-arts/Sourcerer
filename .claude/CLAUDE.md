@@ -94,8 +94,16 @@ Traps:
   first. The `--gallery-dl` run has real pipes (`_gdl._start`) and must keep them.
 - **Not signed, not notarised.** Windows SmartScreen and macOS Gatekeeper warn once (the README says
   how to get past it), some scanners remove PyInstaller programs. Signing is a decision for the user.
-- **Linux has no app window**: pywebview needs GTK or Qt from the system, which a bundle cannot carry;
-  it falls back to the browser (`SOURCERER_DETACHED`: the page's Quit, or 15 minutes without a page).
+- **Linux's window is Qt, from pip** (`QtPy`, `PyQt6`, `PyQt6-WebEngine`, optional lines in
+  `requirements.txt`; the venv has no GTK). Without it the log says "GTK cannot be loaded" and the page
+  greys every window/OAuth login (`server.WINDOW is None`) -- v0.25 and before, in the launcher and
+  the AppImage alike. **Qt aborts the process when it cannot start** (no display, no `libxcb-cursor0`
+  or other xcb library -- an `except` never sees it), so `desktop._window_ok` first runs a child
+  (`window_check`; frozen: `--window-check`, dispatched in `app.py`) and falls back to the browser when
+  it dies. Root needs `--no-sandbox` for QtWebEngine (set there). The AppImage bundles Qt (`build.py`:
+  ~600 MB unpacked, ~240 MB gzip); the **tar.gz (one file) excludes it** -- it would unpack that on
+  every start -- and stays browser-only (`SOURCERER_DETACHED`: the page's Quit, or 15 minutes
+  without a page). Checked: bundle under Xvfb reports `window: true`.
 - **A smoke test that stops an AppImage must kill its process group**: the runtime waits for the program
   as a child, so stopping only the runtime leaves the program and its port behind.
 - **The installer never clears the install folder.** A user may point it at any folder, so a wipe of

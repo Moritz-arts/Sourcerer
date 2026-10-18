@@ -66,9 +66,20 @@ def freeze(out, onefile):
     if sys.platform in ("win32", "darwin"):
         # The window: pywebview on WebView2 (through pythonnet) or WKWebView; their libraries are
         # found by hooks only when asked for. Without them Sourcerer still starts, in the browser.
-        # Linux has no such bridge in the bundle (GTK/Qt come from the system): browser only.
         for pkg in ("webview",) + (("pythonnet", "clr_loader") if sys.platform == "win32" else ()):
             args += ["--collect-all", pkg]
+    elif onefile:
+        # The tar.gz's one file unpacks itself on every start: ~600 MB of Qt each time. It stays
+        # browser-only (desktop._window_ok finds no Qt and says so); the AppImage has the window.
+        args += ["--exclude-module", "PyQt6", "--exclude-module", "qtpy"]
+    else:
+        # The AppImage: pywebview's Qt backend (GTK cannot be carried). qtpy picks PyQt6 at run time
+        # and PyInstaller's PyQt6 hooks then bring the plugins and QtWebEngine, but only for modules it sees.
+        args += ["--collect-all", "webview", "--collect-submodules", "qtpy"]
+        for mod in ("QtWidgets", "QtNetwork", "QtWebChannel", "QtWebEngineCore", "QtWebEngineWidgets"):
+            args += ["--hidden-import", "PyQt6." + mod]
+        for other in ("PyQt5", "PySide2", "PySide6"):           # one binding only; qtpy would see them all
+            args += ["--exclude-module", other]
     # Through a spec file, because the command line cannot drop a binary from the bundle.
     spec_dir.mkdir(parents=True)
     subprocess.check_call([sys.executable, "-m", "PyInstaller.utils.cliutils.makespec"] + args)

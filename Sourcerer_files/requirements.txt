@@ -6,4 +6,7 @@ flask>=3.0          # the local web server the window talks to
 requests>=2.31      # downloads over kept-open connections: many files, one handshake per site
 pillow>=10.0        # fingerprints to find the same picture from another site; thumbnails
 pywebview>=5.0      # the app window itself; without it Sourcerer opens in the browser  # optional
-gallery-dl>=1.32    # lists X and forums; Settings > Updates upgrades it between releases  # optional
+QtPy>=2.4; sys_platform == "linux"             # Linux has no GTK in the venv: pywebview's window is Qt  # optional
+PyQt6>=6.5; sys_platform == "linux"            # the Qt itself, wheels, no sudo; needs libxcb-cursor0 on the system  # optional
+PyQt6-WebEngine>=6.5; sys_platform == "linux"  # the web view in that window  # optional
+gallery-dl>=1.32   # lists X and forums; Settings > Updates upgrades it between releases  # optional
