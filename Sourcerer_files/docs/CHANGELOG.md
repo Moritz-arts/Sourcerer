@@ -5,6 +5,11 @@ automatically -- one line per change, newest first. A release is drafted by hand
 from the tag of whichever version is judged ready, and this is the text to paste
 into it.
 
+## v0.27 — 2026-10-18
+
+- Updates: a release that lacks this system's file links to its release page
+- Windows update: Setup waits for Sourcerer.exe to be free and never forces it closed, and the update helper reports a failed Setup or a helper that did not start
+
 ## v0.26 — 2026-10-18
 
 - Updates: a release whose files are still being attached is reported as such, not as up to date
