@@ -286,46 +286,109 @@ function removeArtist(a) {
   }).catch(fail);
 }
 
-// ---- merge: the artist's card becomes part of another ------------------------------
+// ---- merge: cards become one ----------------------------------------------------------
 
-// Accounts the sites did not show to be one artist (the follows come in as one card each): this card's
-// sources and files move to the card picked, and this one is gone.
-var mergeFrom = 0;
+// Accounts the sites did not show to be one artist (the follows come in as one card each): the open card and the ones
+// ticked here become one. The card marked "Stays" gets every source and file, the others are gone. There is no further
+// question -- the button at the bottom is the confirmation, so several cards go in one go.
+var M = { from: 0, picked: [], keep: 0, key: "", base: "", handles: [], suggested: [] };
+
+// Two names are one when only what is no letter or digit differs: emoji, spaces, marks, width, case
+// ("👹 青林檎テル" is "青林檎テル"). The base leaves out a "(handle)" at the end, which a card gets when another had its name.
+function nameKey(name) { return String(name || "").normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ""); }
+function baseKey(name) { return nameKey(String(name || "").replace(/\s*[(\[（【][^)\]）】]*[)\]）】]\s*$/, "")); }
+// The account names in a card's links: "foo" in bsky.app/profile/foo.bsky.social, x.com/foo and mastodon.social/@foo.
+// Numbers (pixiv's ids) and short ones say nothing.
+function handlesOf(a) {
+  var out = [];
+  a.sources.forEach(function (s) {
+    var last = "";
+    try { last = decodeURIComponent(new URL(s.url).pathname.replace(/\/+$/, "").split("/").pop()); } catch (e) { return; }
+    var h = nameKey(last.replace(/^@/, "").split("@")[0].split(".")[0]);
+    if (h.length >= 3 && !/^\d+$/.test(h) && out.indexOf(h) < 0) out.push(h);
+  });
+  return out;
+}
+// How likely b is the open card's artist: 4 the same name, 3 the same but for a "(handle)" or a shared account name,
+// 2 a name that is the other's account name, 1 one name inside the other. 0: nothing.
+function sameness(b) {
+  var kb = nameKey(b.name), hb = handlesOf(b);
+  if (M.key && M.key === kb) return 4;
+  if ((M.base && M.base === baseKey(b.name)) || M.handles.some(function (h) { return hb.indexOf(h) >= 0; })) return 3;
+  if (hb.indexOf(M.key) >= 0 || M.handles.indexOf(kb) >= 0) return 2;
+  var lo = M.key.length < kb.length ? M.key : kb, hi = lo === M.key ? kb : M.key;
+  return lo.length >= 3 && lo.length * 2 >= hi.length && hi.indexOf(lo) >= 0 ? 1 : 0;
+}
 function openMerge(a) {
   closeMenu();
-  mergeFrom = a.id;
-  $("merge-title").textContent = "Merge " + a.name + " into…";
-  $("merge-hint").textContent = "Pick the artist these accounts belong to. Its card keeps everything of " + a.name +
-    " (sources, downloaded files, history) and this card goes away.";
+  M = { from: a.id, picked: [], keep: 0, key: nameKey(a.name), base: baseKey(a.name), handles: handlesOf(a), suggested: [] };
+  M.suggested = S.artists.filter(function (b) { return b.id !== a.id; })
+    .map(function (b) { return [sameness(b), b]; }).filter(function (x) { return x[0]; })
+    .sort(function (x, y) { return y[0] - x[0] || x[1].name.localeCompare(y[1].name); })
+    .slice(0, 10).map(function (x) { return x[1].id; });
+  $("merge-title").textContent = "Merge " + a.name + " with…";
+  $("merge-hint").textContent = "Tick the cards that are the same artist. They become one card: the one marked Stays keeps " +
+    "every source and downloaded file, the others go away.";
   $("merge-search").value = "";
   renderMerge();
   $("dlg-merge").showModal();
   $("merge-search").focus();
 }
+// The card that stays: the one asked for, else the first ticked (so a single tick merges the open card into it).
+function mergeKeeper() { return [M.from].concat(M.picked).indexOf(M.keep) >= 0 ? M.keep : (M.picked[0] || 0); }
 function renderMerge() {
-  var q = $("merge-search").value.trim().toLowerCase();
-  var list = S.artists.filter(function (a) { return a.id !== mergeFrom && (!q || a.name.toLowerCase().indexOf(q) >= 0); })
-    .sort(function (x, y) { return x.name.localeCompare(y.name); });
-  $("merge-list").innerHTML = list.map(function (a) {
-    return '<button type="button" class="br-item" data-id="' + a.id + '">' + avatarHtml(a) +
+  var q = $("merge-search").value.trim().toLowerCase(), box = $("merge-list"), top = box.scrollTop;
+  var keeper = mergeKeeper(), group = M.picked.length > 0;
+  function row(a, fixed) {
+    var on = fixed || M.picked.indexOf(a.id) >= 0;
+    return '<div class="merge-row' + (on ? " on" : "") + '"><button type="button" class="br-item" data-id="' + a.id + '" aria-pressed="' + on + '">' +
+      '<span class="tick">' + (on ? icon("tick") : "") + "</span>" + avatarHtml(a) +
       '<span class="br-name" title="' + esc(a.name) + '">' + esc(a.name) + "</span>" +
-      '<span class="br-n">' + (a.sources.filter(function (s) { return s.supported; }).length || "") + "</span></button>";
-  }).join("") || '<p class="hint">No other artist.</p>';
+      '<span class="br-n">' + (a.sources.filter(function (s) { return s.supported; }).length || "") + "</span></button>" +
+      (on && group ? (keeper === a.id ? '<span class="keeps">Stays</span>' : '<button type="button" class="keep" data-keep="' + a.id + '">Keep this one</button>') : "") + "</div>";
+  }
+  var me = artistById(M.from), others = S.artists.filter(function (a) { return a.id !== M.from && (!q || a.name.toLowerCase().indexOf(q) >= 0); });
+  var sug = M.suggested.map(artistById).filter(function (a) { return a && others.indexOf(a) >= 0; });
+  var rest = others.filter(function (a) { return sug.indexOf(a) < 0; }).sort(function (x, y) { return x.name.localeCompare(y.name); });
+  box.innerHTML = (me ? row(me, true) : "") +
+    (sug.length ? '<div class="br-group">Possibly the same artist</div>' + sug.map(function (a) { return row(a); }).join("") : "") +
+    (rest.length ? (sug.length ? '<div class="br-group">All artists</div>' : "") + rest.map(function (a) { return row(a); }).join("") : "") +
+    (others.length ? "" : '<p class="hint">No other artist.</p>');
+  box.scrollTop = top;
+  var n = M.picked.length, stay = artistById(keeper), gone = [M.from].concat(M.picked).filter(function (id) { return id !== keeper; }).map(function (id) { return (artistById(id) || {}).name; });
+  $("merge-go").disabled = !n;
+  $("merge-go").textContent = n ? "Merge " + plural(n + 1, "card") : "Merge";
+  $("merge-sum").textContent = n ? "Stays: " + stay.name + " · goes away: " + (gone.length > 3 ? gone.slice(0, 3).join(", ") + " +" + (gone.length - 3) : gone.join(", "))
+    : "Nothing ticked yet.";
 }
 $("merge-search").addEventListener("input", renderMerge);
 $("merge-list").addEventListener("click", function (e) {
-  var b = e.target.closest("[data-id]"), into = b && artistById(+b.dataset.id), from = artistById(mergeFrom);
-  if (!into || !from) return;
-  if (!confirm('Merge "' + from.name + '" into "' + into.name + '"? The card "' + from.name + '" goes away; its sources and its downloaded files stay with "' + into.name + '".')) return;
-  api("POST", "/api/artists/" + from.id + "/merge", { into: into.id }).then(function () {
-    $("dlg-merge").close();
-    galDrop(from.id); galDrop(into.id); galDrop(0);
-    if (G && !G.all && (G.key === from.id || G.key === into.id)) browseClose();
+  var k = e.target.closest("[data-keep]"), b = e.target.closest("[data-id]");
+  if (k) M.keep = +k.dataset.keep;
+  else if (b && +b.dataset.id !== M.from) {
+    var id = +b.dataset.id, i = M.picked.indexOf(id);
+    if (i < 0) M.picked.push(id); else M.picked.splice(i, 1);
+    if (M.keep === id) M.keep = 0;
+  } else return;
+  renderMerge();
+});
+$("merge-go").addEventListener("click", function () {
+  var keep = mergeKeeper(), into = artistById(keep), ids = [M.from].concat(M.picked).filter(function (id) { return id !== keep; }), done = [];
+  if (!into || !ids.length) return;
+  $("merge-go").disabled = true;
+  ids.reduce(function (p, id) {                    // one after the other: a card that is syncing says so, and the ones before it stay merged
+    return p.then(function () { return api("POST", "/api/artists/" + id + "/merge", { into: keep }).then(function () { done.push(id); }); });
+  }, Promise.resolve()).catch(fail).then(function () {
+    done.concat(keep, 0).forEach(galDrop);
+    if (G && !G.all && (done.indexOf(G.key) >= 0 || G.key === keep)) browseClose();
     if (G && G.all) G.stale = true;
-    if (S.brArtist === from.id) S.brArtist = into.id;
+    if (done.indexOf(S.brArtist) >= 0) S.brArtist = keep;
     lastKey = "";
     return load();
-  }).then(function () { toast(from.name + " is part of " + into.name + " now."); }).catch(fail);
+  }).then(function () {
+    $("dlg-merge").close();
+    if (done.length) toast(plural(done.length, "card") + " merged into " + into.name + ".");
+  });
 });
 
 function openFolder(a) { api("POST", "/api/open", { target: "artist", artist_id: a.id }).catch(fail); }

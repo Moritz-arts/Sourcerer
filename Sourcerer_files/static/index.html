@@ -263,7 +263,7 @@
   </div>
 </dialog>
 
-<!-- Merge: the artist's card becomes part of another one (accounts the sites did not show to be one artist). -->
+<!-- Merge: the open card and the ones ticked become one (accounts the sites did not show to be one artist); the button is the confirmation. -->
 <dialog id="dlg-merge" class="dlg">
   <div class="dlg-head">
     <span id="merge-title">Merge into&hellip;</span><span class="grow"></span>
@@ -273,6 +273,10 @@
     <p class="hint" id="merge-hint"></p>
     <input id="merge-search" type="text" placeholder="Search artists" autocomplete="off">
     <div id="merge-list" class="merge-list"></div>
+  </div>
+  <div class="dlg-foot">
+    <span id="merge-sum" class="hint grow"></span>
+    <button type="button" id="merge-go" class="primary" disabled>Merge</button>
   </div>
 </dialog>
 

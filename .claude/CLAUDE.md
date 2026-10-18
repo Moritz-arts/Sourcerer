@@ -404,7 +404,14 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   card and the card is deleted; a link both have stays once; a file only the other card holds goes to
   the record of the same post that has none; downloaded files keep their paths (the old folder stays
   where it is). Refused while either card is syncing or just popped by the worker (`sync.Busy`,
-  `_starting`: looked at and taken off the queue under one lock).
+  `_starting`: looked at and taken off the queue under one lock). **The dialog (`#dlg-merge`) merges
+  many at once and asks nothing twice**: the open card is pinned and ticked, ticking others adds them,
+  the button at the bottom is the confirmation (no `confirm()`), and the card marked *Stays* (the first
+  ticked, or the one asked for with *Keep this one*) receives the rest through one `/merge` call each,
+  in turn. At the top *Possibly the same artist* lists likely twins (`sameness` in `app.js`): same name
+  once everything but letters and digits is gone (`nameKey`: emoji, spaces, width, case -- "👹 青林檎テル"
+  is "青林檎テル"), same but for a trailing "(handle)", a shared account name in the links, one name inside
+  the other. It is a suggestion only; nothing merges by itself.
 - **Logins are made in "Manage your accounts" (`#dlg-accounts`) and nowhere
   else**: one row per login that exists (saved, or being made in a window), one
   under the other (never side by side): dot and name, the fields in the middle,
@@ -506,7 +513,8 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   source's `LABEL` to one, a site without one shows its name). The forum and the booru draw a
   Tabler icon in their own colour. A new site adds its symbol there.
 - **Browse's list** (`renderBrowseList`): the order (*Alphabetic | Latest activity*, by
-  `activityOf`) and the number beside a name (*Sources | Images*) are kept in localStorage. The
+  `activityOf`, | *Source*: groups under the site's logo, name, count and a line; an artist stands once,
+  under its master source, else its first readable one, no source last) and the number beside a name (*Sources | Images*) are kept in localStorage. The
   **auto-download cloud is always there, never a choice of the number**: green (`--dot-ok`) when
   the card downloads by itself, dark grey when not; the artist's right-click menu (edit,
   auto-download, refresh, download, open folder, merge, delete -- the same keys `Enter A U D O M Del`)
