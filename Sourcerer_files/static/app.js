@@ -1713,11 +1713,16 @@ function loadInfo() {
 
 // ---- updates and repair ----------------------------------------------------
 
+var UPD_EVERY = 60000, UPD_TRIES = 15;     // GitHub allows 60 anonymous requests an hour: one a minute, and not for ever
+
 function showUpdate() {
-  var u = S.update, has = !!(u && u.available);
+  var u = S.update, has = !!(u && u.available), waiting = !!(u && u.newer && !has && !u.error);
   $("update-dot").classList.toggle("hidden", !has);
   $("update-dot-2").classList.toggle("hidden", !has);
-  $("btn-install").classList.toggle("hidden", !has);
+  // The button is there as soon as a newer version is, greyed until its file is attached: a hidden
+  // button looked like a missing one while the installers were still being built.
+  $("btn-install").classList.toggle("hidden", !has && !waiting);
+  $("btn-install").disabled = !has;
   if (!u) return;
   if (u.error) $("upd-status").textContent = u.error;
   else if (has) $("upd-status").textContent = "v" + u.version + " is available.";
@@ -1726,12 +1731,13 @@ function showUpdate() {
     // Its file is still being attached -- or never will be (a failed build keeps a system's files off the release):
     // the release page is where to look.
     var st = $("upd-status"), a = document.createElement("a");
-    st.textContent = "v" + u.version + " is out, but its file for this system is not there yet. Check again in a few minutes, or ";
+    st.textContent = "v" + u.version + " is out, its file for this system is still being built. Install unlocks by itself; or ";
     a.href = "#"; a.textContent = "open the release page";
     a.addEventListener("click", function (e) { e.preventDefault(); api("POST", "/api/open-url", { url: u.page }).catch(fail); });
     st.appendChild(a); st.appendChild(document.createTextNode("."));
   } else $("upd-status").textContent = "Up to date. Newest " + (u.channel === "beta" ? "version on the main branch" : "release") + ": v" + u.version + ".";
-  $("btn-install").querySelector("span").textContent = has ? (u.manual ? "Download v" : "Install v") + u.version : "Install";
+  $("btn-install").querySelector("span").textContent = has ? (u.manual ? "Download v" : "Install v") + u.version
+    : waiting ? "Install v" + u.version : "Install";
   $("upd-notes").textContent = has ? u.notes : "";
   $("upd-notes").classList.toggle("hidden", !has || !u.notes);
 }
@@ -1740,12 +1746,15 @@ function checkUpdate(loud) {
   $("upd-status").textContent = "Asking GitHub…";
   return api("GET", "/api/update/check?channel=" + (S.settings.channel || "stable")).then(function (u) {
     S.update = u; showUpdate();
+    clearTimeout(S.updTimer);       // showUpdate runs on every state refresh; only a real answer re-arms the wait
+    if (u.newer && !u.available && (S.updTries = (S.updTries || 0) + 1) <= UPD_TRIES)
+      S.updTimer = setTimeout(function () { checkUpdate(false); }, UPD_EVERY);
   }).catch(function (e) {
     S.update = { error: e.message }; showUpdate();
     if (loud) fail(e);
   });
 }
-$("btn-check").addEventListener("click", function () { checkUpdate(true); });
+$("btn-check").addEventListener("click", function () { S.updTries = 0; checkUpdate(true); });
 $("btn-gdl").addEventListener("click", function () {
   var b = this;
   b.disabled = true; b.textContent = "Updating…";
