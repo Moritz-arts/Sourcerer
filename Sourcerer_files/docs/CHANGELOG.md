@@ -5,6 +5,11 @@ automatically -- one line per change, newest first. A release is drafted by hand
 from the tag of whichever version is judged ready, and this is the text to paste
 into it.
 
+## v0.30 — 2026-10-18
+
+- Follows: the accounts a login follows join the list as artists, nothing downloaded; artists can be merged
+- Follows hardened: only public https links and pictures, Host checked on reads, lists end where the site says, merge keeps its files
+
 ## v0.29 — 2026-10-18
 
 - Updates: the Install button shows at once for a newer release, greyed until its file is attached
