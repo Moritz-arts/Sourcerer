@@ -5,6 +5,12 @@ automatically -- one line per change, newest first. A release is drafted by hand
 from the tag of whichever version is judged ready, and this is the text to paste
 into it.
 
+## v0.31 — 2026-10-18
+
+- Browse: a third order, by source, with each site's logo and a line above its artists
+- Merge: likely twins (names that differ only by emoji, marks or case) are suggested at the top, several cards are ticked and merged with one button, no extra confirmation
+- Misskey: accounts on misskey.io and other Misskey servers (also those a Baraag follow list names) are a source of their own
+
 ## v0.30 — 2026-10-18
 
 - Follows: the accounts a login follows join the list as artists, nothing downloaded; artists can be merged
