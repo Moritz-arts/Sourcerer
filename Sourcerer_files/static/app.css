@@ -133,6 +133,12 @@ input[type=range] { accent-color: var(--fill-accent); cursor: pointer; }
 .br-item .avatar { width: 26px; height: 26px; font-size: 10px; flex: none; }
 .br-item.all .ic { width: 22px; height: 22px; flex: none; }
 .br-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Browse ordered by source (and the merge list's sections): the site's mark, its name, the count, then a line to the edge. */
+.br-group { display: flex; align-items: center; gap: 7px; flex: none; padding: 10px 8px 4px; font-size: 12px; font-weight: 500; color: var(--text-secondary); }
+.br-list > .br-group:first-child, .br-list > .br-item.all + .br-group { padding-top: 4px; }
+.br-group::after { content: ""; flex: 1; height: 1px; background: var(--border-strong); }
+.br-group .ic.logo { width: 14px; height: 14px; }
+.br-group .num { font-weight: 400; color: var(--text-muted); }
 .br-n { font-size: 11px; color: var(--text-muted); }
 .br-item.selected .br-n { color: inherit; opacity: .8; }
 .br-auto { display: inline-flex; flex: none; color: var(--dot-ok); }
