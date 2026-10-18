@@ -30,8 +30,9 @@ follows it.
   **System Settings › Privacy & Security › Open Anyway**).
 - **Linux:** `chmod +x Sourcerer-x86_64.AppImage`, then double-click or run it (needs FUSE 2:
   `sudo apt install libfuse2`, or start it with `--appimage-extract-and-run`). The page opens in
-  your browser — there is no app window on Linux yet, so quit with the **Quit** button. The tar.gz
-  is the same without the AppImage: unpack, run `Sourcerer/Sourcerer`.
+  app window (Qt; needs `libxcb-cursor0` and the usual xcb libraries -- without them, or without a
+  display, it opens in your browser and you quit with the **Quit** button). The tar.gz is the
+  light version without the window: unpack, run `Sourcerer/Sourcerer` (browser only).
 
 The window is Microsoft's WebView2 on Windows (in Windows 11 and current Windows 10; without it
 Sourcerer opens in your browser) and WebKit on macOS. Some virus scanners distrust every program

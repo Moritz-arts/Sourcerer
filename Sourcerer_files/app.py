@@ -9,6 +9,11 @@ if getattr(sys, "frozen", False) and sys.argv[1:2] == ["--gallery-dl"]:
     import gallery_dl
     sys.exit(gallery_dl.main())
 
+# The window probe of sourcerer/desktop.py: the exe is its own Python here too.
+if getattr(sys, "frozen", False) and sys.argv[1:2] == ["--window-check"]:
+    from sourcerer.desktop import window_check
+    sys.exit(window_check())
+
 # pythonw.exe has no console, and print() or a traceback would go nowhere.
 # launch.py hands its log file over as stdout; started any other way, this is it.
 if sys.stdout is None or sys.stderr is None:
