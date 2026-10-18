@@ -492,9 +492,10 @@ function galWatch() {
 var BR_HIDDEN = "sourcerer.browse.hidden";
 var BR_FIT = "sourcerer.browse.fit", BR_SIZE = "sourcerer.browse.size";
 var BR_SORT = "sourcerer.browse.sort", BR_COUNT = "sourcerer.browse.count", BR_LAST = "sourcerer.browse.last";
+function brOrder(v) { return v === "activity" || v === "source" ? v : "name"; }
 S.brArtist = 0; S.brFit = "square"; S.brSort = "name"; S.brCount = "sources";
 try {
-  S.brSort = localStorage.getItem(BR_SORT) === "activity" ? "activity" : "name";
+  S.brSort = brOrder(localStorage.getItem(BR_SORT));
   S.brCount = localStorage.getItem(BR_COUNT) === "files" ? "files" : "sources";   // (older versions also had "auto": the cloud is always shown now)
   S.brArtist = +localStorage.getItem(BR_LAST) || 0;                              // the artist that was open when Sourcerer was closed
 } catch (e) {}
@@ -532,19 +533,26 @@ function browseClose() {
   closeView();
 }
 
-// The artists, "All artists" first; the one open is marked. Alphabetic or the latest activity first, and the
-// number beside a name is what the second choice says: the sources Sourcerer tracks or the images in the library.
+// The artists, "All artists" first; the one open is marked. Alphabetic, the latest activity first, or grouped by source
+// (under each site's logo and a line; an artist stands once, under its master source, else its first one Sourcerer can read),
+// and the number beside a name is what the second choice says: the sources Sourcerer tracks or the images in the library.
 // The cloud at the end is the card's auto-download: green when it is on, dark grey when it is off. A card that
 // is syncing shows a ring instead of its number. The list is only replaced when its markup changed: it is
 // redrawn on every poll while a sync runs, and replacing it would swallow a click that began before.
 var brHtml = "";
+function siteOf(a) {
+  var s = a.sources.filter(function (x) { return x.master; })[0] || a.sources.filter(function (x) { return x.supported; })[0] || a.sources[0];
+  return s ? s.label : "";
+}
 function renderBrowseList() {
-  var q = $("br-search").value.trim().toLowerCase();
+  var q = $("br-search").value.trim().toLowerCase(), bySite = S.brSort === "source", sites = {};
   var list = S.artists.filter(function (a) { return !q || a.name.toLowerCase().indexOf(q) >= 0; })
     .sort(function (x, y) {
       if (S.brSort === "activity") { var tx = activityOf(x), ty = activityOf(y); if (tx !== ty) return tx < ty ? 1 : -1; }
+      if (bySite) { var sx = siteOf(x), sy = siteOf(y); if (sx !== sy) return !sx ? 1 : !sy ? -1 : sx.localeCompare(sy); }
       return x.name.localeCompare(y.name);
     });
+  if (bySite) list.forEach(function (a) { var k = siteOf(a); sites[k] = (sites[k] || 0) + 1; });
   var cur = S.sync.current && S.sync.current.artist_id, queue = S.sync.queue || [];
   function count(a) {
     if (cur === a.id || queue.indexOf(a.id) >= 0) return '<i class="spin" title="' + (cur === a.id ? "Working…" : "Queued") + '"></i>';
@@ -553,8 +561,10 @@ function renderBrowseList() {
   }
   var html = (q ? "" : '<button type="button" class="br-item all' + (!S.brArtist ? " selected" : "") +
     '" data-id="0">' + icon("photo") + '<span class="br-name">All artists</span></button>') +
-    list.map(function (a) {
-      return '<button type="button" class="br-item' + (S.brArtist === a.id ? " selected" : "") + '" data-id="' + a.id + '">' +
+    list.map(function (a, i) {
+      var site = bySite ? siteOf(a) : "", head = bySite && (!i || siteOf(list[i - 1]) !== site) ?
+        '<div class="br-group">' + (siteLogo(site) || "") + "<span>" + esc(site || "No source") + '</span><span class="num">' + sites[site] + "</span></div>" : "";
+      return head + '<button type="button" class="br-item' + (S.brArtist === a.id ? " selected" : "") + '" data-id="' + a.id + '">' +
         avatarHtml(a) + '<span class="br-name" title="' + esc(a.name) + '">' + esc(a.name) + "</span>" +
         '<span class="br-n">' + count(a) + "</span>" +
         '<span class="br-auto ' + (a.auto_download ? "on" : "off") + '" title="Auto-download ' + (a.auto_download ? "on" : "off") +
@@ -1028,7 +1038,7 @@ document.addEventListener("keydown", function (e) {
 $("br-search").addEventListener("input", renderBrowseList);
 $("br-add").addEventListener("click", function () { openCard(null); });
 $("br-sort").addEventListener("change", function () {
-  S.brSort = this.value === "activity" ? "activity" : "name";
+  S.brSort = brOrder(this.value);
   try { localStorage.setItem(BR_SORT, S.brSort); } catch (e) {}
   renderBrowseList();
 });
