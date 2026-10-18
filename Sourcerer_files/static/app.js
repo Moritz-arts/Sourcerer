@@ -1722,8 +1722,15 @@ function showUpdate() {
   if (u.error) $("upd-status").textContent = u.error;
   else if (has) $("upd-status").textContent = "v" + u.version + " is available.";
   else if (!u.version) $("upd-status").textContent = "Nothing published on this channel yet.";
-  else if (u.newer) $("upd-status").textContent = "v" + u.version + " is out, but its file for this system is still being attached. Check again in a few minutes.";
-  else $("upd-status").textContent = "Up to date. Newest " + (u.channel === "beta" ? "version on the main branch" : "release") + ": v" + u.version + ".";
+  else if (u.newer) {
+    // Its file is still being attached -- or never will be (a failed build keeps a system's files off the release):
+    // the release page is where to look.
+    var st = $("upd-status"), a = document.createElement("a");
+    st.textContent = "v" + u.version + " is out, but its file for this system is not there yet. Check again in a few minutes, or ";
+    a.href = "#"; a.textContent = "open the release page";
+    a.addEventListener("click", function (e) { e.preventDefault(); api("POST", "/api/open-url", { url: u.page }).catch(fail); });
+    st.appendChild(a); st.appendChild(document.createTextNode("."));
+  } else $("upd-status").textContent = "Up to date. Newest " + (u.channel === "beta" ? "version on the main branch" : "release") + ": v" + u.version + ".";
   $("btn-install").querySelector("span").textContent = has ? (u.manual ? "Download v" : "Install v") + u.version : "Install";
   $("upd-notes").textContent = has ? u.notes : "";
   $("upd-notes").classList.toggle("hidden", !has || !u.notes);
