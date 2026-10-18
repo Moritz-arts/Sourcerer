@@ -274,7 +274,7 @@ class _Gallery:
         self.asked = set()                     # ... of these, the ones the library was asked about
         with db.connect() as con:
             artists = {r["id"]: dict(r) for r in con.execute(
-                "SELECT * FROM artists" + ("" if self.all else " WHERE id = ?"), () if self.all else (artist_id,))}
+                "SELECT * FROM artists" + (" WHERE listed = 0" if self.all else " WHERE id = ?"), () if self.all else (artist_id,))}
             if not artists and not self.all:
                 raise KeyError(artist_id)
             rows = con.execute("SELECT * FROM sources ORDER BY artist_id, id").fetchall() if self.all else \

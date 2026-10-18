@@ -576,6 +576,14 @@ def get_json(url, params=None, headers=None):
         return _get(url, params, headers=headers).json()
 
 
+def get_json_next(url, params=None, headers=None):
+    """get_json and the next page's address from the Link header (Mastodon pages by it), or None."""
+    params = {k: v for k, v in (params or {}).items() if v is not None}
+    with _Polite(url, _carries_login(url, headers, params)):
+        resp = _get(url, params, headers=headers)
+        return resp.json(), (resp.links.get("next") or {}).get("url")
+
+
 def post_json(url, data=None, json=None, headers=None):
     """A login's request (a token, a session): sent once, the answer as JSON."""
     with _Polite(url, True):
