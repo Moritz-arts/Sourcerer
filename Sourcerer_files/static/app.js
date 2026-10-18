@@ -102,7 +102,7 @@ function avatarHtml(a, cls, id) {
   var name = (a && a.name) || "?", attr = (id ? ' id="' + id + '"' : "");
   cls = "avatar" + (cls ? " " + cls : "");
   if (a && a.avatar && a.id) {
-    return "<img" + attr + ' class="' + cls + '" alt="" src="/api/avatar/' + a.id + "?v=" +
+    return "<img" + attr + ' class="' + cls + '" alt="" loading="lazy" decoding="async" src="/api/avatar/' + a.id + "?v=" +
       encodeURIComponent(a.avatar_checked || "") + '">';
   }
   var c = colours(name);

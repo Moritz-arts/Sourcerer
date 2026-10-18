@@ -88,9 +88,14 @@ CREATE TABLE IF NOT EXISTS snapshots (
 );
 -- The followed accounts a login's list has shown (follows.py), by profile URL: each becomes a card once,
 -- so a card the user deleted or merged away does not come back with the next look at the list.
+-- url is lower-cased (handles and user names do not care). avatar/headers: the profile picture the list named,
+-- fetched later by a worker that survives a restart; tried: failed fetches.
 CREATE TABLE IF NOT EXISTS followed (
-    url    TEXT PRIMARY KEY,
-    added  TEXT NOT NULL DEFAULT (datetime('now'))
+    url      TEXT PRIMARY KEY,
+    added    TEXT NOT NULL DEFAULT (datetime('now')),
+    avatar   TEXT NOT NULL DEFAULT '',
+    headers  TEXT NOT NULL DEFAULT '',
+    tried    INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS settings (
     key    TEXT PRIMARY KEY,

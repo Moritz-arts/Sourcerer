@@ -33,6 +33,8 @@ _NOT_FEDIVERSE = {"youtube.com", "tiktok.com", "medium.com", "threads.net", "thr
                   "donmai.us", "e621.net", "e926.net", "gelbooru.com", "rule34.xxx", "yande.re",
                   "konachan.com", "konachan.net", "safebooru.org", "aibooru.online"}
 PAGE = 40   # the API's maximum
+FOLLOWING = 80   # the maximum of the account lists
+MAX_FOLLOW_PAGES = 250   # 20 000 follows; a Link header that loops would never end
 
 
 def _parse(url):
@@ -166,8 +168,9 @@ def following(key):
     me = _api(server, "accounts/verify_credentials")
 
     def pages():
-        url, params = "https://%s/api/v1/accounts/%s/following" % (server, me["id"]), {"limit": PAGE}
-        while url:
+        url, params, seen = "https://%s/api/v1/accounts/%s/following" % (server, me["id"]), {"limit": FOLLOWING}, set()
+        while url and url not in seen and len(seen) < MAX_FOLLOW_PAGES:
+            seen.add(url)
             found, url = net.get_json_next(url, params, headers=_auth(server))
             params = None                  # the Link header's address carries them
             yield [{"url": a["url"], "name": re.sub(r":[\w+-]+:", "", a.get("display_name") or "").strip() or a.get("username", ""),
