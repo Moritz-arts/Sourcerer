@@ -251,7 +251,7 @@ var lastKey = "";
 function poll() {
   api("GET", "/api/sync").then(function (s) {
     var key = (s.current ? s.current.artist_id : "-") + "|" + s.running + "|" + (s.queue || []).join(",") +
-      "|" + (s.log || []).length + "|" + (s.pauses || []).map(function (p) { return p.site; }).join(",");
+      "|" + (s.log || []).length + "|" + s.follows + "|" + (s.pauses || []).map(function (p) { return p.site; }).join(",");
     // A sync that ended may have saved files: a gallery kept aside would still show them as not downloaded.
     if (S.sync.finished !== s.finished) {
       Object.keys(GS).forEach(function (k) { GS[k].stale = true; });
@@ -286,6 +286,48 @@ function removeArtist(a) {
   }).catch(fail);
 }
 
+// ---- merge: the artist's card becomes part of another ------------------------------
+
+// Accounts the sites did not show to be one artist (the follows come in as one card each): this card's
+// sources and files move to the card picked, and this one is gone.
+var mergeFrom = 0;
+function openMerge(a) {
+  closeMenu();
+  mergeFrom = a.id;
+  $("merge-title").textContent = "Merge " + a.name + " into…";
+  $("merge-hint").textContent = "Pick the artist these accounts belong to. Its card keeps everything of " + a.name +
+    " (sources, downloaded files, history) and this card goes away.";
+  $("merge-search").value = "";
+  renderMerge();
+  $("dlg-merge").showModal();
+  $("merge-search").focus();
+}
+function renderMerge() {
+  var q = $("merge-search").value.trim().toLowerCase();
+  var list = S.artists.filter(function (a) { return a.id !== mergeFrom && (!q || a.name.toLowerCase().indexOf(q) >= 0); })
+    .sort(function (x, y) { return x.name.localeCompare(y.name); });
+  $("merge-list").innerHTML = list.map(function (a) {
+    return '<button type="button" class="br-item" data-id="' + a.id + '">' + avatarHtml(a) +
+      '<span class="br-name" title="' + esc(a.name) + '">' + esc(a.name) + "</span>" +
+      '<span class="br-n">' + (a.sources.filter(function (s) { return s.supported; }).length || "") + "</span></button>";
+  }).join("") || '<p class="hint">No other artist.</p>';
+}
+$("merge-search").addEventListener("input", renderMerge);
+$("merge-list").addEventListener("click", function (e) {
+  var b = e.target.closest("[data-id]"), into = b && artistById(+b.dataset.id), from = artistById(mergeFrom);
+  if (!into || !from) return;
+  if (!confirm('Merge "' + from.name + '" into "' + into.name + '"? The card "' + from.name + '" goes away; its sources and its downloaded files stay with "' + into.name + '".')) return;
+  api("POST", "/api/artists/" + from.id + "/merge", { into: into.id }).then(function () {
+    $("dlg-merge").close();
+    galDrop(from.id); galDrop(into.id); galDrop(0);
+    if (G && !G.all && (G.key === from.id || G.key === into.id)) browseClose();
+    if (G && G.all) G.stale = true;
+    if (S.brArtist === from.id) S.brArtist = into.id;
+    lastKey = "";
+    return load();
+  }).then(function () { toast(from.name + " is part of " + into.name + " now."); }).catch(fail);
+});
+
 function openFolder(a) { api("POST", "/api/open", { target: "artist", artist_id: a.id }).catch(fail); }
 
 // ---- the artist's menu, mouse and keyboard ------------------------------------
@@ -308,6 +350,7 @@ function artistAct(act, a) {
   else if (act === "sync") sync(a.id);
   else if (act === "download") downloadSelected(a);
   else if (act === "folder") openFolder(a);
+  else if (act === "merge") openMerge(a);
   else if (act === "delete") removeArtist(a);
 }
 
@@ -387,7 +430,7 @@ document.addEventListener("keydown", function (e) {
   if (!a) return;
   // Enter on a button presses it; in the artist list it edits the card instead.
   if (k === "Enter" && t.tagName === "BUTTON" && !t.closest("#br-list")) return;
-  var act = k === "Enter" ? "edit" : k === "Delete" ? "delete" : { a: "auto", u: "sync", d: "download", o: "folder" }[low];
+  var act = k === "Enter" ? "edit" : k === "Delete" ? "delete" : { a: "auto", u: "sync", d: "download", o: "folder", m: "merge" }[low];
   if (act) { e.preventDefault(); artistAct(act, a); }
 });
 
@@ -1295,6 +1338,7 @@ function fillSettings() {
   var st = S.settings;
   $("set-library").value = S.library;
   $("btn-browse").classList.toggle("hidden", !S.window);
+  $("set-follows").checked = st.import_follows === "1";
   $("set-auto").checked = st.auto_sync === "1";
   $("set-hours").value = st.auto_hours; $("set-hours").disabled = st.auto_sync !== "1";
   $("set-parallel").value = st.parallel;
@@ -1336,6 +1380,7 @@ $("btn-browse").addEventListener("click", function () {
     if (d.path) return saveSetting({ library: d.path }).then(load);
   }).catch(fail);
 });
+$("set-follows").addEventListener("change", function () { saveSetting({ import_follows: this.checked ? "1" : "0" }); });
 $("set-auto").addEventListener("change", function () { saveSetting({ auto_sync: this.checked ? "1" : "0" }); });
 $("set-hours").addEventListener("change", function () { saveSetting({ auto_hours: this.value }); });
 $("set-parallel").addEventListener("change", function () { saveSetting({ parallel: this.value }); });

@@ -218,6 +218,26 @@ def profile(url):
             "handle": "@" + p.get("handle", actor), "avatar": p.get("avatar") or ""}
 
 
+def following(key):
+    """(list name, pages) of the accounts the login follows: [{"url", "name", "avatar"}], newest follow first."""
+    did = (accounts.secrets("bluesky") or {}).get("did")
+    if not did:
+        return
+
+    def pages():
+        cursor = None
+        while True:
+            page = _get("app.bsky.graph.getFollows", {"actor": did, "limit": PAGE, "cursor": cursor})
+            # "handle.invalid": an account whose handle no longer resolves has no profile address.
+            yield [{"url": "https://bsky.app/profile/" + f["handle"], "avatar": f.get("avatar") or "",
+                    "name": f.get("displayName") or f["handle"]}
+                   for f in page.get("follows") or [] if f.get("handle") and not f["handle"].endswith(".invalid")]
+            cursor = page.get("cursor")
+            if not cursor or not page.get("follows"):
+                return
+    yield "", pages()
+
+
 def _pds(did):
     """The server that holds the account's files."""
     if did.startswith("did:web:"):

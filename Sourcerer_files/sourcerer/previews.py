@@ -281,7 +281,7 @@ def _due():
     limit = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=REFRESH_HOURS)).isoformat()
     with db.connect() as con:
         return [r[0] for r in con.execute(
-            "SELECT id FROM artists WHERE (previews_at IS NULL OR previews_at < ?) AND EXISTS "
+            "SELECT id FROM artists WHERE listed = 0 AND (previews_at IS NULL OR previews_at < ?) AND EXISTS "
             "(SELECT 1 FROM sources WHERE artist_id = artists.id) "
             "ORDER BY COALESCE(last_activity, last_sync, created) DESC", (limit,))]
 

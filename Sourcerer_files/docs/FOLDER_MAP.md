@@ -38,6 +38,8 @@ Sourcerer/                        <- what Sourcerer.zip unpacks to; move it free
     │   │                           straight from the sites, pictures in memory only
     │   ├─ previews.py            looks at each card's sources in the background and keeps
     │   │                           their snapshots fresh (its small copies are no longer shown)
+    │   ├─ follows.py             the accounts a login follows become listed cards (Bluesky,
+    │   │                           Mastodon, pixiv); nothing is read or downloaded for them
     │   ├─ snapshots.py           the newest posts of a source as last seen (pickled Media
     │   │                           in the DB): Browse opens from it, previews use it
     │   ├─ accounts.py            logins: login window, cookies.txt, saved cookies

@@ -278,6 +278,18 @@ add the one that replaced it.
   runs share the parent's unpacked folder so they stay quick, and a restart unpacks its own. Old
   copies (a folder with `Sourcerer_files/Userdata`) keep working and the installer moves the data out.
 
+- 2026-10-18 — **The accounts a login follows are the list.** The user: logging in only opened
+  the door, and only artists made by hand got through; the followed accounts should be in the list
+  at once, with no download, and accounts that belong to one artist must be mergeable. So: after a
+  login (and every ~12 h, and when the Settings switch is turned on) Bluesky, Mastodon and pixiv
+  list their follows and every account becomes a card once -- *listed* (`artists.listed`): in
+  no sweep (Sync all, automatic sync, previews, All artists) until the user edits, syncs or merges
+  it or turns auto-download on, because hundreds of cards read in the background would be hundreds
+  of requests nobody asked for. What was added is remembered (`followed`), so a deleted card does
+  not return. *Merge into...* (menu, `M`) moves a card's sources and files to another. X and Patreon
+  are not in yet: X's follows need gallery-dl and the account's handle (and X locks accounts),
+  Patreon's are memberships.
+
 ## Done
 
 - [x] Repository workshop: CLAUDE.md, docs, version workflow
@@ -345,8 +357,14 @@ add the one that replaced it.
       green chips, "N new posts"); Squares / Full picture layout; previews for cards
       with login sources without a sync first
 
+- [x] Follows import: Bluesky, Mastodon and pixiv follows become listed cards after a login;
+      Merge into... for accounts the sites did not show to be one artist
+
 ## Next
 
+- [ ] Follows of X and Patreon (gallery-dl's following list; Patreon's memberships), and a home
+      timeline ("Following") in Browse that shows the newest posts of everybody a login follows
+      with one request per page instead of one source per account.
 - [ ] Standalone builds: an in-program update for macOS, the AppImage and the portable copies
       (an installed Windows copy has it), gallery-dl between releases (its wheel next to the
       program); look at the first real runs on all three systems; an app window on Linux (Qt?);

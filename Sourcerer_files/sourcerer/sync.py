@@ -167,7 +167,13 @@ def enqueue(artist_ids=None, auto=False, only=None, mode=None):
     The longest unsynced first, in a random order among equals: not the same
     cards in the same order every day."""
     with db.connect() as con:
-        ids = [r[0] for r in con.execute("SELECT id FROM artists ORDER BY COALESCE(last_sync, ''), RANDOM()")]
+        # Cards only listed (made from a login's follows) are in nobody's sweep: Sync all and the
+        # automatic sync leave them alone. Asking for one -- by name -- takes it into the routine.
+        ids = [r[0] for r in con.execute(
+            "SELECT id FROM artists" + ("" if artist_ids is not None else " WHERE listed = 0") +
+            " ORDER BY COALESCE(last_sync, ''), RANDOM()")]
+        if artist_ids is not None and not auto:
+            con.executemany("UPDATE artists SET listed = 0 WHERE id = ?", [(i,) for i in artist_ids])
     if artist_ids is not None:
         wanted = set(artist_ids)
         ids = [i for i in ids if i in wanted]
@@ -494,6 +500,55 @@ def name_avatars():
         ids = [r[0] for r in con.execute("SELECT id FROM artists WHERE avatar IS NOT NULL")]
     for artist_id in ids:
         name_avatar(artist_id)
+
+
+class Busy(Exception):
+    """The card is being synced right now."""
+
+
+def merge(into_id, other_id):
+    """The card other_id becomes part of into_id: its sources, files and history move over and it
+    is gone -- the way to put one artist's accounts together where the sites were not recognised as
+    one. The downloaded files stay where they are (paths are kept). Returns how many sources moved."""
+    if into_id == other_id:
+        raise ValueError("Pick another card.")
+    with _lock:
+        if _current and _current["artist_id"] in (into_id, other_id):
+            raise Busy("%s is being synced. Try again when it is done." % _current["name"])
+    cancel(other_id)
+    moved = 0
+    with db.connect() as con:
+        a = con.execute("SELECT * FROM artists WHERE id = ?", (into_id,)).fetchone()
+        b = con.execute("SELECT * FROM artists WHERE id = ?", (other_id,)).fetchone()
+        if not a or not b:
+            raise KeyError(into_id if not a else other_id)
+        for src in con.execute("SELECT id, url FROM sources WHERE artist_id = ? ORDER BY id", (other_id,)).fetchall():
+            same = con.execute("SELECT id FROM sources WHERE artist_id = ? AND url = ?", (into_id, src["url"])).fetchone()
+            if same:                               # the same link on both: the one already there stays
+                con.execute("UPDATE files SET source_id = ? WHERE source_id = ?", (same[0], src["id"]))
+                con.execute("DELETE FROM sources WHERE id = ?", (src["id"],))
+            else:
+                con.execute("UPDATE sources SET artist_id = ? WHERE id = ?", (into_id, src["id"]))
+                moved += 1
+        # A file both cards have under one remote_key stays with the card that has it (a duplicate row
+        # of the other card goes with that card); everything else is now into_id's.
+        con.execute("UPDATE OR IGNORE files SET artist_id = ? WHERE artist_id = ?", (into_id, other_id))
+        con.execute("UPDATE OR IGNORE failures SET artist_id = ? WHERE artist_id = ?", (into_id, other_id))
+        master = a["master_source_id"]
+        if not master and b["master_source_id"] and con.execute(
+                "SELECT 1 FROM sources WHERE id = ? AND artist_id = ?", (b["master_source_id"], into_id)).fetchone():
+            master = b["master_source_id"]
+        con.execute("UPDATE artists SET listed = ?, master_source_id = ?, avatar = ?, last_activity = ?, "
+                    "pending = (SELECT COALESCE(SUM(pending), 0) FROM sources WHERE artist_id = ?) WHERE id = ?",
+                    (a["listed"] and b["listed"], master, a["avatar"] or b["avatar"],
+                     max(filter(None, [a["last_activity"], b["last_activity"]]), default=None), into_id, into_id))
+        con.execute("DELETE FROM artists WHERE id = ?", (other_id,))
+    if b["avatar"] and not a["avatar"]:
+        name_avatar(into_id)                        # the picture came along: named after its new card
+    elif b["avatar"]:
+        (config.AVATARS / b["avatar"]).unlink(missing_ok=True)
+    event("info", "%s is part of %s now" % (b["name"], a["name"]))
+    return moved
 
 
 def check_card(artist_id):

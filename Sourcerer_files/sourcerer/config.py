@@ -62,6 +62,7 @@ DEFAULTS = {
     "theme": "system",          # 'system', 'light', 'dark'
     "auto_sync": "0",           # '1': sync every card on its own
     "auto_hours": "6",          # how often, in hours
+    "import_follows": "1",      # '1': the accounts a login follows become artists in the list (follows.py)
     "last_auto": "",            # when it last did
     "parallel": "4",            # downloads at once, all sites together
     "per_host": "2",            # downloads at once from one site

@@ -160,6 +160,22 @@ def still_logged_in(key):
         raise
 
 
+def following(key):
+    """(list name, pages) of the accounts the login follows, newest follow first."""
+    server = key.split(":", 1)[1]
+    me = _api(server, "accounts/verify_credentials")
+
+    def pages():
+        url, params = "https://%s/api/v1/accounts/%s/following" % (server, me["id"]), {"limit": PAGE}
+        while url:
+            found, url = net.get_json_next(url, params, headers=_auth(server))
+            params = None                  # the Link header's address carries them
+            yield [{"url": a["url"], "name": re.sub(r":[\w+-]+:", "", a.get("display_name") or "").strip() or a.get("username", ""),
+                    "avatar": "" if (a.get("avatar_static") or "").endswith("/missing.png") else a.get("avatar_static") or ""}
+                   for a in found if a.get("url")]
+    yield "", pages()
+
+
 def profile(url):
     server, account = _account(url)
     # Display names carry custom emoji as :shortcode:, which no folder should.

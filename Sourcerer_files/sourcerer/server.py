@@ -17,7 +17,7 @@ import urllib.parse
 
 from flask import Flask, abort, jsonify, request, send_file, send_from_directory
 
-from . import accounts, config, db, gallery, imaging, net, previews, sources, sync, updater
+from . import accounts, config, db, follows, gallery, imaging, net, previews, sources, sync, updater
 
 log = logging.getLogger(__name__)
 app = Flask(__name__, static_folder=None)
@@ -28,7 +28,7 @@ LAYOUTS = ("together", "per_source")
 DEDUPES = ("keep_all", "best", "master")
 # What Settings may change, and the values each may take.
 CHOICES = {"filenames": ("original", "dated"), "theme": ("system", "light", "dark"),
-           "auto_sync": ("0", "1"), "channel": ("stable", "beta")}
+           "auto_sync": ("0", "1"), "import_follows": ("0", "1"), "channel": ("stable", "beta")}
 RANGES = {"card_size": (160, 800), "auto_hours": (1, 168), "parallel": (1, 16),
           "per_host": (1, 8), "pace_ms": (0, 5000)}
 
@@ -142,7 +142,7 @@ def _save(con, artist_id, data):
     master = con.execute("SELECT id FROM sources WHERE artist_id = ? AND url = ?",
                          (artist_id, data["master"])).fetchone()
     con.execute("UPDATE artists SET name = ?, layout = ?, dedupe = ?, master_source_id = ?, "
-                "folder = ?, auto_download = ? WHERE id = ?", (data["name"], data["layout"], data["dedupe"],
+                "folder = ?, auto_download = ?, listed = 0 WHERE id = ?", (data["name"], data["layout"], data["dedupe"],
                                                                master[0] if master else None, data["folder"],
                                                                data["auto_download"], artist_id))
 
@@ -404,9 +404,24 @@ def set_auto_download(artist_id):
     """The card's switch: a sync that finds new posts downloads them too."""
     on = 1 if _body().get("on") else 0
     with db.connect() as con:
-        if not con.execute("UPDATE artists SET auto_download = ? WHERE id = ?", (on, artist_id)).rowcount:
+        if not con.execute("UPDATE artists SET auto_download = ?, listed = listed AND ? = 0 WHERE id = ?",
+                           (on, on, artist_id)).rowcount:
             abort(404)
     return jsonify(ok=True, auto_download=on)
+
+
+@app.post("/api/artists/<int:artist_id>/merge")
+def merge_artist(artist_id):
+    """The card becomes part of the card named in "into": its sources and files move over."""
+    into = int((request.get_json(force=True) or {}).get("into") or 0)
+    try:
+        moved = sync.merge(into, artist_id)
+    except KeyError:
+        abort(404)
+    except (ValueError, sync.Busy) as e:
+        return jsonify(error=str(e)), 400
+    previews.forget(artist_id)
+    return jsonify(ok=True, moved=moved)
 
 
 @app.post("/api/sync/cancel")
@@ -417,7 +432,7 @@ def cancel_sync():
 
 @app.get("/api/sync")
 def sync_status():
-    return jsonify(dict(sync.status(), pauses=net.pauses(), previews=previews.version))
+    return jsonify(dict(sync.status(), pauses=net.pauses(), previews=previews.version, follows=follows.version))
 
 
 @app.get("/api/thumb/<int:file_id>")
@@ -590,6 +605,8 @@ def save_settings():
         if key in ("auto_sync", "auto_hours") and db.get_setting(key) != value:
             db.set_setting("next_auto", "")        # drawn from the old interval: draw anew when due
         db.set_setting(key, value)
+    if clean.get("import_follows") == "1":
+        follows.look_async()
     net.configure(per_host=db.setting_int("per_host", 1, 8), pace_ms=db.setting_int("pace_ms", 0, 5000))
     return get_settings()
 
@@ -859,7 +876,7 @@ def repair():
     action = (request.get_json(silent=True) or {}).get("action")
     if action == "avatars":
         with db.connect() as con:
-            ids = [r[0] for r in con.execute("SELECT id FROM artists")]
+            ids = [r[0] for r in con.execute("SELECT id FROM artists WHERE listed = 0")]
         def run():                     # one card after another, a few seconds apart, like a sync
             for i in ids:
                 sync.check_card(i)

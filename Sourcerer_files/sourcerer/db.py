@@ -86,6 +86,12 @@ CREATE TABLE IF NOT EXISTS snapshots (
     tail        TEXT,
     data        BLOB NOT NULL
 );
+-- The followed accounts a login's list has shown (follows.py), by profile URL: each becomes a card once,
+-- so a card the user deleted or merged away does not come back with the next look at the list.
+CREATE TABLE IF NOT EXISTS followed (
+    url    TEXT PRIMARY KEY,
+    added  TEXT NOT NULL DEFAULT (datetime('now'))
+);
 CREATE TABLE IF NOT EXISTS settings (
     key    TEXT PRIMARY KEY,
     value  TEXT NOT NULL
@@ -113,6 +119,10 @@ COLUMNS = {
         # sources and counts what is new). Cards made before this setting keep downloading: see init().
         "auto_download": "INTEGER NOT NULL DEFAULT 0",
         "pending": "INTEGER NOT NULL DEFAULT 0",   # new posts the last look found that are not downloaded
+        # 1: made from a login's follows and not touched since -- it is only in the list. No look in the
+        # background (previews, Sync all, automatic sync) and not in "All artists" until the user does
+        # something with the card (edits it, syncs it, turns auto-download on, merges it).
+        "listed": "INTEGER NOT NULL DEFAULT 0",
     },
     "snapshots": {"tail": "TEXT"},
     "sources": {

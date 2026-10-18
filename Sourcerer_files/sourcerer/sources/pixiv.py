@@ -29,7 +29,7 @@ import urllib.parse
 
 import requests
 
-from .. import net
+from .. import accounts, net
 
 KIND = "pixiv"
 LABEL = "Pixiv"
@@ -97,6 +97,32 @@ def _ajax(path, params=()):
     if data.get("error"):
         raise RuntimeError("pixiv: %s" % (data.get("message") or "request refused"))
     return data["body"]
+
+
+FOLLOWING = 24         # what pixiv's own list asks for
+
+
+def following(key):
+    """(list name, pages) of the artists the login follows -- the public list and the private one."""
+    me = (accounts.jar("pixiv").get("PHPSESSID") or "").split("_", 1)[0]    # a member's session id starts with the user id
+    if not me.isdigit():
+        return
+
+    def pages(rest):
+        offset = 0
+        while True:
+            body = _ajax("user/%s/following" % me, {"offset": offset, "limit": FOLLOWING, "rest": rest,
+                                                    "tag": "", "acceptingRequests": 0})
+            users = body.get("users") or []
+            if not users:
+                return
+            yield [{"url": "https://www.pixiv.net/users/%s" % u["userId"], "name": u.get("userName") or "",
+                    "avatar": u.get("profileImageUrl") or "", "avatar_headers": REFERER} for u in users]
+            offset += len(users)
+            if offset >= body.get("total", 0):
+                return
+    yield "show", pages("show")
+    yield "hide", pages("hide")
 
 
 def profile(url):

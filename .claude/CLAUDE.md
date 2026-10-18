@@ -15,8 +15,9 @@ XenForo forums and boorus, a gallery per card (all its sources, straight from
 the sites), a login for every site (Manage Accounts, checked at each start),
 settings like TrackImage's, and an
 updater with Stable/Beta and repair; an artist has a menu (edit, auto-download,
-refresh, download, open the downloaded files, delete) and an Auto-download
-cloud in the list; and the workshop —
+refresh, download, open the downloaded files, merge into another, delete) and an Auto-download
+cloud in the list; the accounts a login follows (Bluesky, Mastodon, pixiv) join the list by
+themselves, only listed (`follows.py`); and the workshop —
 these notes, the docs and the automation that versions every push. `Sourcerer_files/sourcerer/__init__.py`
 lists the program's layers.
 
@@ -374,6 +375,24 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
 
 ### Program
 
+- **A login's follows are cards, but only *listed* ones** (`follows.py`, `artists.listed`):
+  Bluesky (`getFollows`), Mastodon (`/following`, paged by the Link header: `net.get_json_next`) and
+  pixiv (`user/<id>/following`, public and private list) hand out pages of `{url, name, avatar}`
+  through `following(key)` -- it yields `(list name, pages)` -- and each account becomes a card once.
+  **A listed card is in no sweep**: `enqueue(None)` (Sync all, automatic sync), `previews._due` and "All
+  artists" (`gallery._Gallery`) skip `listed = 1`, because a thousand pixiv follows read in the
+  background are a thousand requests nobody asked for. Anything the user does with the card clears
+  it (`_save` on an edit, auto-download on, `enqueue` of that card by name); a merge keeps it only
+  when both cards had it. A new place that reads *every* card must say `WHERE listed = 0`. What was
+  added is remembered by profile URL (`followed`): a deleted or merged card does not return. A list
+  read to its end once (`follows_read:<key>:<list>`) is read again only up to its first page of known
+  accounts -- the newest follows come first. Needs the setting `import_follows`; started after a
+  login (`accounts.CHANGED`), 90-150 s after start (once the account check marked expired logins) and
+  every 10-14 h. Profile pictures come from the list itself, one at a time (`_pictures`), never a
+  profile request per card.
+- **Merge** (`sync.merge`, `/api/artists/<id>/merge`): the card's sources and files move to the picked
+  card and the card is deleted; a link both have stays once; downloaded files keep their paths (the
+  old folder stays where it is). Refused while either card is syncing (`sync.Busy`).
 - **Logins are made in "Manage your accounts" (`#dlg-accounts`) and nowhere
   else**: one row per login that exists (saved, or being made in a window), one
   under the other (never side by side): dot and name, the fields in the middle,
@@ -478,7 +497,7 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   `activityOf`) and the number beside a name (*Sources | Images*) are kept in localStorage. The
   **auto-download cloud is always there, never a choice of the number**: green (`--dot-ok`) when
   the card downloads by itself, dark grey when not; the artist's right-click menu (edit,
-  auto-download, refresh, download, open folder, delete -- the same keys `Enter A U D O Del`)
+  auto-download, refresh, download, open folder, merge, delete -- the same keys `Enter A U D O M Del`)
   turns it on and off. A card that syncs shows a ring in place of its number. The list is
   replaced only when its markup changed (it is redrawn on every poll while a sync runs, and
   replacing it swallowed a click that began before). The *Add artist* button at the bottom
