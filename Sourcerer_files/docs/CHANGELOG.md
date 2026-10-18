@@ -5,6 +5,10 @@ automatically -- one line per change, newest first. A release is drafted by hand
 from the tag of whichever version is judged ready, and this is the text to paste
 into it.
 
+## v0.29 — 2026-10-18
+
+- Updates: the Install button shows at once for a newer release, greyed until its file is attached
+
 ## v0.28 — 2026-10-18
 
 - Linux: the app window comes from Qt (PyQt6 from pip) in the launcher and the AppImage
