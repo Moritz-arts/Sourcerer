@@ -5,6 +5,12 @@ automatically -- one line per change, newest first. A release is drafted by hand
 from the tag of whichever version is judged ready, and this is the text to paste
 into it.
 
+## v0.26 — 2026-10-18
+
+- Updates: a release whose files are still being attached is reported as such, not as up to date
+- Updates: Install starts the update at once, without a confirmation question
+- Windows update: Setup starts only once Sourcerer has exited, logs to setup.log, and the old program restarts when Setup fails
+
 ## v0.25 — 2026-10-17
 
 - Manage Accounts opens with the add row ready; a forum's login window is logged and XenForo offers cookies.txt import in the app window
