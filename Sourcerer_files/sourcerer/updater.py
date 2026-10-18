@@ -27,6 +27,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import zipfile
 
 import requests
@@ -69,6 +70,7 @@ def _check_main():
     version = base64.b64decode(found["content"]).decode("utf-8").strip()
     message = ((head.get("commit") or {}).get("message") or "").strip().splitlines()
     return {"channel": "beta", "current": config.VERSION, "version": version,
+            "newer": version_tuple(version) > version_tuple(config.VERSION),
             "available": version_tuple(version) > version_tuple(config.VERSION),
             "url": "https://codeload.github.com/%s/zip/%s" % (config.REPO, sha),
             "notes": message[0] if message else "", "page": head.get("html_url") or "", "manual": False}
@@ -94,6 +96,22 @@ def _check_release():
             "manual": config.FROZEN and not installed()}
 
 
+DETACHED, NEW_GROUP, NO_WINDOW = 0x00000008, 0x00000200, 0x08000000     # Windows creation flags
+
+
+def _detached(args, flags=0, **kwargs):
+    """Start a program that outlives this one: no stdio of ours, a process group (a session off
+    Windows) of its own. `flags` are the Windows creation flags; cwd and env can be given."""
+    opts = {"cwd": tempfile.gettempdir(), "stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL,
+            "stderr": subprocess.DEVNULL, "close_fds": True}
+    opts.update(kwargs)
+    if os.name == "nt":
+        opts["creationflags"] = flags
+    else:
+        opts["start_new_session"] = True
+    return subprocess.Popen(args, **opts)
+
+
 # A one-file build unpacks itself to a temp folder, and a program it starts from the same file shares
 # that folder (that is what keeps every gallery-dl run quick). A *new* Sourcerer -- the restarted one,
 # the one the installer starts -- must unpack its own: the old folder goes with the old process.
@@ -111,53 +129,91 @@ def installed():
 
 
 # Run by a hidden cmd, paths only through the environment (a user name may not survive the console's
-# code page). No ( ) blocks, ping is the sleep (see the update helper); the new Sourcerer is started by
-# the installer itself (/START=1), the old one only when Setup failed -- and then the failure is a
-# block in update.log, which the next start reports (desktop._after_update). Success writes nothing:
-# the new Sourcerer would read the log before this script got to it.
+# code page) and the system's own tools by full path (a stray find.exe or ping.bat on the PATH or in
+# the temp folder must not stand in). No ( ) blocks, ping is the sleep (see the update helper).
+# The cmd does NOT wait for the program itself: Setup does (InitializeSetup in Sourcerer.iss), where
+# "is Sourcerer.exe in use" can be asked the way Setup asks it. A cmd cannot: appending to a running
+# exe succeeds (`>>` asks for append access only, which a running image allows) -- CI showed Setup
+# started at once and sitting on the running program. Setup never forces the program closed: when it
+# stays open for /WAIT seconds, Setup stops with code 1 and the update is not run.
+# The new Sourcerer is started by the installer itself (/START=1); the old one only when Setup failed
+# (or the installer's [Run] entry did not start anything) -- and then the reason is a block in
+# update.log, which the next start reports (desktop._after_update). Success writes nothing there: the
+# new Sourcerer would read the log before this script got to it.
+SETUP_WAIT = 60                       # seconds Setup gives the program to close
 SETUP_CMD = "\r\n".join([
     "@echo off",
-    "set n=0",
-    ":wait",
-    "set /a n+=1",
-    "if %n% gtr 60 goto go",
-    'tasklist /FI "IMAGENAME eq %SOURCERER_IMAGE%" /NH 2>nul | find /I "%SOURCERER_IMAGE%" >nul',
-    'if not "%errorlevel%"=="0" goto go',
-    "ping -n 2 127.0.0.1 >nul",
-    "goto wait",
-    ":go",
-    'start "" /wait "%SOURCERER_SETUP%" /SILENT /SUPPRESSMSGBOXES /NORESTART /FORCECLOSEAPPLICATIONS /START=1 /LOG="%SOURCERER_SETUP_LOG%"',
+    'echo started>"%SOURCERER_MARK%"',
+    'start "" /wait "%SOURCERER_SETUP%" /SILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS /START=1 /WAIT=%SOURCERER_WAIT% /LOG="%SOURCERER_SETUP_LOG%"',
     "set code=%errorlevel%",
-    'if "%code%"=="0" goto end',
-    'echo %SOURCERER_STAMP%  waiting for Sourcerer to close>>"%SOURCERER_UPDATE_LOG%"',
-    'echo setup failed (code %code%); Sourcerer starts again>>"%SOURCERER_UPDATE_LOG%"',
+    'if "%code%"=="0" goto ok',
+    'echo %SOURCERER_STAMP%  update by Setup>>"%SOURCERER_UPDATE_LOG%"',
+    'echo setup failed (code %code%; code 1 means Sourcerer did not close in time); Sourcerer starts again; details in Userdata\\Logs\\setup.log>>"%SOURCERER_UPDATE_LOG%"',
+    'start "" "%SOURCERER_EXE%" --restart',
+    "goto end",
+    ":ok",
+    "set n=0",
+    ":alive",
+    '"%SOURCERER_SYS%\\tasklist.exe" /FI "IMAGENAME eq %SOURCERER_IMAGE%" /NH 2>nul | "%SOURCERER_SYS%\\find.exe" /I "%SOURCERER_IMAGE%" >nul',
+    'if "%errorlevel%"=="0" goto end',
+    "set /a n+=1",
+    "if %n% geq 20 goto lost",
+    '"%SOURCERER_SYS%\\ping.exe" -n 2 127.0.0.1 >nul',
+    "goto alive",
+    ":lost",
     'start "" "%SOURCERER_EXE%" --restart',
     ":end",
+    'del "%SOURCERER_MARK%" 2>nul',
     '(goto) 2>nul & del "%~f0"',
     "",
 ])
 
 
-def _setup_after_exit(setup):
-    """Windows, installed: run the installer once no Sourcerer.exe is left.
+def run_setup_script(exe, setup, log_dir, wait=SETUP_WAIT):
+    """Windows, installed: a hidden cmd runs `setup` (it waits for `exe` to be free, `wait` seconds).
 
-    Started at once, Setup reached "Closing applications..." while this program was still going
-    down -- the one-file build is two processes, the window already gone -- and its restart
-    manager sat there until it gave up and rolled the update back. So a hidden cmd waits for every
-    Sourcerer.exe to end (60 s at most), runs Setup with its own log (Userdata/Logs/setup.log) and,
-    when Setup fails, starts the old Sourcerer again: no exit path leaves the program closed."""
-    exe = pathlib.Path(sys.executable)
-    config.LOG_DIR.mkdir(parents=True, exist_ok=True)
-    fd, script = tempfile.mkstemp(prefix="sourcerer-update-", suffix=".cmd")
-    with os.fdopen(fd, "w", encoding="ascii", newline="") as f:
-        f.write(SETUP_CMD)
-    env = dict(os.environ, SOURCERER_IMAGE=exe.name, SOURCERER_EXE=str(exe), SOURCERER_SETUP=str(setup),
-               SOURCERER_SETUP_LOG=str(config.LOG_DIR / "setup.log"),
-               SOURCERER_UPDATE_LOG=str(config.LOG_DIR / "update.log"),
-               SOURCERER_STAMP=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), **INDEPENDENT)
-    subprocess.Popen(["cmd.exe", "/c", script], cwd=tempfile.gettempdir(), stdin=subprocess.DEVNULL,
-                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True, env=env,
-                     creationflags=0x08000000 | 0x00000200)              # no window, own process group
+    Setup run while this program was still going down -- the one-file build is two processes, the
+    window already gone -- reached "Closing applications...", its restart manager sat there until it
+    gave up and rolled the update back. Setup itself now waits for the program to let go (and never
+    forces it); the script gives it its own log (Userdata/Logs/setup.log) and, when Setup fails,
+    starts the old Sourcerer again: no exit path leaves the program closed. It writes a mark first thing; if
+    that does not appear (cmd.exe blocked, the script removed by a scanner) this raises, and the
+    caller must not shut Sourcerer down."""
+    log_dir.mkdir(parents=True, exist_ok=True)
+    fd, name = tempfile.mkstemp(prefix="sourcerer-update-", suffix=".cmd")
+    script = pathlib.Path(name)
+    mark = script.with_suffix(".started")
+    proc = None
+    try:
+        with os.fdopen(fd, "w", encoding="ascii", newline="") as f:
+            f.write(SETUP_CMD)
+        env = dict(os.environ, SOURCERER_EXE=str(exe), SOURCERER_IMAGE=pathlib.Path(exe).name,
+                   SOURCERER_SETUP=str(setup), SOURCERER_MARK=str(mark),
+                   SOURCERER_SETUP_LOG=str(log_dir / "setup.log"), SOURCERER_UPDATE_LOG=str(log_dir / "update.log"),
+                   SOURCERER_STAMP=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                   SOURCERER_SYS=os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32"),
+                   SOURCERER_WAIT=str(wait), **INDEPENDENT)
+        # By its bare name from the temp folder (cwd): a path with ( ) & in it -- C:\Users\Jo (work) --
+        # would be torn apart by cmd /c's quote handling. /d: no AutoRun commands.
+        proc = _detached(["cmd.exe", "/d", "/c", script.name], NO_WINDOW | NEW_GROUP, env=env)
+        for _ in range(50):                                        # 5 s for a cold, scanned cmd.exe
+            if mark.exists():
+                return
+            if proc.poll() is not None:
+                break
+            time.sleep(0.1)
+        raise RuntimeError("The update helper did not start (is cmd.exe blocked here?). "
+                           "Sourcerer keeps running; install the new Sourcerer-Setup.exe by hand.")
+    except BaseException:
+        if proc is not None and proc.poll() is None:
+            proc.kill()
+        script.unlink(missing_ok=True)
+        mark.unlink(missing_ok=True)
+        raise
+
+
+def _setup_after_exit(setup):
+    run_setup_script(pathlib.Path(sys.executable), setup, config.LOG_DIR)
 
 
 def _install_setup(channel):
@@ -208,14 +264,9 @@ def restart():
     if config.FROZEN:
         # The new one waits (--restart) until this one no longer answers; started at once it
         # would find this one running and leave. No shell, no helper script: the exe is enough.
-        kwargs = {"cwd": str(config.INSTALL), "stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL,
-                  "stderr": subprocess.DEVNULL, "close_fds": True, "env": dict(os.environ, **INDEPENDENT)}
-        if os.name == "nt":
-            kwargs["creationflags"] = 0x00000008 | 0x00000200       # detached, own process group
-        else:
-            kwargs["start_new_session"] = True
         # An AppImage's inner binary vanishes with its mount once this process is gone.
-        subprocess.Popen([config.APPIMAGE or sys.executable, "--restart"], **kwargs)
+        _detached([config.APPIMAGE or sys.executable, "--restart"], DETACHED | NEW_GROUP,
+                  cwd=str(config.INSTALL), env=dict(os.environ, **INDEPENDENT))
         return
     _launch_helper(swap=False)
 
@@ -296,13 +347,7 @@ def _launch_helper(swap):
     pids = [os.getpid()] + ([os.getppid()] if os.name == "nt" else [])
     args = [_base_python(), str(helper), "--install", str(config.INSTALL),
             "--stage", STAGE_REL if swap else "-", "--pids", ",".join(map(str, pids))]
-    kwargs = {"cwd": tempfile.gettempdir(), "stdin": subprocess.DEVNULL,
-              "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL, "close_fds": True}
-    if os.name == "nt":
-        kwargs["creationflags"] = 0x00000008 | 0x00000200 | 0x08000000  # detached, own group, no window
-    else:
-        kwargs["start_new_session"] = True
-    subprocess.Popen(args, **kwargs)
+    _detached(args, DETACHED | NEW_GROUP | NO_WINDOW)
     log.info("helper started: %s", " ".join(args))
 
 

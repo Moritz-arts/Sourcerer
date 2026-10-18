@@ -116,13 +116,27 @@ Traps:
 - **The installer must not meet the dying program.** The in-app update first ran Setup at once and
   then quit (`_shutdown`, ~4 s later): Setup's restart manager hit the still-running one-file build
   (two `Sourcerer.exe` processes, window already destroyed), sat on "Closing applications..." and
-  rolled the update back -- v0.23 -> v0.25 never happened. `updater._setup_after_exit` now starts a
-  hidden cmd (`SETUP_CMD`, paths only through the environment) that waits until no `Sourcerer.exe`
-  runs (60 s at most), runs Setup with `/FORCECLOSEAPPLICATIONS` and its own log
-  `Userdata/Logs/setup.log`, and starts the old program again when Setup fails (block in
-  `update.log`, reported by `desktop._after_update`). Success writes nothing there: the new
-  Sourcerer starts inside Setup and would read the log before the script got to it. Not run on a
-  real Windows desktop yet -- CI never installs over a *running* copy.
+  rolled the update back -- v0.23 -> v0.25 never happened. So **Setup waits itself**
+  (`InitializeSetup` in `Sourcerer.iss`, silent + `/START=1` only): while the installed `Sourcerer.exe`
+  refuses to be opened for writing (`SaveStringToFile(Exe, '', True)`; a running program does) it sleeps,
+  `/WAIT` seconds at most (60); and it **never forces** the program closed -- still open after that, Setup
+  stops with code 1 and nothing is touched. Setup is always the newest code, so this also covers an older
+  Sourcerer (v0.25 and before) that still runs it at once and quits seconds later. The in-app update
+  (`updater.run_setup_script`) starts a hidden cmd (`SETUP_CMD`; paths only through the environment, the
+  script by its bare name from the temp folder -- a `( )` in a user's temp path breaks `cmd /c "<path>"` --
+  and the system's tools by full path) that runs Setup with its own log `Userdata/Logs/setup.log`, starts
+  the old program again when Setup fails (block in `update.log`, opened by `update by Setup`, reported by
+  `desktop._after_update`) and checks that a Sourcerer runs after a successful Setup. It writes a mark first
+  thing and `run_setup_script` raises if the mark does not appear, so `update_install` does not shut
+  Sourcerer down for a helper that never ran. Success writes nothing in `update.log`: the new Sourcerer starts
+  inside Setup and would read it before the script got to it.
+  **A cmd cannot ask "is the exe in use"**: the idiom `2>nul (>>file (call ))` (append, write nothing)
+  succeeded on a running Sourcerer.exe -- `>>` asks for append access only, which a running image allows
+  -- so a script built on it ran Setup at once (CI caught it, the first time the script ran at all).
+  `tasklist | find` by image name has the other faults (a copy elsewhere, a blocked tasklist, languages).
+  `smoke.py` (`installer_update`) runs all of it against the installed program on Windows: stays open,
+  closes, Setup fails, Setup started at once; between steps it kills every `Sourcerer.exe` and waits until
+  the file opens for writing, or one step's leftovers (a Setup still waiting, a program it started) spoil the next.
 - **Fewer files, on purpose** (`build.py`): Windows 10+ has the C runtime, so the ~40 `api-ms-win-*.dll`
   forwarders and `ucrtbase.dll` are dropped through the spec (the command line cannot drop a binary) and
   `setuptools`/`pkg_resources` are excluded -- a smaller file that unpacks faster. The installer is Windows

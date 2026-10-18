@@ -53,7 +53,9 @@ def _after_update():
         lines = (config.LOG_DIR / "update.log").read_text(encoding="utf-8").splitlines()
     except OSError:
         return
-    starts = [i for i, line in enumerate(lines) if line.endswith("  waiting for Sourcerer to close")]
+    # HELPER opens its block with the first line, the Windows installer's script (updater.SETUP_CMD) with the second.
+    starts = [i for i, line in enumerate(lines)
+              if line.endswith(("  waiting for Sourcerer to close", "  update by Setup"))]
     if not starts:
         return
     block = lines[starts[-1]:]
@@ -68,7 +70,7 @@ def _after_update():
         sync.event("done", "Updated to v%s" % config.VERSION)
     else:
         why = next((line.split("  ", 1)[-1] for line in block
-                    if any(w in line for w in ("failed", "could not", "broke", "RESTORE"))),
+                    if any(w in line for w in ("failed", "could not", "did not", "broke", "RESTORE"))),
                    block[-1].split("  ", 1)[-1])
         sync.event("error", "The update did not go through: %s -- details in Settings > Updates" % why)
 

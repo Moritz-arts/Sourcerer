@@ -20,6 +20,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -138,6 +139,154 @@ def update_over(asset, exe, data):
     check((data / "mine.txt").read_text() == "my cards" and exe.is_file(), "a second update keeps Userdata where it is")
 
 
+def until(test, seconds):
+    end = time.time() + seconds
+    while time.time() < end:
+        if test():
+            return True
+        time.sleep(0.5)
+    return False
+
+
+def installer_update(asset, exe, data, start):
+    """The in-app update of an installed Windows copy, run for real against the installed program.
+
+    updater.SETUP_CMD is a cmd script nobody could run on a desktop yet, and the one thing the update
+    must get right is the order: Setup replaces Sourcerer.exe only after it has let go. Four situations:
+    the program stays open (Setup stops, nothing is killed), it closes (Setup goes on, the new Sourcerer
+    comes up by itself), Setup fails (the old Sourcerer starts again and the reason is logged), and Setup
+    started at once by an older Sourcerer meets a program that quits seconds later (Setup waits)."""
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "Sourcerer_files"))
+    from sourcerer import updater
+    logs = data / "Logs"
+    update_log, setup_log = logs / "update.log", logs / "setup.log"
+    temp = pathlib.Path(tempfile.gettempdir())
+
+    def free():
+        """No Sourcerer left from an earlier step: the next one starts from a program that is not in use."""
+        subprocess.call(["taskkill", "/F", "/T", "/IM", exe.name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        def unlocked():
+            try:
+                with open(exe, "r+b"):                      # a running program refuses to be opened for writing
+                    return True
+            except OSError:
+                return False
+        return until(unlocked, 30)
+
+    def fresh():
+        free()
+        logs.mkdir(parents=True, exist_ok=True)
+        for f in (update_log, setup_log, logs / "race.log", data / "running.json"):
+            f.unlink(missing_ok=True)
+
+    def text(path):
+        return path.read_text(encoding="utf-8", errors="replace") if path.is_file() else ""
+
+    def running():
+        app = start("--no-open", "--port", str(PORT))
+        return app, wait_for(PORT)
+
+    def end(app, pid):
+        kill(pid)
+        stop(app)
+        time.sleep(3)
+
+    def newcomer(old_pid, seconds=150):
+        """The Sourcerer that came up without anybody starting it: another pid, answering."""
+        found = []
+
+        def test():
+            try:
+                info = json.loads((data / "running.json").read_text(encoding="utf-8"))
+                if info["pid"] != old_pid and wait_for(info["port"], 2):
+                    found.append(info)
+            except (OSError, ValueError, KeyError):
+                pass
+            return bool(found)
+        until(test, seconds)
+        return found[0] if found else None
+
+    # 1. A program that stays open: Setup waits, gives up, and nothing is killed.
+    name = "a program that stays open is left alone"
+    try:
+        fresh()
+        app, ping = running()
+        check(bool(ping), name + ": starts")
+        if ping:
+            updater.run_setup_script(exe, asset, logs, wait=3)
+            check(True, "the update helper starts (its mark appears)")
+            check(until(lambda: "setup failed (code 1" in text(update_log), 90), name + ": update.log says Setup stopped",
+                  text(update_log).strip())
+            check("still in use" in text(setup_log), name + ": Setup says why", "setup.log %d bytes" % len(text(setup_log)))
+            check(wait_for(PORT, 5) and json.loads(get("/api/ping")[1])["pid"] == ping["pid"], name + ": still the same program")
+            end(app, ping["pid"])
+    except Exception as e:
+        check(False, name, repr(e))
+
+    # 2. The program closes: Setup goes on, the new Sourcerer comes up by itself, the helper cleans up.
+    name = "an update runs once the program has closed"
+    try:
+        fresh()
+        app, ping = running()
+        check(bool(ping), name + ": starts")
+        if ping:
+            updater.run_setup_script(exe, asset, logs)
+            time.sleep(6)
+            check(bool(wait_for(PORT, 5)) and json.loads(get("/api/ping")[1])["pid"] == ping["pid"],
+                  "Setup waits and does not force the program closed")
+            end(app, ping["pid"])
+            new = newcomer(ping["pid"])
+            check(bool(new), name + ": the new Sourcerer comes up by itself")
+            check("waited" in text(setup_log) and "succeeded" in text(setup_log),
+                  name + ": Setup waited and went through", "setup.log %d bytes" % len(text(setup_log)))
+            check("update by Setup" not in text(update_log), name + ": nothing in update.log", text(update_log).strip())
+            check(until(lambda: not list(temp.glob("sourcerer-update-*")), 30), "the helper script and its mark are gone")
+            if new:
+                end(app, new["pid"])
+    except Exception as e:
+        check(False, name, repr(e))
+
+    # 3. Setup fails: the old Sourcerer starts again, the reason is in update.log (and reported at start).
+    name = "a failing Setup brings the old Sourcerer back"
+    try:
+        fresh()
+        stub = pathlib.Path(sys.executable)      # python.exe given Setup's switches: "can't open file '/SILENT'", exit code 2
+        app, ping = running()
+        check(bool(ping), name + ": starts")
+        if ping:
+            end(app, ping["pid"])
+            updater.run_setup_script(exe, stub, logs)
+            back = newcomer(ping["pid"])
+            check(bool(back), name + ": Sourcerer starts again")
+            check("setup failed (code 2" in text(update_log), name + ": the code is in update.log", text(update_log).strip())
+            if back:
+                end(app, back["pid"])
+    except Exception as e:
+        check(False, name, repr(e))
+
+    # 4. Setup started at once by an older Sourcerer (v0.25 and before) while the program is still up.
+    name = "Setup waits for a program that quits seconds later"
+    try:
+        fresh()
+        app, ping = running()
+        check(bool(ping), name + ": starts")
+        if ping:
+            threading.Timer(6, lambda: end(app, ping["pid"])).start()
+            done = subprocess.run([str(asset), "/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS",
+                                   "/START=1", "/LOG=" + str(logs / "race.log")], timeout=240)
+            race = text(logs / "race.log")
+            check(done.returncode == 0, name + ": Setup went through", "exit code %s" % done.returncode)
+            check("for Sourcerer.exe to close" in race, name + ": it says it waited", "race.log %d bytes" % len(race))
+            new = newcomer(ping["pid"])
+            check(bool(new), name + ": the new Sourcerer comes up")
+            if new:
+                end(app, new["pid"])
+    except Exception as e:
+        check(False, name, repr(e))
+    free()
+
+
 def restart_works(data, old_pid):
     """Settings > Repair > Restart: the old one goes, a new one answers on its own. In a one-file build the
     new one has to unpack a folder of its own (the old one's goes with it)."""
@@ -224,6 +373,9 @@ def main():
                 kill(again["pid"])
     finally:
         stop(app)
+
+    if asset.name.endswith("Setup.exe"):
+        installer_update(asset, exe, data, start)
 
     if "--window" in sys.argv:
         shown = start("--port", str(PORT + 1))
