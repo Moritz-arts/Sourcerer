@@ -20,10 +20,11 @@ import time
 import urllib.parse
 from dataclasses import dataclass
 
-from . import bluesky, booru, mastodon, patreon, pixiv, x, xenforo
+from . import bluesky, booru, mastodon, misskey, patreon, pixiv, x, xenforo
 
-# booru before mastodon: a booru's /users/ pages look like the fediverse's.
-SITES = [bluesky, pixiv, x, patreon, xenforo, booru, mastodon]
+# booru before mastodon: a booru's /users/ pages look like the fediverse's. misskey too: its profile
+# links are Mastodon's, told apart by the server (known or learned).
+SITES = [bluesky, pixiv, x, patreon, xenforo, booru, misskey, mastodon]
 log = logging.getLogger(__name__)
 
 

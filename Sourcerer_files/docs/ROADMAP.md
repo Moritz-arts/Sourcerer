@@ -359,6 +359,8 @@ add the one that replaced it.
 
 - [x] Follows import: Bluesky, Mastodon and pixiv follows become listed cards after a login;
       Merge into... for accounts the sites did not show to be one artist
+- [x] Misskey (misskey.io and forks) as a source: notes with files, no login; a Mastodon list's
+      Misskey accounts are cards too; unknown Misskey servers are learned
 - [x] Merge dialog: likely twins (same name but for emoji / marks / case, shared account name) listed at
       the top, several cards ticked and merged with one button, no extra confirmation; Browse can be
       ordered by source (logo and line per site)

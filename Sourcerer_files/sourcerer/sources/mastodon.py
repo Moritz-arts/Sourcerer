@@ -17,6 +17,7 @@ import urllib.parse
 import requests
 
 from .. import accounts, config, net
+from . import misskey
 
 KIND = "mastodon"
 LABEL = "Mastodon"
@@ -97,9 +98,20 @@ def _api(server, path, params=None):
         raise
 
 
+class NotMastodon(Exception):
+    """The server answers a Misskey's way: misskey.py has learned it and reads it from now on."""
+
+
 def _account(url):
     server, user = _parse(url)
-    return server, _api(server, "accounts/lookup", {"acct": user})
+    try:
+        return server, _api(server, "accounts/lookup", {"acct": user})
+    except requests.HTTPError as e:
+        # A Misskey has no Mastodon API (404): a follow list of a Mastodon server names such accounts, and
+        # their links look like any other. Found out once, then the link is recognised as Misskey.
+        if e.response is not None and e.response.status_code == 404 and misskey.probe(server):
+            raise NotMastodon(server) from e
+        raise
 
 
 # ---- logging in (Manage Accounts) ---------------------------------------------------
@@ -180,7 +192,10 @@ def following(key):
 
 
 def profile(url):
-    server, account = _account(url)
+    try:
+        server, account = _account(url)
+    except NotMastodon:
+        return misskey.profile(url)
     # Display names carry custom emoji as :shortcode:, which no folder should.
     name = re.sub(r":[\w+-]+:", "", account.get("display_name") or "").strip()
     avatar = account.get("avatar_static") or account.get("avatar") or ""
@@ -191,7 +206,11 @@ def profile(url):
 
 
 def pages(url):
-    server, account = _account(url)
+    try:
+        server, account = _account(url)
+    except NotMastodon:
+        yield from misskey.pages(url)
+        return
     max_id = None
     while True:
         statuses = _api(server, "accounts/%s/statuses" % account["id"], {

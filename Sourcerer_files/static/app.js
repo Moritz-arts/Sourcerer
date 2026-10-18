@@ -796,7 +796,7 @@ function proxyOf(it, size) {
 }
 
 // A site's mark instead of its name; "" for a site without one (the caller writes the name then).
-var SITE_LOGOS = { Bluesky: "bluesky", Mastodon: "mastodon", Pixiv: "pixiv", Patreon: "patreon", X: "x", XenForo: "xenforo", Booru: "booru" };
+var SITE_LOGOS = { Bluesky: "bluesky", Mastodon: "mastodon", Misskey: "misskey", Pixiv: "pixiv", Patreon: "patreon", X: "x", XenForo: "xenforo", Booru: "booru" };
 function siteLogo(label) {
   return SITE_LOGOS[label] ? '<svg class="ic logo" role="img" aria-label="' + esc(label) + '"><use href="#l-' + SITE_LOGOS[label] + '"/></svg>' : "";
 }
