@@ -63,7 +63,9 @@ Sourcerer/                        <- what Sourcerer.zip unpacks to; move it free
         │                           booru -- cookies, a token, a session or an API key,
         │                           readable by this user only, never shipped
         ├─ Logs/                  sourcerer.log; update.log (the update helper's
-        │                           steps); console.log (the program's own output)
+        │                           steps); setup.log (Inno Setup's own log of an
+        │                           in-app update, Windows installed); console.log
+        │                           (the program's own output)
         ├─ Avatars/               profile pictures, <artist>.jpg
         ├─ Previews/              a cache: <artist id>/<hash>.jpg, the small pictures
         │                           cards show of posts that are not downloaded

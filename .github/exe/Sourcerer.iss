@@ -64,6 +64,45 @@ begin
   Result := WizardSilent and (ExpandConstant('{param:START|0}') = '1');
 end;
 
+function InitializeSetup: Boolean;
+var
+  Dir, Exe: String;
+  Limit, Waited: Integer;
+begin
+  Result := True;
+  { The in-app update runs this Setup while Sourcerer is still going down (v0.25 and older: at once, and
+    the program quits seconds later). Setup then meets a program on its way out, its restart manager
+    sits on "Closing applications..." and rolls the update back. So Setup waits itself: while the
+    installed Sourcerer.exe refuses to be opened for writing (a running program does), up to /WAIT
+    seconds (60). It never forces the program closed: when it stays open Setup stops, exit code 1,
+    and the update is not run. Only for that silent start (/START=1) -- started by hand, Setup asks
+    the user to close Sourcerer as usual. }
+  if not (WizardSilent and (ExpandConstant('{param:START|0}') = '1')) then
+    Exit;
+  if not RegQueryStringValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{6C1F6B7A-5D0E-4B27-9C54-0D9A4A6E51B3}_is1',
+                             'Inno Setup: App Path', Dir) then
+    Exit;
+  Exe := AddBackslash(Dir) + 'Sourcerer.exe';
+  Limit := StrToIntDef(ExpandConstant('{param:WAIT|60}'), 60);
+  Waited := 0;
+  while Waited < Limit do
+  begin
+    if not FileExists(Exe) then
+      Break;
+    if SaveStringToFile(Exe, '', True) then   { appends nothing; fails while the program runs }
+      Break;
+    Sleep(1000);
+    Waited := Waited + 1;
+  end;
+  if Waited > 0 then
+    Log(Format('waited %d s for Sourcerer.exe to close', [Waited]));
+  if FileExists(Exe) and not SaveStringToFile(Exe, '', True) then
+  begin
+    Log('Sourcerer.exe is still in use; Setup does not force it closed');
+    Result := False;
+  end;
+end;
+
 procedure RetireOldProgramFolder;
 var
   Old, Mine: String;
