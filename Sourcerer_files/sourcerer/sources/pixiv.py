@@ -100,6 +100,7 @@ def _ajax(path, params=()):
 
 
 FOLLOWING = 24         # what pixiv's own list asks for
+MAX_FOLLOW_PAGES = 500   # 12 000 follows
 
 
 def following(key):
@@ -109,17 +110,15 @@ def following(key):
         return
 
     def pages(rest):
-        offset = 0
-        while True:
-            body = _ajax("user/%s/following" % me, {"offset": offset, "limit": FOLLOWING, "rest": rest,
+        # By page, as pixiv's own list does: an empty page with more behind it (accounts left out)
+        # must not end the list, and an offset that stood still would never end.
+        for n in range(MAX_FOLLOW_PAGES):
+            body = _ajax("user/%s/following" % me, {"offset": n * FOLLOWING, "limit": FOLLOWING, "rest": rest,
                                                     "tag": "", "acceptingRequests": 0})
-            users = body.get("users") or []
-            if not users:
-                return
             yield [{"url": "https://www.pixiv.net/users/%s" % u["userId"], "name": u.get("userName") or "",
-                    "avatar": u.get("profileImageUrl") or "", "avatar_headers": REFERER} for u in users]
-            offset += len(users)
-            if offset >= body.get("total", 0):
+                    "avatar": u.get("profileImageUrl") or "", "avatar_headers": REFERER}
+                   for u in body.get("users") or []]
+            if (n + 1) * FOLLOWING >= (body.get("total") or 0):
                 return
     yield "show", pages("show")
     yield "hide", pages("hide")

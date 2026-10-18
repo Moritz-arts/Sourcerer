@@ -32,6 +32,7 @@ LABEL = "Bluesky"
 API = "https://public.api.bsky.app/xrpc/"
 _URL = re.compile(r"^https?://(?:www\.)?bsky\.app/profile/([^/?#\s]+)", re.I)
 PAGE = 100   # the API's maximum
+MAX_FOLLOW_PAGES = 200   # 20 000 follows: a list that never ends is the server's fault
 
 
 def match(url):
@@ -226,15 +227,17 @@ def following(key):
 
     def pages():
         cursor = None
-        while True:
+        for _ in range(MAX_FOLLOW_PAGES):
             page = _get("app.bsky.graph.getFollows", {"actor": did, "limit": PAGE, "cursor": cursor})
             # "handle.invalid": an account whose handle no longer resolves has no profile address.
             yield [{"url": "https://bsky.app/profile/" + f["handle"], "avatar": f.get("avatar") or "",
                     "name": f.get("displayName") or f["handle"]}
                    for f in page.get("follows") or [] if f.get("handle") and not f["handle"].endswith(".invalid")]
-            cursor = page.get("cursor")
-            if not cursor or not page.get("follows"):
+            # The list ends where the cursor does: a page can be empty (accounts left out after paging)
+            # with more behind it. A cursor that repeats would never end.
+            if not page.get("cursor") or page["cursor"] == cursor:
                 return
+            cursor = page["cursor"]
     yield "", pages()
 
 

@@ -30,12 +30,14 @@ import datetime
 import email.utils
 import hashlib
 import http.cookiejar
+import ipaddress
 import json
 import logging
 import mimetypes
 import os
 import random
 import re
+import socket
 import ssl
 import threading
 import time
@@ -577,11 +579,33 @@ def get_json(url, params=None, headers=None):
 
 
 def get_json_next(url, params=None, headers=None):
-    """get_json and the next page's address from the Link header (Mastodon pages by it), or None."""
+    """get_json and the next page's address from the Link header (Mastodon pages by it), or None.
+    The address comes from the server: one on another host or without https would be sent the
+    login's token, so it is not followed."""
     params = {k: v for k, v in (params or {}).items() if v is not None}
     with _Polite(url, _carries_login(url, headers, params)):
         resp = _get(url, params, headers=headers)
-        return resp.json(), (resp.links.get("next") or {}).get("url")
+        found = (resp.links.get("next") or {}).get("url")
+    here, there = urllib.parse.urlsplit(url), urllib.parse.urlsplit(found or "")
+    return resp.json(), (found if there.scheme == "https" and there.netloc.lower() == here.netloc.lower() else None)
+
+
+def public_https(url):
+    """Whether url is an https address that leads out to the internet, not into this machine or its
+    network -- for addresses a site hands out (an avatar, an account's home). The name is resolved
+    here; a name that does not resolve is let through (a proxy may know it) and so is a redirect."""
+    try:
+        parts = urllib.parse.urlsplit(url)
+        if parts.scheme != "https" or not parts.hostname:
+            return False
+        for info in socket.getaddrinfo(parts.hostname, parts.port or 443, proto=socket.IPPROTO_TCP):
+            if not ipaddress.ip_address(info[4][0].split("%")[0]).is_global:
+                return False
+    except socket.gaierror:
+        return True
+    except (OSError, ValueError):
+        return False
+    return True
 
 
 def post_json(url, data=None, json=None, headers=None):

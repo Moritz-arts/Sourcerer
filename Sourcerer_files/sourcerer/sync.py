@@ -61,6 +61,7 @@ _lock = threading.Lock()
 _save = threading.Lock()     # deciding and saving happen one file at a time
 _queue = []                  # artist ids waiting
 _auto = set()                # of those, queued by the automatic sync
+_starting = set()            # popped by the worker, _current not set yet: busy all the same (merge asks)
 _only = {}                   # artist id -> ids of the only sources a queued sync asks (Browse: download these)
 _modes = {}                  # artist id -> "refresh" or "download" for a queued job (none: the card's auto-download decides)
 _followup = {}               # artist id -> sources (None: all) of a download asked for while the card's own job could not take it
@@ -126,11 +127,12 @@ def safe_name(name):
     return name[:120] or "Unnamed"
 
 
-def artist_folder(artist):
-    """The card's own folder if one was chosen, else <library>/<name>."""
+def artist_folder(artist, lib=None):
+    """The card's own folder if one was chosen, else <library>/<name>. lib: library(), for a caller
+    that asks for many cards."""
     if artist["folder"]:
         return pathlib.Path(artist["folder"])
-    return pathlib.Path(library()) / safe_name(artist["name"])
+    return pathlib.Path(lib or library()) / safe_name(artist["name"])
 
 
 def target_folder(artist, label):
@@ -231,14 +233,21 @@ def enqueue(artist_ids=None, auto=False, only=None, mode=None):
     return len(added) + followed
 
 
+def _unqueue(artist_id):
+    """Take a card off the waiting list (the lock is held). True when it was on it."""
+    if artist_id not in _queue:
+        return False
+    _queue.remove(artist_id)
+    _auto.discard(artist_id)
+    _only.pop(artist_id, None)
+    _modes.pop(artist_id, None)
+    _followup.pop(artist_id, None)
+    return True
+
+
 def cancel(artist_id):
     with _lock:
-        if artist_id in _queue:
-            _queue.remove(artist_id)
-            _auto.discard(artist_id)
-            _only.pop(artist_id, None)
-            _modes.pop(artist_id, None)
-            _followup.pop(artist_id, None)
+        if _unqueue(artist_id):
             return True
         if _current and _current["artist_id"] == artist_id:
             _followup.pop(artist_id, None)
@@ -256,6 +265,7 @@ def _work():
                 _state["finished"] = _now()
                 return
             artist_id = _queue.pop(0)
+            _starting.add(artist_id)
             auto = artist_id in _auto
             only = _only.pop(artist_id, None)
             mode = _modes.pop(artist_id, None)
@@ -269,6 +279,7 @@ def _work():
         finally:
             with _lock:
                 _current = None
+                _starting.discard(artist_id)
                 later = _followup.pop(artist_id, False)
         if later is not False and not _cancel.is_set():      # a download asked for meanwhile follows the job
             enqueue([artist_id], only=later, mode="download")
@@ -509,13 +520,14 @@ class Busy(Exception):
 def merge(into_id, other_id):
     """The card other_id becomes part of into_id: its sources, files and history move over and it
     is gone -- the way to put one artist's accounts together where the sites were not recognised as
-    one. The downloaded files stay where they are (paths are kept). Returns how many sources moved."""
+    one. The downloaded files stay where they are (paths are kept). The result is a card the user
+    acted on, so it is no longer only listed. Returns how many sources moved."""
     if into_id == other_id:
         raise ValueError("Pick another card.")
-    with _lock:
-        if _current and _current["artist_id"] in (into_id, other_id):
-            raise Busy("%s is being synced. Try again when it is done." % _current["name"])
-    cancel(other_id)
+    with _lock:       # looked at and taken off the waiting list in one step: the worker cannot pop it between
+        if (_current and _current["artist_id"] in (into_id, other_id)) or {into_id, other_id} & _starting:
+            raise Busy("The card is being synced. Try again when it is done.")
+        _unqueue(other_id)
     moved = 0
     with db.connect() as con:
         a = con.execute("SELECT * FROM artists WHERE id = ?", (into_id,)).fetchone()
@@ -533,6 +545,15 @@ def merge(into_id, other_id):
         # A file both cards have under one remote_key stays with the card that has it (a duplicate row
         # of the other card goes with that card); everything else is now into_id's.
         con.execute("UPDATE OR IGNORE files SET artist_id = ? WHERE artist_id = ?", (into_id, other_id))
+        # What stayed behind clashed with a record of into_id. Where that record is a duplicate without a
+        # file (path NULL) and the other card holds the real one, the file goes to the record -- or it
+        # would stay in the folder with no card knowing it, and be downloaded a second time.
+        for f in con.execute("SELECT * FROM files WHERE artist_id = ? AND path IS NOT NULL", (other_id,)).fetchall():
+            con.execute("UPDATE files SET path = ?, sha256 = ?, phash = ?, width = ?, height = ?, size = ?, "
+                        "post_url = COALESCE(post_url, ?), posted = COALESCE(posted, ?) "
+                        "WHERE artist_id = ? AND remote_key = ? AND path IS NULL",
+                        (f["path"], f["sha256"], f["phash"], f["width"], f["height"], f["size"],
+                         f["post_url"], f["posted"], into_id, f["remote_key"]))
         con.execute("UPDATE OR IGNORE failures SET artist_id = ? WHERE artist_id = ?", (into_id, other_id))
         master = a["master_source_id"]
         if not master and b["master_source_id"] and con.execute(
@@ -540,13 +561,16 @@ def merge(into_id, other_id):
             master = b["master_source_id"]
         con.execute("UPDATE artists SET listed = ?, master_source_id = ?, avatar = ?, last_activity = ?, "
                     "pending = (SELECT COALESCE(SUM(pending), 0) FROM sources WHERE artist_id = ?) WHERE id = ?",
-                    (a["listed"] and b["listed"], master, a["avatar"] or b["avatar"],
+                    (0, master, a["avatar"] or b["avatar"],
                      max(filter(None, [a["last_activity"], b["last_activity"]]), default=None), into_id, into_id))
         con.execute("DELETE FROM artists WHERE id = ?", (other_id,))
     if b["avatar"] and not a["avatar"]:
         name_avatar(into_id)                        # the picture came along: named after its new card
     elif b["avatar"]:
-        (config.AVATARS / b["avatar"]).unlink(missing_ok=True)
+        try:
+            (config.AVATARS / b["avatar"]).unlink(missing_ok=True)
+        except OSError as e:                         # the merge is done: a picture left over is not worth failing for
+            log.info("picture of the merged card not removed: %s", e)
     event("info", "%s is part of %s now" % (b["name"], a["name"]))
     return moved
 

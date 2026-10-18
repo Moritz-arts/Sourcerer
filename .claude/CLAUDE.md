@@ -382,17 +382,29 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   **A listed card is in no sweep**: `enqueue(None)` (Sync all, automatic sync), `previews._due` and "All
   artists" (`gallery._Gallery`) skip `listed = 1`, because a thousand pixiv follows read in the
   background are a thousand requests nobody asked for. Anything the user does with the card clears
-  it (`_save` on an edit, auto-download on, `enqueue` of that card by name); a merge keeps it only
-  when both cards had it. A new place that reads *every* card must say `WHERE listed = 0`. What was
-  added is remembered by profile URL (`followed`): a deleted or merged card does not return. A list
-  read to its end once (`follows_read:<key>:<list>`) is read again only up to its first page of known
-  accounts -- the newest follows come first. Needs the setting `import_follows`; started after a
-  login (`accounts.CHANGED`), 90-150 s after start (once the account check marked expired logins) and
-  every 10-14 h. Profile pictures come from the list itself, one at a time (`_pictures`), never a
-  profile request per card.
+  it (`_save` on an edit, auto-download on, `enqueue` of that card by name, a merge); a card made by
+  hand for an account that is listed takes the listed card over (`server._absorb_listed`). A new place
+  that reads *every* card must say `WHERE listed = 0`. What was added is remembered by lower-cased
+  profile URL (`followed`): a deleted or merged card does not return. A list read to its end once by
+  this login (`follows_read:<key>:<list>` holds the login's `saved` stamp, so another account starts
+  over) is read again only up to its first page of known accounts -- the newest follows come first. A
+  list ends where the site says (Bluesky's cursor, pixiv's total, no Link header), never on an empty
+  page, and every walk has a page cap. Needs the setting `import_follows`; started after a login
+  (`accounts.CHANGED`), 90-150 s after start (once the account check marked expired logins) and every
+  10-14 h.
+- **A follow list is the site's word, not ours.** A link is taken only when it is a profile of the
+  list's own site (`follows._add`: another site's address -- a pixiv work's -- would cost a request on
+  a login inside a write transaction) and on a public https host (`net.public_https`; checked before
+  the request, redirects are not); a Mastodon `Link: rel=next` is followed only on the same https host
+  (`net.get_json_next`), or the login's token would go wherever the server says. Profile pictures
+  come from the list itself, from the table `followed` (`avatar`, `tried`) one at a time by
+  `follows._pictures` -- a restart carries on, a failure is tried once more, a resting site ends the
+  run -- never a profile request per card. Names that would share a folder get the handle added.
 - **Merge** (`sync.merge`, `/api/artists/<id>/merge`): the card's sources and files move to the picked
-  card and the card is deleted; a link both have stays once; downloaded files keep their paths (the
-  old folder stays where it is). Refused while either card is syncing (`sync.Busy`).
+  card and the card is deleted; a link both have stays once; a file only the other card holds goes to
+  the record of the same post that has none; downloaded files keep their paths (the old folder stays
+  where it is). Refused while either card is syncing or just popped by the worker (`sync.Busy`,
+  `_starting`: looked at and taken off the queue under one lock).
 - **Logins are made in "Manage your accounts" (`#dlg-accounts`) and nowhere
   else**: one row per login that exists (saved, or being made in a window), one
   under the other (never side by side): dot and name, the fields in the middle,
@@ -521,7 +533,8 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
 - **The server listens on 127.0.0.1 only.** Nothing here is for other machines.
   And only Sourcerer's own page may change anything (`server._same_origin`):
   any web page in the user's browser can POST a form to 127.0.0.1, so a
-  POST with a foreign Origin or Host is refused. Requests without an Origin
+  POST with a foreign Origin or Host is refused. A *foreign Host* is refused for a GET too
+  (DNS rebinding): `/api/state` holds every account the user follows. Requests without an Origin
   (launch.py's `/api/focus`) pass.
 - **Be gentle with sites; it is what keeps users unblocked.** Every request
   goes through `net.py`: an honest User-Agent, at most `per_host` requests per

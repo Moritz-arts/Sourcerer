@@ -51,6 +51,7 @@ def _status(s):
 
 
 def _artists():
+    lib = sync.library()                                  # once: it is a query, and there can be thousands of cards
     with db.connect() as con:
         artists = [dict(r) for r in con.execute(
             "SELECT a.*, (SELECT COUNT(*) FROM files f WHERE f.artist_id = a.id "
@@ -67,9 +68,10 @@ def _artists():
                 s.update(sources.describe(s["url"]), master=s["id"] == a["master_source_id"])
                 s["status"] = _status(s)
                 a["sources"].append(s)
-            # The newest posts of the card's sources -- with or without a download (previews.py).
-            a["thumbs"] = previews.card_thumbs(con, a["id"])
-            a["path"] = str(sync.artist_folder(a))
+            # The newest posts of the card's sources -- with or without a download (previews.py); a card
+            # that is only listed has none, and the page shows none anyway.
+            a["thumbs"] = [] if a["listed"] else previews.card_thumbs(con, a["id"])
+            a["path"] = str(sync.artist_folder(a, lib))
             a["folder"] = a["folder"] or ""
     return artists
 
@@ -199,14 +201,16 @@ def _same_origin():
     """Only Sourcerer's own page may change anything. Any web page in the
     user's browser could otherwise POST to 127.0.0.1 -- a form needs no
     permission -- and log accounts in or out, or start syncs. A page from
-    elsewhere names itself in Origin; a renamed host (DNS rebinding) shows in Host."""
+    elsewhere names itself in Origin; a renamed host (DNS rebinding) shows in Host --
+    for a read too: /api/state holds every account the user follows."""
+    host = urllib.parse.urlsplit("//" + (request.host or ""))
+    if host.hostname not in _LOCAL:
+        abort(403)
     if request.method in ("GET", "HEAD", "OPTIONS"):
         return None
-    host = urllib.parse.urlsplit("//" + (request.host or ""))
     origin = request.headers.get("Origin")
     seen = urllib.parse.urlsplit(origin) if origin else None
-    if host.hostname not in _LOCAL or (seen is not None and (
-            seen.hostname not in _LOCAL or seen.port != host.port)):
+    if seen is not None and (seen.hostname not in _LOCAL or seen.port != host.port):
         abort(403)
     return None
 
@@ -308,6 +312,7 @@ def create_artist():
     with db.connect() as con:
         artist_id = con.execute("INSERT INTO artists (name) VALUES (?)", (data["name"],)).lastrowid
         _save(con, artist_id, data)
+    _absorb_listed(artist_id, data["urls"])
     _background(sync.check_card, artist_id)
     previews.soon(artist_id)
     if body.get("download_now"):
@@ -328,12 +333,30 @@ def update_artist(artist_id):
         _move_folder(con, artist_id, sync.artist_folder(row),
                      sync.artist_folder(dict(row, name=data["name"], folder=data["folder"])))
         _save(con, artist_id, data)
+    _absorb_listed(artist_id, data["urls"])
     sync.name_avatar(artist_id)                  # the picture's file is named after the artist
     _background(sync.check_card, artist_id)
     previews.soon(artist_id)                     # another source may have newer pictures
     if body.get("download_now"):
         sync.enqueue([artist_id], mode="download")
     return jsonify(ok=True)
+
+
+def _absorb_listed(artist_id, urls):
+    """A card made by hand for an account that is in the list already (a followed one, only listed)
+    takes that card over -- two cards would sync the same account twice."""
+    mine = sorted({u.lower() for u in urls})
+    if not mine:
+        return
+    with db.connect() as con:
+        others = [r[0] for r in con.execute(
+            "SELECT DISTINCT s.artist_id FROM sources s JOIN artists a ON a.id = s.artist_id WHERE a.listed = 1 "
+            "AND a.id != ? AND lower(s.url) IN (%s)" % ",".join("?" * len(mine)), [artist_id] + mine)]
+    for other in others:
+        try:
+            sync.merge(artist_id, other)
+        except (sync.Busy, KeyError, ValueError) as e:
+            log.info("listed card %s not taken over: %s", other, e)
 
 
 def _move_folder(con, artist_id, src, dst):
@@ -413,7 +436,10 @@ def set_auto_download(artist_id):
 @app.post("/api/artists/<int:artist_id>/merge")
 def merge_artist(artist_id):
     """The card becomes part of the card named in "into": its sources and files move over."""
-    into = int((request.get_json(force=True) or {}).get("into") or 0)
+    try:
+        into = int(_body().get("into") or 0)
+    except (TypeError, ValueError):
+        return jsonify(error="Pick a card."), 400
     try:
         moved = sync.merge(into, artist_id)
     except KeyError:
