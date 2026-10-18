@@ -89,7 +89,8 @@ def _add(page, kind, public):
         site = sources.site_for(raw)
         # Only a profile of the list's own site: normalising another site's address (a pixiv work's)
         # is a request, and a hostile server could name any host.
-        if site and site.KIND == kind:
+        # (a Mastodon list names Misskey accounts too: Mastodon follows across the fediverse)
+        if site and (site.KIND == kind or (kind == "mastodon" and site.KIND == "misskey")):
             host = urllib.parse.urlsplit(raw).hostname or ""
             if host not in public:
                 public[host] = net.public_https(raw)

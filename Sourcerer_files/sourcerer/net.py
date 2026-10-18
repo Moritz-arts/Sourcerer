@@ -69,7 +69,8 @@ HOSTS = {"www.pixiv.net": (1, 1.5), "i.pximg.net": (1, 0.5), "www.patreon.com": 
          "gelbooru.com": (1, 1.0), "api.rule34.xxx": (1, 1.0),
          "safebooru.org": (1, 1.0), "yande.re": (1, 1.0), "konachan.com": (1, 1.0),
          "konachan.net": (1, 1.0), "www.sakugabooru.com": (1, 1.0), "aibooru.online": (1, 1.0),
-         "xbooru.com": (1, 1.0), "tbib.org": (1, 1.0), "hypnohub.net": (1, 1.0)}
+         "xbooru.com": (1, 1.0), "tbib.org": (1, 1.0), "hypnohub.net": (1, 1.0),
+         "misskey.io": (2, 0.5)}
 # Not retried on a 429 or a bot check. pixiv's terms forbid "large numbers of
 # actions within a short period"; tools that kept retrying there had accounts restricted.
 STOP_HOSTS = {"www.pixiv.net"}
@@ -95,8 +96,9 @@ BUDGET = 3000
 # image host too, and a day's budget counts them together.
 _SITES = {"pixiv.net": "pixiv", "pximg.net": "pixiv", "patreon.com": "patreon",
           "patreonusercontent.com": "patreon", "x.com": "x", "twitter.com": "x", "twimg.com": "x",
-          "bsky.app": "bluesky", "bsky.network": "bluesky", "bsky.social": "bluesky"}
-NAMES = {"pixiv": "Pixiv", "patreon": "Patreon", "x": "X", "bluesky": "Bluesky"}
+          "bsky.app": "bluesky", "bsky.network": "bluesky", "bsky.social": "bluesky",
+          "misskey.io": "misskey", "misskeyusercontent.jp": "misskey"}
+NAMES = {"pixiv": "Pixiv", "patreon": "Patreon", "x": "X", "bluesky": "Bluesky", "misskey": "Misskey.io"}
 PAUSED = []                 # callbacks(site, until, why), for the activity log
 
 
@@ -576,6 +578,12 @@ def get_json(url, params=None, headers=None):
     params = {k: v for k, v in (params or {}).items() if v is not None}
     with _Polite(url, _carries_login(url, headers, params)):
         return _get(url, params, headers=headers).json()
+
+
+def post_read(url, json=None, headers=None):
+    """A POST that only reads (Misskey's whole API is one): the site's ordinary lane, retried like a GET."""
+    with _Polite(url, _carries_login(url, headers)):
+        return _get(url, headers=headers, method="POST", json=json, tries=RETRIES).json()
 
 
 def get_json_next(url, params=None, headers=None):

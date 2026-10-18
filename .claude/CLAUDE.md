@@ -10,7 +10,7 @@ what people download and unpack is these folders, unchanged.
 `launch.py` behind them; the program — a window that is Browse (the artists
 on the left, their posts on the right), a card dialog (sources with a live dot each, own folder, master source, folder
 layout, what to do with the same picture from two sources), a queued
-background sync that downloads from Bluesky, Mastodon, Pixiv, Patreon, X,
+background sync that downloads from Bluesky, Mastodon, Misskey, Pixiv, Patreon, X,
 XenForo forums and boorus, a gallery per card (all its sources, straight from
 the sites), a login for every site (Manage Accounts, checked at each start),
 settings like TrackImage's, and an
@@ -443,6 +443,18 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   the column: better detection then fixes sources saved before it.
 - **Profile URLs lie about their site.** pixiv's `/users/123` matched the
   fediverse pattern; `mastodon.py` keeps a list of hosts that are not.
+- **A Misskey looks like a Mastodon in the address** (`https://misskey.io/@user`) **and answers nothing a
+  Mastodon client asks** (404 on `/api/v1/...`): Baraag's follow list names such accounts, and they were
+  cards that never worked. `sources/misskey.py` has the whole API (POST + JSON, also what only reads:
+  `net.post_read`, retried like a GET) and sits before `mastodon` in `SITES`. A server is Misskey when it
+  is in `misskey.HOSTS`, starts with `misskey.`, or was **learned**: a Mastodon source whose
+  `accounts/lookup` gets a 404 asks `/api/meta` once (`misskey.probe`), keeps the host in the setting
+  `misskey_hosts` and carries on through misskey.py -- no list to keep current, but one request per
+  unknown server. `match` must stay free of requests (it runs on every read of every source). A Mastodon
+  list's Misskey accounts become cards too (`follows._add`). A file's `url` is what the server serves
+  (the original, or an image's public copy); its uploader's name is shared by thousands, so the stored
+  name is used. No login yet: a server that shows notes to members only says so on the card. The mark is
+  drawn (a Tabler "notes" icon in Misskey's green): Simple Icons' Misskey mark is CC BY-NC-SA, not CC0.
 - **pywebview 6 turned `FOLDER_DIALOG` into a deprecated function.** Passing it
   as the dialog type opens nothing; use `FileDialog.FOLDER` (with a fallback
   for 5.x), as `server.pick_folder` does.
