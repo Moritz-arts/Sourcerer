@@ -82,6 +82,9 @@ the old one, AppImage: replace the file, portable zip / tar.gz: delete all but `
 `$APPIMAGE`, its inner binary dies with the mount).
 
 Traps:
+- **The Install button shows as soon as a release is newer, greyed until its file is attached**
+  (`showUpdate`, `u.newer` without `u.available`) and the page asks again every minute, 15 times: the
+  installers come minutes after the release, and a hidden button read as a missing one.
 - **A publishing gate must not depend on a site we do not control.** The first smoke test failed the whole
   build on GitHub's API rationing a shared runner address (502 from our own endpoint) and no file
   was ever attached. Only a TLS failure ("cannot connect") fails the update check now.
