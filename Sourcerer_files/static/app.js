@@ -123,6 +123,7 @@ function applySettings() {
   var t = S.settings.theme;
   if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
   else delete document.documentElement.dataset.theme;
+  document.documentElement.classList.toggle("no-tile-logo", S.settings.tile_logo === "0");
 }
 
 // ---- artists ---------------------------------------------------------------
@@ -826,7 +827,7 @@ function tileHtml(it, i) {
     (it.w && it.h ? '" data-ar="' + galRatio(it.w, it.h) : "") +
     '" data-src="' + esc(it.source) + '" title="' + esc(who + (it.posted ? " · " + it.posted.slice(0, 10) : "")) + '">' +
     picture + (it.video && it.thumb ? '<span class="gal-play">' + icon("play") + "</span>" : "") +
-    '<span class="gal-tag">' + (siteLogo(it.source) || esc(it.source)) + name + "</span>" +
+    '<span class="gal-tag">' + (siteLogo(it.source) || '<span class="gal-site">' + esc(it.source) + "</span>") + name + "</span>" +
     (it.saved ? '<span class="gal-saved" title="Downloaded">' + icon("tick") + "</span>" : "") + "</button>";
 }
 
@@ -856,6 +857,7 @@ function viewItem(i) {
   if (!G || !G.items[i]) return;
   var it = G.items[i];
   G.view = i;
+  zoomReset();
   // The grid's picture stands in while the large one comes (a proxied one can
   // wait a few seconds for its site's turn) -- only when it is already loaded,
   // so the stand-in costs no request of its own.
@@ -927,6 +929,7 @@ function step(by) {
 }
 
 function closeView() {
+  zoomReset();
   $("gal-view").classList.add("hidden");
   $("gal-stage").innerHTML = "";                  // stops a video
   if (G) G.view = -1;
@@ -972,6 +975,7 @@ $("gal-sources").addEventListener("click", function (e) {
 });
 $("gal-view").addEventListener("click", function (e) {
   var b = e.target.closest("[data-gal]");
+  if (!b && G && !Z.moved && outsidePicture(e)) closeView();          // the dark around the picture closes it too
   if (!b || !G) return;
   var it = G.items[G.view];
   if (b.dataset.gal === "prev") step(-1);
@@ -980,6 +984,74 @@ $("gal-view").addEventListener("click", function (e) {
   else if (b.dataset.gal === "post" && it && it.post) api("POST", "/api/open-url", { url: it.post }).catch(fail);
   else if (b.dataset.gal === "download") galDownload();
 });
+// ---- the open picture: double-click and wheel zoom it, a drag moves it ----------------
+// The picture is the stage's whole box with object-fit: contain, so the dark around it is part of the img
+// element: a click is "outside" by the picture's own shape (outsidePicture). Zoom is a transform on the
+// images about the box's centre: Z.x / Z.y move it, Z.s scales it (1 = fitted, no zoom).
+var Z = { s: 1, x: 0, y: 0, drag: null, moved: false }, ZOOM_MAX = 8;
+function zoomApply() {
+  var st = $("gal-stage");
+  st.style.setProperty("--zs", Z.s); st.style.setProperty("--zx", Z.x + "px"); st.style.setProperty("--zy", Z.y + "px");
+  st.classList.toggle("zoomed", Z.s > 1);
+}
+function zoomReset() { Z.s = 1; Z.x = Z.y = 0; Z.drag = null; zoomApply(); }
+// The image's box (the stage without its padding): its size and where its centre is on the screen.
+function zoomBox() {
+  var st = $("gal-stage"), r = st.getBoundingClientRect(), c = getComputedStyle(st);
+  var l = parseFloat(c.paddingLeft), t = parseFloat(c.paddingTop);
+  var w = st.clientWidth - l - parseFloat(c.paddingRight), h = st.clientHeight - t - parseFloat(c.paddingBottom);
+  return { w: w, h: h, cx: r.left + st.clientLeft + l + w / 2, cy: r.top + st.clientTop + t + h / 2 };
+}
+function zoomClamp(box) {
+  var mx = (Z.s - 1) * box.w / 2, my = (Z.s - 1) * box.h / 2;
+  Z.x = Math.max(-mx, Math.min(mx, Z.x)); Z.y = Math.max(-my, Math.min(my, Z.y));
+}
+// Scale to s2 so that the point under the cursor (clientX/Y) stays where it is.
+function zoomAt(s2, clientX, clientY) {
+  s2 = Math.max(1, Math.min(ZOOM_MAX, s2));
+  if (s2 < 1.03) return zoomReset();
+  var box = zoomBox(), px = clientX - box.cx, py = clientY - box.cy, r = s2 / Z.s;
+  Z.x = px - (px - Z.x) * r; Z.y = py - (py - Z.y) * r; Z.s = s2;
+  zoomClamp(box); zoomApply();
+}
+function stageImage() { return $("gal-stage").querySelector("img:last-child"); }
+// Whether a click landed on the dark around the picture (never while zoomed: the picture fills the screen then).
+function outsidePicture(e) {
+  if (Z.s > 1) return false;
+  if (e.target === $("gal-view") || e.target === $("gal-stage")) return true;
+  var img = e.target.tagName === "IMG" && e.target.closest("#gal-stage") ? e.target : null;
+  if (!img || !img.naturalWidth) return false;
+  var box = zoomBox(), f = Math.min(box.w / img.naturalWidth, box.h / img.naturalHeight);
+  return Math.abs(e.clientX - box.cx) > img.naturalWidth * f / 2 || Math.abs(e.clientY - box.cy) > img.naturalHeight * f / 2;
+}
+$("gal-stage").addEventListener("dblclick", function (e) {
+  if (!stageImage() || e.target.tagName !== "IMG") return;
+  if (Z.s > 1) zoomReset(); else zoomAt(2.5, e.clientX, e.clientY);
+});
+$("gal-stage").addEventListener("wheel", function (e) {
+  if (!stageImage()) return;
+  e.preventDefault();
+  zoomAt(Z.s * Math.exp(-e.deltaY * (e.deltaMode === 1 ? 16 : 1) * 0.0025), e.clientX, e.clientY);
+}, { passive: false });
+$("gal-stage").addEventListener("mousedown", function (e) {
+  if (Z.s <= 1 || e.button !== 0) return;
+  Z.drag = { x: e.clientX, y: e.clientY, tx: Z.x, ty: Z.y }; Z.moved = false;
+  e.preventDefault();
+});
+$("gal-stage").addEventListener("dragstart", function (e) { e.preventDefault(); });
+document.addEventListener("mousemove", function (e) {
+  if (!Z.drag) return;
+  var dx = e.clientX - Z.drag.x, dy = e.clientY - Z.drag.y;
+  if (Math.abs(dx) + Math.abs(dy) > 3) Z.moved = true;
+  Z.x = Z.drag.tx + dx; Z.y = Z.drag.ty + dy;
+  zoomClamp(zoomBox()); zoomApply();
+});
+document.addEventListener("mouseup", function () {
+  if (!Z.drag) return;
+  Z.drag = null;
+  setTimeout(function () { Z.moved = false; }, 0);              // after the click that ends a drag
+});
+
 function galDownload(i) {
   var g = G, it;
   if (i === undefined) i = G && G.view;               // the viewer's button and key: the picture open
@@ -1482,6 +1554,7 @@ function fillSettings() {
   $("set-library").value = S.library;
   $("btn-browse").classList.toggle("hidden", !S.window);
   $("set-follows").checked = st.import_follows === "1";
+  $("set-tilelogo").checked = st.tile_logo !== "0";
   $("set-auto").checked = st.auto_sync === "1";
   $("set-hours").value = st.auto_hours; $("set-hours").disabled = st.auto_sync !== "1";
   $("set-parallel").value = st.parallel;
@@ -1523,6 +1596,7 @@ $("btn-browse").addEventListener("click", function () {
     if (d.path) return saveSetting({ library: d.path }).then(load);
   }).catch(fail);
 });
+$("set-tilelogo").addEventListener("change", function () { saveSetting({ tile_logo: this.checked ? "1" : "0" }); });
 $("set-follows").addEventListener("change", function () { saveSetting({ import_follows: this.checked ? "1" : "0" }); });
 $("set-auto").addEventListener("change", function () { saveSetting({ auto_sync: this.checked ? "1" : "0" }); });
 $("set-hours").addEventListener("change", function () { saveSetting({ auto_hours: this.value }); });

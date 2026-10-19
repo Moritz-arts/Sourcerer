@@ -729,9 +729,15 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   freeze waiting for a long list.
 - **Right-click on a picture**: the grid offers *Download this picture*, the viewer also *Copy picture*
   (`#picmenu`, `galCopy`: fetched through `/api/gallery/<g>/<n>/large` -- a CDN's own picture would taint the
-  canvas -- converted to PNG, the one format every program takes from the clipboard). The viewer's bottom
-  bar starts with the site's mark, then the artist's picture and name; the X that closes a dialog or
-  the picture is red.
+  canvas -- converted to PNG, the one format every program takes from the clipboard). **The viewer's bar is at
+  the top** and starts with the site's mark, then the artist's picture and name, the date, Open post,
+  Download and the X (red, as every X that closes a dialog). **A click on the dark around the picture closes
+  it** -- but the picture is the stage's whole box with `object-fit: contain`, so "outside" is computed from
+  its natural shape (`outsidePicture`), never while zoomed. **Double-click zooms** (2.5x about the cursor, again
+  to reset), **the wheel zooms** (1x-8x about the cursor), a drag moves a zoomed picture (`Z`, a transform on
+  the stage's images; a drag's own click must not close the view: `Z.moved`); a new picture starts unzoomed.
+  *Settings > Appearance > Site mark on the pictures* (`tile_logo`) hides the mark in the corner of the
+  grid's tiles (`.no-tile-logo` on `<html>`); in "All artists" the artist's name stays.
 - **The gallery fetches only what a listing handed out.** The proxy
   (`/api/gallery/<gallery>/<n>/thumb|large`) takes an item number, never a
   URL: any page could otherwise make Sourcerer fetch with the user's

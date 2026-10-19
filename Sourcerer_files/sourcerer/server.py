@@ -28,7 +28,8 @@ LAYOUTS = ("together", "per_source")
 DEDUPES = ("keep_all", "best", "master")
 # What Settings may change, and the values each may take.
 CHOICES = {"filenames": ("original", "dated"), "theme": ("system", "light", "dark"),
-           "auto_sync": ("0", "1"), "import_follows": ("0", "1"), "channel": ("stable", "beta")}
+           "auto_sync": ("0", "1"), "import_follows": ("0", "1"), "channel": ("stable", "beta"),
+           "tile_logo": ("0", "1")}
 RANGES = {"card_size": (160, 800), "auto_hours": (1, 168), "parallel": (1, 16),
           "per_host": (1, 8), "pace_ms": (0, 5000)}
 

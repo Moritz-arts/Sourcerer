@@ -209,6 +209,10 @@ input[type=range] { accent-color: var(--fill-accent); cursor: pointer; }
 .gal-tag { position: absolute; left: 7px; bottom: 7px; display: flex; align-items: center; color: #fff; font-size: 11px; font-weight: 500;
   filter: drop-shadow(0 0 2px rgba(0, 0, 0, .75)) drop-shadow(0 1px 2px rgba(0, 0, 0, .5)); }
 .gal-tag .ic.logo { width: 18px; height: 18px; flex: none; }
+/* Settings > Appearance: no site mark on the pictures; the artist's name in "All artists" stays. */
+.no-tile-logo .gal-tag .ic.logo, .no-tile-logo .gal-site { display: none; }
+.no-tile-logo .gal-tag:not(:has(.gal-name)) { display: none; }
+.no-tile-logo .gal-name { margin-left: 0; }
 .gal-name { margin-left: 6px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gal-tag:has(.gal-name) { right: 7px; }
 .gal-saved { position: absolute; right: 6px; top: 6px; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center;
@@ -216,9 +220,13 @@ input[type=range] { accent-color: var(--fill-accent); cursor: pointer; }
 .gal-saved .ic { width: 15px; height: 15px; stroke-width: 3; }
 .gal-end { text-align: center; padding: 20px; color: var(--text-muted); font-size: 13px; }
 .gal-view { position: absolute; inset: 0; z-index: 5; display: flex; align-items: center; background: rgba(0, 0, 0, .93); color: #eee; }
-.gal-stage { flex: 1; align-self: stretch; display: flex; align-items: center; justify-content: center; min-width: 0; padding: 12px 0 64px; }
+.gal-stage { flex: 1; align-self: stretch; display: flex; align-items: center; justify-content: center; min-width: 0; padding: 64px 0 12px;
+  overflow: hidden; }
+.gal-stage.zoomed { cursor: grab; }
+.gal-stage.zoomed:active { cursor: grabbing; }
 /* The box is the whole stage and the picture is fitted into it: a small one is scaled up until one side meets the window, not left at its own size. */
 .gal-stage img, .gal-stage video { width: 100%; height: 100%; object-fit: contain; }
+.gal-stage img { transform: translate(var(--zx, 0px), var(--zy, 0px)) scale(var(--zs, 1)); user-select: none; -webkit-user-drag: none; }
 .gal-stage .gal-ph { width: 100%; height: 100%; filter: blur(2px); opacity: .85; }
 .gal-stage .gal-big { position: absolute; width: 0; height: 0; opacity: 0; }
 .gal-nav { align-self: stretch; width: 130px; border: none; border-radius: 0; background: none; color: #fff; }
@@ -230,7 +238,7 @@ input[type=range] { accent-color: var(--fill-accent); cursor: pointer; }
 .gal-who .avatar { width: 26px; height: 26px; font-size: 10px; }
 .gal-bar button.primary.done, .gal-bar button.primary.done:disabled { background: var(--fill-ok); color: #fff; opacity: 1; }
 .gal-nav .ic { width: 32px; height: 32px; }
-.gal-bar { position: absolute; left: 0; right: 0; bottom: 0; display: flex; align-items: center; gap: 8px; padding: 10px 16px;
+.gal-bar { position: absolute; left: 0; right: 0; top: 0; z-index: 1; display: flex; align-items: center; gap: 8px; padding: 10px 16px;
   background: rgba(0, 0, 0, .55); font-size: 13px; }
 .gal-bar button:not(.primary) { background: rgba(255, 255, 255, .1); color: #eee; border-color: transparent; }
 .hint.bad { color: var(--text-danger); }
@@ -318,7 +326,8 @@ input[type=range] { accent-color: var(--fill-accent); cursor: pointer; }
 .menu button { border: none; justify-content: flex-start; width: 100%; padding: 6px 10px; }
 .menu .kbd { margin-left: auto; }
 /* The X that closes a dialog or the picture is red: the way out is easy to find. */
-.dlg-head .icon[data-close], .gal-bar .icon[data-gal="back"] { color: var(--text-danger); }
+.dlg-head .icon[data-close] { color: var(--text-danger); }
+.gal-bar .icon[data-gal="back"] { color: #ff8a8a; }
 .dlg-head .icon[data-close]:hover:not(:disabled), .gal-bar .icon[data-gal="back"]:hover:not(:disabled) { background: var(--bg-danger); }
 .toasts { position: fixed; right: 16px; bottom: 56px; display: flex; flex-direction: column; gap: 8px; z-index: 30; }
 .toast {
