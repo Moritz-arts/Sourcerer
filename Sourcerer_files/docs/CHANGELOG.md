@@ -5,6 +5,16 @@ automatically -- one line per change, newest first. A release is drafted by hand
 from the tag of whichever version is judged ready, and this is the text to paste
 into it.
 
+## v0.32 — 2026-10-19
+
+- Browse: no Download all button, an Auto-download switch beside Download, only green clouds in the list, a bigger artist head, right-click to download or copy a picture, red close buttons
+- XenForo: forums in a folder or behind an index.php? guard log in, keep their login across redirects and list their media
+- Follows: the same artist's accounts on different sites land on one card by themselves, and cards that are already apart are combined
+- Viewer: the bar moves to the top, a click on the dark closes it, double-click and wheel zoom, a switch in Appearance hides the site mark on the pictures
+- Settings: more parallel downloads and connections per site, a master password asked at every start, a reset to a fresh install, and a TrackImage card
+- Browse: download one picture, several or the whole artist, GIFs play, more orders and numbers, latest activity by the newest post, a scan at every start, the window's own title bar
+- Refresh checks one artist at a time, the opened artist first, and only auto-download cards; Misskey login, Fanbox and Fantia, sharper grid pictures, favorites
+
 ## v0.31 — 2026-10-18
 
 - Browse: a third order, by source, with each site's logo and a line above its artists
