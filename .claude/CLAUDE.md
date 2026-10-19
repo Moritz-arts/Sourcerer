@@ -443,6 +443,20 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   the column: better detection then fixes sources saved before it.
 - **Profile URLs lie about their site.** pixiv's `/users/123` matched the
   fediverse pattern; `mastodon.py` keeps a list of hosts that are not.
+- **A XenForo forum may route only through `index.php?`** (a custom anti-DDOS guard answers the friendly
+  `/forum/media/users/...` and `/login/` with a bare nginx 403, and `/forum/` with a 301): a link keeps
+  the route it was pasted with (`xenforo._PATH` captures `index.php?`, `normalize` preserves it), and the
+  login window that shows a bare 403 is sent once to `base + "/index.php?login/"` (`accounts._watch`,
+  `_window_says_403`; once, so a forum that is really down is not asked in a loop). **The forum is made
+  known to gallery-dl by its base**: `"xenforo:<url>"` takes only scheme and host as the forum, so a forum
+  in a folder lost the folder and was listed at the wrong place (a 403 read as "members only"). The URL
+  goes plain and `xenforo._options` registers `extractor.xenforo.sourcerer-<host> = {"root": base}`
+  (gallery-dl's own instance config; the key must differ from every name it knows). **gallery-dl reads
+  options along `extractor.<category>.<subcategory>`, and the category is that instance key -- or
+  `atfforum` for a forum it knows -- so the login, user agent and pacing go at the `extractor` level**
+  (`_gdl.items(..., None, options)`; a section named `xenforo` or the host leaves every one ignored: a guest
+  read, checked against gallery-dl 1.32). The "one read per site" lock is per forum host (`lock=`), not per
+  section. `remote_key` (`xenforo:<host>:<id>`) does not depend on the link's form.
 - **A Misskey looks like a Mastodon in the address** (`https://misskey.io/@user`) **and answers nothing a
   Mastodon client asks** (404 on `/api/v1/...`): Baraag's follow list names such accounts, and they were
   cards that never worked. `sources/misskey.py` has the whole API (POST + JSON, also what only reads:
@@ -741,7 +755,12 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   with Mozilla/5.0 on logged-in requests.
 - **Login cookies go as a Cookie header of their own**, never `cookies=`:
   requests sends those in addition to what the session caught, and pixiv
-  read the guest PHPSESSID first -- a logged-in sync silently ran as a guest.
+  read the guest PHPSESSID first -- a logged-in sync silently ran as a guest. **But requests drops that
+  header on every redirect**, the same host's too: a forum answering `/forum/` with a 301 to
+  `/forum/index.php` saw a visitor on the second hop, challenged it, and the login was marked "ran
+  out" seconds after it was made (any site that redirects without challenging ran as a guest in silence).
+  `net._Session.rebuild_auth` puts the header back -- for the same scheme, host and port only, with what
+  the answers set meanwhile kept after it -- so nothing reaches another host and `cookies=` stays out.
 - **An expired login often fails silently.** Patreon's /api/posts answers an
   expired session_id as a guest; pixiv answers 401. Check the login itself
   (`patreon.whoami`, `sync._still_logged_in`) and mark it (`accounts.mark`);

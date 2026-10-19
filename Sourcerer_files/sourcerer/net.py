@@ -285,10 +285,34 @@ _hung_up = {}
 _NO_TLS13 = ("PROTOCOL_VERSION", "UNSUPPORTED_PROTOCOL", "WRONG_VERSION_NUMBER", "NO_PROTOCOLS_AVAILABLE")
 
 
+def _origin(url):
+    p = urllib.parse.urlsplit(url)
+    return p.scheme, p.hostname, p.port or (443 if p.scheme == "https" else 80)
+
+
+class _Session(requests.Session):
+    """requests drops a Cookie header of our own on every redirect, the same host's too, and builds the
+    next hop's from its jar -- which holds none of a login that goes as a header (see _get). A forum
+    that answers /forum/ with a 301 to /forum/index.php, and a bot check that challenges a request
+    without cookies, then saw a visitor on the second hop: the login looked expired seconds after it was
+    made. The header goes along again to the same place (scheme, host and port), and to no other."""
+
+    def rebuild_auth(self, prepared_request, response):
+        super().rebuild_auth(prepared_request, response)
+        sent = response.request.headers.get("Cookie")
+        if not sent or _origin(response.request.url) != _origin(prepared_request.url):
+            return
+        mine = {c.split("=", 1)[0].strip() for c in sent.split(";")}
+        # What the answers set meanwhile (the jar's header) stays, unless it is a login cookie's name.
+        extra = [c.strip() for c in (prepared_request.headers.get("Cookie") or "").split(";")
+                 if c.strip() and c.split("=", 1)[0].strip() not in mine]
+        prepared_request.headers["Cookie"] = "; ".join([sent] + extra)
+
+
 def _session():
     s = getattr(_local, "session", None)
     if s is None:
-        s = _local.session = requests.Session()
+        s = _local.session = _Session()
         s.headers["User-Agent"] = config.USER_AGENT
         s.mount("https://", _Tls13())
     for netloc in list(_OLD_TLS):

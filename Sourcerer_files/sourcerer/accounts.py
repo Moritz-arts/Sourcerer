@@ -395,6 +395,16 @@ def _forum_says_logged_in(window):
         return False
 
 
+def _window_says_403(window):
+    """Whether the window shows a bare 403 page (nginx's: a title and one line, no forum). A forum with a
+    guard that lets only "/" and "index.php?*" through answers the friendly /login/ so."""
+    try:
+        text = window.evaluate_js("(document.title || '') + ' ' + (document.body ? document.body.innerText : '')") or ""
+    except Exception:
+        return False
+    return len(text.strip()) < 300 and "403" in text and "forbidden" in text.lower()
+
+
 def _oauth_code(window, host):
     """The code the server's authorize page hands out once the user said yes:
     Mastodon puts it in the address (/oauth/authorize/native?code=...), as
@@ -419,6 +429,7 @@ def _oauth_code(window, host):
 def _watch(key, window, ok, closed, extra, finish):
     deadline = time.monotonic() + LOGIN_MINUTES * 60
     found = code = at = None
+    rerouted = not (key.startswith("xenforo:") and extra.get("base"))      # a forum's login page is tried by its other route once
     while not closed.is_set() and time.monotonic() < deadline:
         time.sleep(1.5)
         try:        # where the window is, for the log: a forum's 403 page has no address bar to read
@@ -429,6 +440,14 @@ def _watch(key, window, ok, closed, extra, finish):
         if here != at:
             at = here
             log.info("%s: login window at %s", key, at)
+        if not rerouted and _window_says_403(window):
+            rerouted = True              # once: a forum that is really down must not be asked in a loop
+            log.info("%s: the login page answered 403, trying it as index.php?login/", key)
+            try:
+                window.load_url(extra["base"] + "/index.php?login/")
+            except Exception as e:
+                log.info("%s: login page not reloaded: %s", key, e)
+            continue
         if finish:
             code = _oauth_code(window, key.split(":", 1)[1])
             if code:

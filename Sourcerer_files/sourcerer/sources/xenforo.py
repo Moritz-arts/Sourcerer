@@ -2,8 +2,9 @@
 or a thread's attachments. Most forums show their media to members only:
 log in to the forum under Manage Accounts.
 
-Listing goes through gallery-dl's generic XenForo extractor (_gdl.py, with
-the "xenforo:" prefix that makes it work on any forum); the files are the
+Listing goes through gallery-dl's XenForo extractor (_gdl.py). The forum is made known to it by
+its base (_options): the "xenforo:<url>" form takes only scheme and host as the forum, so a forum
+in a folder (example.com/forum/) lost the folder and was asked at the wrong place. The files are the
 /full originals, downloaded by Sourcerer itself -- their Content-Disposition
 carries the uploader's file name, where gallery-dl only knows the title.
 
@@ -23,8 +24,10 @@ from .. import accounts, config, net
 
 KIND = "xenforo"
 LABEL = "XenForo"
-# What a XenForo link points at, below the forum's base (which may be a folder).
-_PATH = re.compile(r"^(.*?)/(?:index\.php\?)?(media/users|members|media/albums|threads)/([^/?#]+)", re.I)
+# What a XenForo link points at, below the forum's base (which may be a folder): the base, the route's
+# "index.php?" when the link has it, the kind and the slug.id. A forum behind a guard that lets only "/"
+# and "index.php?*" through answers the friendly path with a bare 403, so a link keeps the route it came with.
+_PATH = re.compile(r"^(.*?)/(index\.php\?)?(media/users|members|media/albums|threads)/([^/?#]+)", re.I)
 # tls12: off, so gallery-dl shakes hands with TLS 1.3 only, as net.py does --
 # VerticalScope's forums answered its usual handshake with 409 (see net._Tls13).
 # retries: 0 -- gallery-dl would answer a 429 with four more requests, with the login.
@@ -42,16 +45,16 @@ def _parts(url):
 def match(url):
     p, m = _parts(url)
     # A slug.id is XenForo's mark; other forum software names its pages differently.
-    return bool(m and re.search(r"\.\d+$", m.group(3)))
+    return bool(m and re.search(r"\.\d+$", m.group(4)))
 
 
 def normalize(url):
     """A member's media gallery for a member's link; albums and threads as they are."""
     p, m = _parts(url)
-    kind = m.group(2).lower()
+    kind = m.group(3).lower()
     if kind == "members":
         kind = "media/users"
-    return "https://%s%s/%s/%s" % (p.netloc.lower(), m.group(1).rstrip("/"), kind, m.group(3))
+    return "https://%s%s/%s%s/%s" % (p.netloc.lower(), m.group(1).rstrip("/"), (m.group(2) or "").lower(), kind, m.group(4))
 
 
 def account_key(url):
@@ -69,11 +72,16 @@ def _host(url):
 
 
 def _options(url):
-    options = dict(OPTIONS, cookies=accounts.jar("xenforo:" + _host(url), fresh=True))
+    """What gallery-dl gets for this forum (extractor-wide: see _gdl._config): the login, the pacing, and the
+    forum's base registered as an instance of its own, which is what makes a forum it does not know by name
+    -- or one in a folder -- match at all. The key must differ from every name gallery-dl knows."""
+    p, m = _parts(url)
+    options = dict(OPTIONS, cookies=accounts.jar("xenforo:" + _host(url), fresh=True),
+                   xenforo={"sourcerer-" + _host(url): {"root": "%s://%s%s" % (p.scheme, p.netloc.lower(), m.group(1).rstrip("/"))}})
     # The forum's own pass (Cloudflare) holds only with the browser that earned it.
     options.update({"user-agent": accounts.headers_for(url).get("User-Agent") or config.USER_AGENT,
                     "browser": ""})
-    if "/threads/" in url:
+    if re.search(r"[/?]threads/", url):
         options["order-posts"] = "desc"          # newest first, for the early stop
     return options
 
@@ -81,7 +89,7 @@ def _options(url):
 def profile(url):
     """The member's name and picture, from their media page."""
     p, m = _parts(url)
-    slug = m.group(3).rsplit(".", 1)[0]
+    slug = m.group(4).rsplit(".", 1)[0]
     try:
         text, _final = net.get_text(url)
     except requests.HTTPError as e:
@@ -104,7 +112,7 @@ def pages(url):
         raise RuntimeError("Forums need gallery-dl, which did not install: Settings > Repair")
     host = _host(url)
     net._stopped(url)
-    listing = _gdl.items("xenforo:" + url, urllib.parse.urlparse(url).hostname, _options(url), FIELDS)
+    listing = _gdl.items(url, None, _options(url), FIELDS, lock="xenforo:" + host)
     while True:
         try:
             batch = next(listing)
