@@ -141,10 +141,10 @@ function renderAll() {
 // The card's switch: a sync of it also downloads what it finds.
 function setAuto(a, on) {
   a.auto_download = on ? 1 : 0;
-  renderBrowseList();
+  renderBrowseList(); renderBrowseHead();
   api("POST", "/api/artists/" + a.id + "/auto-download", { on: on }).then(function () {
     toast("Auto-download " + (on ? "on" : "off") + " for " + a.name);
-  }).catch(function (err) { fail(err); a.auto_download = on ? 0 : 1; renderBrowseList(); });
+  }).catch(function (err) { fail(err); a.auto_download = on ? 0 : 1; renderBrowseList(); renderBrowseHead(); });
 }
 
 // ---- activity bar and log ---------------------------------------------------
@@ -197,7 +197,7 @@ function renderActivity() {
   html += '<button id="btn-log" class="mini' + (open ? " open" : "") + '" data-act="log" title="Activity log (Ctrl+L)">' +
     icon("list") + " Activity" + (n ? '<span class="count">' + n + "</span>" : "") + icon("chevron-up", "chev") + "</button>";
   $("activity").innerHTML = html;
-  $("btn-sync-all").disabled = $("btn-download-all").disabled = !S.artists.length;
+  $("btn-sync-all").disabled = !S.artists.length;
   if (open) renderLog();
 }
 
@@ -224,7 +224,9 @@ function toggleLog() {
 
 // ---- loading and polling ---------------------------------------------------
 
+var lastLoad = 0, loadTimer = 0, LOAD_GAP = 4000;
 function load() {
+  lastLoad = Date.now();
   return api("GET", "/api/state").then(function (d) {
     S.artists = d.artists; S.sync = d.sync; S.library = d.library; S.window = d.window;
     S.sep = d.sep; S.sites = d.sites; S.fields = d.fields; S.settings = d.settings; S.logins = d.logins || []; S.pauses = d.pauses || [];
@@ -244,6 +246,17 @@ function load() {
   });
 }
 
+// A running sync changes the key at nearly every poll (a card done, a line in the log), and every reload is the whole
+// state -- a thousand cards, 1.5 MB, redrawn: the window stopped answering. While a sync runs the cards are
+// reloaded every LOAD_GAP at most; the activity bar, which the poll itself feeds, follows at once.
+function loadSoon() {
+  var wait = S.sync.running ? LOAD_GAP - (Date.now() - lastLoad) : 0;
+  if (wait <= 0) return load();
+  renderActivity();
+  if (!loadTimer) loadTimer = setTimeout(function () { loadTimer = 0; load(); }, wait);
+  return Promise.resolve();
+}
+
 // A poll is a delay: quick while a sync runs, slow when nothing does. The
 // artists are reloaded whenever the artist being synced changes, so counts
 // and badges follow without reloading on every tick.
@@ -259,7 +272,7 @@ function poll() {
     }
     S.sync = s;
     if (s.pauses) S.pauses = s.pauses;
-    if (key !== lastKey) { lastKey = key; return load(); }
+    if (key !== lastKey) { lastKey = key; return loadSoon(); }
     renderBrowseList(); renderBrowseHead(); renderActivity();
   }).catch(function () {}).then(function () {
     setTimeout(poll, S.sync.running ? 700 : 3000);
@@ -395,7 +408,7 @@ function openFolder(a) { api("POST", "/api/open", { target: "artist", artist_id:
 
 // ---- the artist's menu, mouse and keyboard ------------------------------------
 
-function closeMenu() { $("menu").classList.add("hidden"); S.menuFor = null; }
+function closeMenu() { $("menu").classList.add("hidden"); $("picmenu").classList.add("hidden"); S.menuFor = null; }
 function openMenu(a, x, y) {
   var m = $("menu");
   S.menuFor = a.id;
@@ -418,7 +431,7 @@ function artistAct(act, a) {
 }
 
 document.addEventListener("click", function (e) {
-  if (!e.target.closest("#menu")) closeMenu();
+  if (!e.target.closest("#menu, #picmenu")) closeMenu();
   var btn = e.target.closest("[data-act]");
   if (!btn) return;
   switch (btn.dataset.act) {
@@ -483,7 +496,7 @@ document.addEventListener("keydown", function (e) {
   if (dialog) return;
   if ((ctrl && low === "n") || (!ctrl && !e.altKey && !typing && low === "n")) { e.preventDefault(); return openCard(null); }
   if ((ctrl && low === "f") || (k === "/" && !typing)) { e.preventDefault(); $("br-search").focus(); return $("br-search").select(); }
-  if (k === "F5" || (ctrl && low === "r")) { e.preventDefault(); return sync(null, k === "F5" && e.shiftKey); }
+  if (k === "F5" || (ctrl && low === "r")) { e.preventDefault(); return sync(null); }
   if (ctrl && k === ",") { e.preventDefault(); return openSettings(); }
   if (ctrl && low === "l") { e.preventDefault(); return toggleLog(); }
 
@@ -630,8 +643,7 @@ function renderBrowseList() {
       return head + '<button type="button" class="br-item' + (S.brArtist === a.id ? " selected" : "") + '" data-id="' + a.id + '">' +
         avatarHtml(a) + '<span class="br-name" title="' + esc(a.name) + '">' + esc(a.name) + "</span>" +
         '<span class="br-n">' + count(a) + "</span>" +
-        '<span class="br-auto ' + (a.auto_download ? "on" : "off") + '" title="Auto-download ' + (a.auto_download ? "on" : "off") +
-        ' (right-click to change)">' + icon("cloud-down") + "</span></button>";
+        (a.auto_download ? '<span class="br-auto" title="Auto-download on">' + icon("cloud-down") + "</span>" : "") + "</button>";
     }).join("");
   if (html !== brHtml) { brHtml = html; $("br-list").innerHTML = html; }
 }
@@ -646,7 +658,9 @@ function renderBrowseHead() {
   // The artist's picture beside the name (not for "All artists"); replaced only when it changed, or it would blink on every poll.
   var av = a ? avatarHtml(a) : "";
   if (av !== brAvatar) { brAvatar = av; $("gal-avatar").innerHTML = av; }
-  ["br-download", "br-edit", "br-refresh", "br-folder"].forEach(function (id) { $(id).classList.toggle("hidden", !a); });
+  ["br-download", "br-edit", "br-refresh", "br-folder", "br-auto"].forEach(function (id) { $(id).classList.toggle("hidden", !a); });
+  $("br-auto").classList.toggle("on", !!(a && a.auto_download));
+  $("br-auto").setAttribute("aria-checked", a && a.auto_download ? "true" : "false");
   $("br-download").disabled = $("br-refresh").disabled = !sup;
   galHead();
 }
@@ -966,11 +980,13 @@ $("gal-view").addEventListener("click", function (e) {
   else if (b.dataset.gal === "post" && it && it.post) api("POST", "/api/open-url", { url: it.post }).catch(fail);
   else if (b.dataset.gal === "download") galDownload();
 });
-function galDownload() {
-  var g = G, i = G && G.view, it = g && g.items[i];
+function galDownload(i) {
+  var g = G, it;
+  if (i === undefined) i = G && G.view;               // the viewer's button and key: the picture open
+  it = g && g.items[i];
   if (!it || it.saved || g.downloading[it.id]) return;
   g.downloading[it.id] = true;
-  galDlState(it);
+  if (g.view === i) galDlState(it);
   api("POST", "/api/gallery/download", { gallery: g.id, item: it.id }).then(function (d) {
     delete g.downloading[it.id];
     g.items[i] = d.item;
@@ -986,6 +1002,59 @@ function galDownload() {
     delete g.downloading[it.id];
     if (g === G && g.view === i) galDlState(it);
   });
+}
+// Right-click on a picture: the grid's offers to download it, the viewer's also to copy it (as a PNG, the one
+// format every program takes from the clipboard). The copy is fetched through Sourcerer -- a CDN's picture
+// would taint the canvas -- like the viewer's own fallback.
+var picAt = -1;
+function openPicMenu(i, viewer, x, y) {
+  var it = G && G.items[i], m = $("picmenu");
+  if (!it) return;
+  picAt = i;
+  m.querySelector('[data-pic="copy"]').classList.toggle("hidden", !viewer || !!it.video);
+  var d = m.querySelector('[data-pic="download"]');
+  d.disabled = !!it.saved || !!G.downloading[it.id];
+  d.querySelector("span").textContent = it.saved ? "Already downloaded" : "Download this picture";
+  m.classList.remove("hidden");
+  m.style.top = Math.max(4, Math.min(y, innerHeight - m.offsetHeight - 8)) + "px";
+  m.style.left = Math.max(4, Math.min(x, innerWidth - m.offsetWidth - 8)) + "px";
+}
+$("gal-grid").addEventListener("contextmenu", function (e) {
+  var tile = e.target.closest(".gal-tile");
+  if (!tile) return;
+  e.preventDefault();
+  openPicMenu(+tile.dataset.i, false, e.clientX, e.clientY);
+});
+$("gal-stage").addEventListener("contextmenu", function (e) {
+  if (!G || G.view < 0) return;
+  e.preventDefault();
+  openPicMenu(G.view, true, e.clientX, e.clientY);
+});
+$("picmenu").addEventListener("click", function (e) {
+  var b = e.target.closest("[data-pic]");
+  if (!b || b.disabled) return;
+  var i = picAt;
+  closeMenu();
+  if (b.dataset.pic === "download") galDownload(i); else galCopy(i);
+});
+function galCopy(i) {
+  var it = G && G.items[i];
+  if (!it || it.video) return;
+  if (!navigator.clipboard || !window.ClipboardItem) return toast("This window cannot copy pictures.", true);
+  var url = G.id ? "/api/gallery/" + G.id + "/" + it.id + "/large" : it.large;
+  fetch(url).then(function (r) {
+    if (!r.ok) throw new Error("The picture did not load (" + r.status + ").");
+    return r.blob();
+  }).then(function (blob) {
+    return blob.type === "image/png" ? blob : createImageBitmap(blob).then(function (bmp) {
+      var c = document.createElement("canvas");
+      c.width = bmp.width; c.height = bmp.height;
+      c.getContext("2d").drawImage(bmp, 0, 0);
+      return new Promise(function (ok, no) { c.toBlob(function (b) { b ? ok(b) : no(new Error("The picture could not be converted.")); }, "image/png"); });
+    });
+  }).then(function (png) {
+    return navigator.clipboard.write([new ClipboardItem({ "image/png": png })]);
+  }).then(function () { toast("Picture copied."); }).catch(fail);
 }
 $("gal-size").addEventListener("input", function () { galSize(+this.value); });
 try { var savedSize = +localStorage.getItem(BR_SIZE); if (savedSize) $("gal-size").value = savedSize; } catch (e) {}
@@ -1137,6 +1206,7 @@ function downloadSelected(a) {
   }).then(function (s) { S.sync = s; renderBrowseHead(); }).catch(fail).then(function () { b.disabled = false; renderBrowseHead(); });
 }
 $("br-download").addEventListener("click", function () { artistAct("download", G && G.artist); });
+$("br-auto").addEventListener("click", function () { var a = G && G.artist; if (a) setAuto(a, !a.auto_download); });
 
 // ---- the card dialog -------------------------------------------------------
 
@@ -1956,7 +2026,6 @@ $("btn-quit").addEventListener("click", function () {
   }).catch(fail);
 });
 $("btn-sync-all").addEventListener("click", function () { sync(null); });
-$("btn-download-all").addEventListener("click", function () { sync(null, true); });
 
 load().then(function () {
   poll();

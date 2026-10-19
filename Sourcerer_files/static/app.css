@@ -142,7 +142,6 @@ input[type=range] { accent-color: var(--fill-accent); cursor: pointer; }
 .br-n { font-size: 11px; color: var(--text-muted); }
 .br-item.selected .br-n { color: inherit; opacity: .8; }
 .br-auto { display: inline-flex; flex: none; color: var(--dot-ok); }
-.br-auto.off { color: var(--text-muted); opacity: .4; }
 .br-auto .ic { width: 15px; height: 15px; }
 .br-item .spin { width: 13px; height: 13px; }
 .br-order { display: flex; gap: 6px; }
@@ -153,16 +152,28 @@ input[type=range] { accent-color: var(--fill-accent); cursor: pointer; }
   border: 1.5px dashed var(--border-strong); border-radius: var(--radius); background: transparent; color: var(--text-muted); font-size: 13px; }
 .br-add:hover:not(:disabled) { border-color: var(--fill-accent); color: var(--text-accent); background: transparent; }
 .br-main { flex: 1; min-width: 0; display: flex; flex-direction: column; position: relative; }
-.br-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 9px 14px; border-bottom: .5px solid var(--border); }
+.br-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 8px; padding: 12px 16px; border-bottom: .5px solid var(--border); }
 .br-avatar { display: contents; }
-.br-avatar .avatar { width: 30px; height: 30px; font-size: 11px; margin-right: -2px; }
-.br-title { font-weight: 600; font-size: 15px; white-space: nowrap; min-width: 0; max-width: 40%; overflow: hidden; text-overflow: ellipsis; }
+.br-avatar .avatar { width: 44px; height: 44px; font-size: 15px; margin-right: 0; }
+.br-title { font-weight: 600; font-size: 18px; white-space: nowrap; min-width: 0; max-width: 40%; overflow: hidden; text-overflow: ellipsis; }
 #br-download { white-space: nowrap; flex: none; }
+/* The switch beside Download: the open artist's auto-download, green when on. */
+#br-auto { display: inline-flex; align-items: center; gap: 7px; flex: none; white-space: nowrap; }
+#br-auto .ic { color: var(--text-muted); }
+#br-auto .track { position: relative; width: 28px; height: 16px; border-radius: 8px; background: var(--border-strong); transition: background .15s; }
+#br-auto .track::after { content: ""; position: absolute; left: 2px; top: 2px; width: 12px; height: 12px; border-radius: 50%; background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .3); transition: transform .15s; }
+#br-auto.on .track { background: var(--dot-ok); }
+#br-auto.on .track::after { transform: translateX(12px); }
+#br-auto.on .ic { color: var(--dot-ok); }
 @media (max-width: 800px) { .br-side { width: 160px; } .br-order { flex-direction: column; } #br-sort { flex: none; } #version { display: none; } }
 .gal-sources { display: flex; flex-wrap: wrap; flex: 1 1 140px; gap: 6px; margin-left: 6px; min-width: 0; }
 .chip { font-size: 12px; font-weight: 400; padding: 2px 10px; border-radius: 12px; display: inline-flex; align-items: center; gap: 6px; }
-.chip.off { opacity: .45; }
-.chip.logo { padding: 5px 9px; margin-right: 4px; border-color: transparent; }
+/* A site that is switched off is grey and faint, one that is on is in colour: the head says at a glance what is shown. */
+.chip.off { opacity: .4; filter: grayscale(1); }
+.chip.logo { padding: 7px 9px; margin-right: 0; border-color: transparent; border-radius: 14px; }
+.gal-sources .chip.logo:not(.off) { background: var(--surface-2); }
+.gal-sources .mark, .gal-sources .ic.logo { width: 22px; height: 22px; }
 .chip.logo:hover:not(:disabled), .chip.logo:active:not(:disabled) { background: transparent; border-color: transparent; transform: none; }
 .chip.logo .mark { transition: transform .12s; }
 .chip.logo:hover .mark { transform: scale(1.15); }
@@ -173,9 +184,11 @@ input[type=range] { accent-color: var(--fill-accent); cursor: pointer; }
 .mark .dot { position: absolute; right: -5px; bottom: -4px; box-shadow: 0 0 0 1.5px var(--surface-2); }
 .mark .spin { position: absolute; inset: -4px; width: auto; height: auto; border-width: 2px; }
 .chip > .dot, .chip > .spin { width: 8px; height: 8px; border-width: 1.5px; }
-#gal-size { width: 120px; }
+#gal-size { width: 96px; }
+/* The picture controls stay together, and where the head runs out of width they wrap as one, to the right. */
+.br-view { display: flex; align-items: center; gap: 8px; flex: none; margin-left: auto; }
 .br-head .seg button { padding: 3px 10px; font-size: 12px; }
-#br-edit, #br-refresh, #br-folder { padding: 3px 5px; }
+#br-edit, #br-refresh, #br-folder { padding: 5px 7px; }
 /* No artist yet: the invitation instead of the gallery. */
 .browse.blank .br-head, .browse.blank .gal-body { display: none; }
 .browse.blank .br-main { overflow: auto; }
@@ -211,9 +224,8 @@ input[type=range] { accent-color: var(--fill-accent); cursor: pointer; }
 .gal-nav { align-self: stretch; width: 130px; border: none; border-radius: 0; background: none; color: #fff; }
 .gal-nav:hover:not(:disabled) { background: rgba(255, 255, 255, .06); }
 .gal-nav:active:not(:disabled) { transform: none; }
-.gal-source { position: absolute; left: 18px; top: 16px; z-index: 1; display: flex; align-items: center; pointer-events: none;
-  filter: drop-shadow(0 0 3px rgba(0, 0, 0, .8)); color: #fff; }
-.gal-source .ic.logo { width: 26px; height: 26px; }
+.gal-source { display: flex; align-items: center; margin-right: 4px; color: #fff; }
+.gal-source .ic.logo { width: 24px; height: 24px; }
 .gal-who { display: inline-flex; align-items: center; gap: 8px; font-weight: 500; margin-right: 4px; }
 .gal-who .avatar { width: 26px; height: 26px; font-size: 10px; }
 .gal-bar button.primary.done, .gal-bar button.primary.done:disabled { background: var(--fill-ok); color: #fff; opacity: 1; }
@@ -305,6 +317,9 @@ input[type=range] { accent-color: var(--fill-accent); cursor: pointer; }
 }
 .menu button { border: none; justify-content: flex-start; width: 100%; padding: 6px 10px; }
 .menu .kbd { margin-left: auto; }
+/* The X that closes a dialog or the picture is red: the way out is easy to find. */
+.dlg-head .icon[data-close], .gal-bar .icon[data-gal="back"] { color: var(--text-danger); }
+.dlg-head .icon[data-close]:hover:not(:disabled), .gal-bar .icon[data-gal="back"]:hover:not(:disabled) { background: var(--bg-danger); }
 .toasts { position: fixed; right: 16px; bottom: 56px; display: flex; flex-direction: column; gap: 8px; z-index: 30; }
 .toast {
   background: var(--surface-3); border: .5px solid var(--border-strong); border-radius: var(--radius);

@@ -56,21 +56,20 @@ def _artists():
         artists = [dict(r) for r in con.execute(
             "SELECT a.*, (SELECT COUNT(*) FROM files f WHERE f.artist_id = a.id "
             "AND f.path IS NOT NULL) AS file_count FROM artists a ORDER BY a.name COLLATE NOCASE")]
+        # One query for every source, not one per card: the page asks for all of this again and again while a
+        # sync runs, and with a thousand follows three queries a card were most of the answer's time.
+        mine = {}
+        for r in con.execute("SELECT s.*, (SELECT COUNT(*) FROM files f WHERE f.source_id = s.id "
+                             "AND f.path IS NOT NULL) AS file_count FROM sources s ORDER BY s.artist_id, s.id"):
+            mine.setdefault(r["artist_id"], []).append(dict(r))
         for a in artists:
             a["sources"] = []
-            for r in con.execute(
-                    "SELECT s.*, (SELECT COUNT(*) FROM files f WHERE f.source_id = s.id "
-                    "AND f.path IS NOT NULL) AS file_count FROM sources s WHERE s.artist_id = ? "
-                    "ORDER BY s.id", (a["id"],)):
-                s = dict(r)
+            for s in mine.get(a["id"], []):
                 # Recognised afresh on every read, so better detection reaches
                 # sources saved before it (a pixiv link once stored as Mastodon).
                 s.update(sources.describe(s["url"]), master=s["id"] == a["master_source_id"])
                 s["status"] = _status(s)
                 a["sources"].append(s)
-            # The newest posts of the card's sources -- with or without a download (previews.py); a card
-            # that is only listed has none, and the page shows none anyway.
-            a["thumbs"] = [] if a["listed"] else previews.card_thumbs(con, a["id"])
             a["path"] = str(sync.artist_folder(a, lib))
             a["folder"] = a["folder"] or ""
     return artists
