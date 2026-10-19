@@ -20,6 +20,7 @@ from .. import accounts, net
 KIND = "fanbox"
 LABEL = "Fanbox"
 HOME = "https://www.fanbox.cc"
+FOLLOWS_HOURS = 11        # follows.py reads the list of followed accounts at most this often
 LOGIN = ("required", "Fanbox shows its posts only to logged-in accounts.")
 _RESERVED = {"www", "api", "downloads", "image", "assets", "help", "official", "blog", "fanbox", "payment"}
 _URL = re.compile(r"^https?://(?:(?!www\.)([\w-]+)\.fanbox\.cc|(?:www\.)?fanbox\.cc/@([\w-]+))(?=[/?#]|$)", re.I)
@@ -61,6 +62,30 @@ def still_logged_in(key):
         if e.response is not None and e.response.status_code in (400, 401, 403):
             return False
         raise
+
+
+def following(key):
+    """(list name, pages) of the creators the login follows and supports: [{"url", "name", "avatar"}]. The lists are the
+    account's own (a visitor is answered with a 400)."""
+    def pages():
+        seen = set()
+        for endpoint, name in (("creator.listFollowing", "following"), ("plan.listSupporting", "supporting")):
+            try:
+                body = net.get_json("https://api.fanbox.cc/" + endpoint, headers={"Origin": HOME}).get("body") or []
+            except Exception:
+                if name == "supporting":         # the second list is a bonus: its shape is the site's to change
+                    break
+                raise
+            out = []
+            for item in body if isinstance(body, list) else []:
+                creator = item.get("creatorId") or ""
+                user = item.get("user") or {}
+                if creator and creator.lower() not in seen and _creator("https://%s.fanbox.cc" % creator):
+                    seen.add(creator.lower())
+                    out.append({"url": "https://%s.fanbox.cc" % creator, "name": user.get("name") or creator,
+                                "avatar": user.get("iconUrl") or "", "avatar_headers": HEADERS})
+            yield out
+    yield "", pages()
 
 
 def profile(url):

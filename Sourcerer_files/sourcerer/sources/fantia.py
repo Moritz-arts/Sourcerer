@@ -12,11 +12,12 @@ import random
 import re
 
 from . import _gdl
-from .. import accounts, net
+from .. import accounts, db, net
 
 KIND = "fantia"
 LABEL = "Fantia"
 HOME = "https://fantia.jp"
+FOLLOWS_HOURS = 11        # follows.py reads the list of followed accounts at most this often
 LOGIN = ("recommended", "Logged out, Fantia shows the free posts only; a supported plan's posts need the login.")
 _URL = re.compile(r"^https?://(?:www\.)?fantia\.jp/fanclubs/(\d+)(?=[/?#]|$)", re.I)
 OPTIONS = {"sleep-request": "2.0-4.0", "ratelimit": "abort", "text": False}
@@ -59,6 +60,41 @@ def profile(url):
                         headers={"Accept": "application/json", "X-Requested-With": "XMLHttpRequest"})["fanclub"]
     return {"name": club.get("creator_name") or club.get("fanclub_name_or_creator_name") or "Fanclub " + fanclub,
             "handle": "fantia.jp/fanclubs/" + fanclub, "avatar": (club.get("icon") or {}).get("main") or ""}
+
+
+_PLAN = re.compile(r'class="user-avatar"\s+href="/fanclubs/(\d+)')
+MAX_PLAN_PAGES = 40
+
+
+def following(key):
+    """(list name, pages) of the fanclubs the login supports (the plans page lists them, free ones and paid ones:
+    gallery-dl reads it the same way): [{"url", "name", "avatar"}]. A fanclub the list has shown before costs no
+    request for its name; a new one costs one."""
+    with db.connect() as con:
+        known = {r[0] for r in con.execute("SELECT url FROM followed WHERE url LIKE ?", (HOME + "/fanclubs/%",))}
+
+    def pages():
+        seen = set()
+        for plan in ("not_free", "free"):
+            for page in range(1, MAX_PLAN_PAGES + 1):
+                text, _final = net.get_text("%s/mypage/users/plans" % HOME, params={"type": plan, "page": page})
+                ids = [i for i in _PLAN.findall(text) if i not in seen]
+                if not ids:
+                    break
+                seen.update(ids)
+                out = []
+                for fanclub in ids:
+                    url = "%s/fanclubs/%s" % (HOME, fanclub)
+                    if url in known:
+                        out.append({"url": url, "name": "", "avatar": ""})
+                        continue
+                    try:
+                        info = profile(url)
+                    except Exception:
+                        info = {"name": "", "avatar": ""}
+                    out.append({"url": url, "name": info["name"], "avatar": info["avatar"]})
+                yield out
+    yield "", pages()
 
 
 def _run(fn, *args):

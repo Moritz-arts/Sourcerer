@@ -1,10 +1,10 @@
 """The newest posts of a source, as the last look at it left them.
 
-Every look at a source's first page -- a sync, the card previews' worker, Browse -- keeps what
+Every look at a source's first page -- a sync, Browse -- keeps what
 it found here: the Media objects themselves (pickled: a few hundred bytes each; a pixiv work
 carries the function that resolves its original), newest first, at most KEEP of them. Browse
 then opens from this at once and checks the site meanwhile (gallery._Source), a card counts
-what is new without asking anybody, and the previews need no listing of their own.
+what is new without asking anybody.
 
 It is the program's own data in its own database, yet the database travels with Userdata: a
 snapshot is read back through an unpickler that builds only what ALLOWED names (Media, the

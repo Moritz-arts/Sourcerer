@@ -4,9 +4,9 @@ Artists wait in a queue and are handled one at a time in a background thread;
 the window polls status(). There are two jobs, kept apart:
 
     sync      (mode "refresh") looks at the newest posts of every source, keeps what it
-              saw (snapshots.py), counts what is new and not downloaded (artists.pending)
-              and lets the card's previews follow. Nothing is downloaded -- unless the
-              card has auto-download on: then the sync goes on to download what is new.
+              saw (snapshots.py) and counts what is new and not downloaded (artists.pending).
+              Nothing is downloaded -- unless the card has auto-download on: then the sync
+              goes on to download what is new.
     download  (mode "download") asks every source what is new, walking its history as
               far as it takes, then downloads it -- several files at once, within each
               site's limits (net.py) -- so the card can say "87 / 240" and the activity
@@ -28,7 +28,6 @@ import collections
 import datetime
 import glob
 import hashlib
-import io
 import json
 import logging
 import os
@@ -65,7 +64,7 @@ _lock = threading.Lock()
 _save = threading.Lock()     # deciding and saving happen one file at a time
 _queue = []                  # artist ids waiting
 _auto = set()                # of those, queued by the automatic sync
-_starting = set()            # popped by the worker, _current not set yet: busy all the same (merge asks)
+_starting = set()            # popped by a worker, not in _running yet: busy all the same (merge asks, _pick avoids its sites)
 _only = {}                   # artist id -> ids of the only sources a queued sync asks (Browse: download these)
 _modes = {}                  # artist id -> "refresh" or "download" for a queued job (none: the card's auto-download decides)
 _followup = {}               # artist id -> sources (None: all) of a download asked for while the card's own job could not take it
@@ -74,9 +73,11 @@ REFRESH_ITEMS = 120          # a sync (refresh) reads a source's newest pages un
 REFRESH_PAGES = 4            # ... or this many pages
 _used = {}                   # careful login site -> (artist id, when its last card was done with it)
 _focused = set()             # queued cards that Browse opened: they go first, and wait less
-_current = None              # what the running sync is doing, for the window
-_worker = None
-_cancel = threading.Event()
+WORKERS = 3                  # cards worked on at once -- only cards that share no site where requests must go one at a time
+GDL_KINDS = ("x", "xenforo", "fanbox", "fantia")      # read through gallery-dl: one listing per site at a time (_gdl._busy)
+_running = {}                # artist id -> what its sync is doing, for the window (in the order they began)
+_cancels = {}                # artist id -> the Event that cancels its running sync
+_workers = set()             # the worker threads
 _state = {"finished": None}
 _log = collections.deque(maxlen=300)
 _speed = collections.deque()  # (time, bytes) of the last seconds
@@ -87,12 +88,14 @@ def _now():
 
 
 def status():
+    """current: the card that began first and still runs; active: all of them (several can run at once)."""
     with _lock:
-        cur = dict(_current) if _current else None
-        if cur:
-            cur["speed"] = _rate()
-        return {"running": _worker is not None, "current": cur, "queue": list(_queue),
-                "finished": _state["finished"], "log": list(_log)}
+        active = [dict(c) for c in _running.values()]
+        speed = _rate()
+        for c in active:
+            c["speed"] = speed
+        return {"running": bool(_workers or _running), "current": active[0] if active else None, "active": active,
+                "queue": list(_queue), "finished": _state["finished"], "log": list(_log)}
 
 
 def event(kind, text, artist=None, **counts):
@@ -190,13 +193,11 @@ def enqueue(artist_ids=None, auto=False, only=None, mode=None):
     if artist_ids is not None:
         wanted = set(artist_ids)
         ids = [i for i in ids if i in wanted]
-    global _worker
     followed = 0
     with _lock:
-        busy = _current["artist_id"] if _current else None
         # A download asked for while the same card is only being looked at follows it.
-        follows = busy if mode == "download" and _current and _current.get("mode") == "refresh" else None
-        added = [i for i in ids if i not in _queue and (i != busy or i == follows)]
+        follows = {i for i, c in _running.items() if mode == "download" and c.get("mode") == "refresh"}
+        added = [i for i in ids if i not in _queue and ((i not in _running and i not in _starting) or i in follows)]
         _queue.extend(added)
         for i in added:
             if only:
@@ -236,11 +237,9 @@ def enqueue(artist_ids=None, auto=False, only=None, mode=None):
             _auto.update(added)
         else:                              # somebody asked: not the careful automatic kind any more
             _auto.difference_update(added if only else ids)     # (a restricted ask of a queued card changes nothing else)
-        # Under the same lock the worker clears _worker in when it runs dry, so
-        # an artist queued in that moment never waits for a worker that is gone.
-        if added and _worker is None:
-            _worker = threading.Thread(target=_work, daemon=True, name="sync")
-            _worker.start()
+        # Under the same lock a worker leaves in when it runs dry, so an artist queued in that
+        # moment never waits for a worker that is gone.
+        _spawn()
     return len(added) + followed
 
 
@@ -270,25 +269,50 @@ def focus(artist_id):
         return True
 
 
+def _exclusive(url):
+    """The site where this source must be read by one card at a time: a cookie login's (an account is what gets banned,
+    and its gap between cards is kept per site) and one gallery-dl reads (its lock turns a second listing away). The other
+    sites' lanes (net) pace whoever comes."""
+    if not sources.site_for(url):
+        return None
+    if accounts.careful(sources.account_key(url)) or sources.kind_of(url) in GDL_KINDS:
+        return net.site_of(url)
+    return None
+
+
 def _pick():
-    """The next card to work on, taken off the queue (the lock is held): the one Browse opened, else the first of the
-    first few whose careful-login sites are not cooling down from the last card -- so a card on pixiv does not hold
-    up the Bluesky ones behind it -- else whichever will be ready soonest."""
-    if _queue[0] in _focused:
-        return _queue.pop(0)
+    """The next card to work on, taken off the queue (the lock is held), or None when every card that waits needs a site
+    that another running card has. The card Browse opened first; else the first of the first few whose cookie-login
+    sites are not cooling down from the last card -- so a card on pixiv does not hold up the Bluesky ones behind it --
+    else, when nothing else runs, whichever will be ready soonest."""
     head = _queue[:PICK_FROM]
     now = time.monotonic()
     cooling = {i: 0.0 for i in head}
-    if _used:
-        with db.connect() as con:
-            rows = con.execute("SELECT artist_id, url FROM sources WHERE artist_id IN (%s)" % ",".join("?" * len(head)), head)
-            for aid, url in rows:
-                used = _used.get(net.site_of(url))
-                if used and used[0] != aid and accounts.careful(sources.account_key(url)):
-                    cooling[aid] = max(cooling[aid], next_card()[0] - (now - used[1]))
-    ready = [i for i in head if cooling[i] <= 0]
-    chosen = ready[0] if ready else min(head, key=lambda i: cooling[i])
-    _queue.remove(chosen)
+    sites = {i: set() for i in head}
+    with db.connect() as con:
+        rows = con.execute("SELECT artist_id, url FROM sources WHERE artist_id IN (%s)" % ",".join("?" * len(head)), head).fetchall()
+        busy, going = set(), list(set(_running) | _starting)       # (a card just picked is not in _running yet)
+        if going:
+            for aid, url in con.execute("SELECT artist_id, url FROM sources WHERE artist_id IN (%s)" % ",".join("?" * len(going)), going):
+                busy.add(_exclusive(url))
+    for aid, url in rows:
+        where = _exclusive(url)
+        if where:
+            sites[aid].add(where)
+            used = _used.get(where)
+            if used and used[0] != aid:
+                cooling[aid] = max(cooling[aid], next_card()[0] - (now - used[1]))
+    free = [i for i in head if not sites[i] & busy]
+    if not free:
+        return None
+    for i in free:                                    # the card somebody opened: before the rest
+        if i in _focused:
+            _queue.remove(i)
+            return i
+    ready = [i for i in free if cooling[i] <= 0]
+    chosen = ready[0] if ready else (min(free, key=lambda i: cooling[i]) if not (_running or _starting) else None)
+    if chosen is not None:
+        _queue.remove(chosen)
     return chosen
 
 
@@ -296,28 +320,44 @@ def cancel(artist_id):
     with _lock:
         if _unqueue(artist_id):
             return True
-        if _current and _current["artist_id"] == artist_id:
+        if artist_id in _cancels:                     # running, or just picked
             _followup.pop(artist_id, None)
-            _cancel.set()
+            _cancels[artist_id].set()
             return True
     return False
 
 
+def _cancelled(cur):
+    """Whether the sync that `cur` belongs to was cancelled."""
+    event_ = _cancels.get(cur.get("artist_id"))
+    return bool(event_ and event_.is_set())
+
+
+def _spawn():
+    """Workers for the cards that wait, up to WORKERS (the lock is held). A worker that finds nothing it may start while
+    others run leaves; the ones that run pick the next card when they are done."""
+    for _ in range(min(WORKERS - len(_workers), len(_queue))):
+        t = threading.Thread(target=_work, daemon=True, name="sync")
+        _workers.add(t)
+        t.start()
+
+
 def _work():
-    global _worker, _current
+    me = threading.current_thread()
     while True:
         with _lock:
-            if not _queue:
-                _worker = None
-                _state["finished"] = _now()
+            artist_id = _pick() if _queue else None
+            if artist_id is None:
+                _workers.discard(me)
+                if not _workers and not _running:
+                    _state["finished"] = _now()
                 return
-            artist_id = _pick()
             _starting.add(artist_id)
             auto = artist_id in _auto
             only = _only.pop(artist_id, None)
             mode = _modes.pop(artist_id, None)
             _auto.discard(artist_id)
-            _cancel.clear()
+            cancel = _cancels[artist_id] = threading.Event()
         try:
             _sync_artist(artist_id, auto, only, mode)
         except Exception as e:                       # never leave a card stuck as running
@@ -325,10 +365,11 @@ def _work():
             event("error", "Sync failed: %s" % net.reason(e))
         finally:
             with _lock:
-                _current = None
+                _running.pop(artist_id, None)
+                _cancels.pop(artist_id, None)
                 _starting.discard(artist_id)
                 later = _followup.pop(artist_id, False)
-        if later is not False and not _cancel.is_set():      # a download asked for meanwhile follows the job
+        if later is not False and not cancel.is_set():      # a download asked for meanwhile follows the job
             enqueue([artist_id], only=later, mode="download")
 
 
@@ -339,6 +380,7 @@ def scheduler():
     def run():
         time.sleep(random.uniform(20, 60))    # the window first, and not the start's own second
         check_accounts_at_start()
+        threading.Thread(target=backfill_avatars, daemon=True, name="avatar-addresses").start()
         if db.get_setting("scan_on_start") == "1":           # as Refresh: a card with auto-download downloads what it finds
             try:
                 if enqueue(auto=True):
@@ -370,6 +412,35 @@ def scheduler():
             except Exception:
                 log.exception("scheduler")
     threading.Thread(target=run, daemon=True, name="scheduler").start()
+
+
+def backfill_avatars():
+    """Cards made by hand that do not know where their profile picture is (v0.32 kept the file, not the address):
+    one card at a time, a few seconds apart, through a source on a site that is no login risk -- the rest learn it at
+    their next sync. Cards of a follow list got the address from the list."""
+    def sources_of(artist_id):
+        with db.connect() as con:
+            return [r["url"] for r in con.execute("SELECT url FROM sources WHERE artist_id = ? ORDER BY id", (artist_id,))]
+
+    with db.connect() as con:
+        ids = [r[0] for r in con.execute("SELECT id FROM artists WHERE listed = 0 AND avatar_url IS NULL "
+                                         "AND avatar_checked IS NULL ORDER BY id")]
+    for artist_id in ids:
+        urls = [u for u in sources_of(artist_id) if sources.site_for(u) and not accounts.careful(sources.account_key(u))
+                and not net.paused(u)]
+        if urls:
+            for url in urls:
+                try:
+                    info = sources.profile(url) or {}
+                except Exception as e:
+                    log.info("no profile picture from %s: %s", url, net.reason(e))
+                    continue
+                if info.get("avatar"):
+                    _set_avatar(artist_id, info["avatar"], info.get("avatar_headers"))
+                    break
+            with db.connect() as con:
+                con.execute("UPDATE artists SET avatar_checked = COALESCE(avatar_checked, ?) WHERE id = ?", (_now(), artist_id))
+        time.sleep(random.uniform(4, 9))
 
 
 def _next_auto(now):
@@ -520,50 +591,14 @@ def _ordered_sources(con, artist):
                        (artist["id"], artist["master_source_id"] or 0)).fetchall()
 
 
-def _avatar_name(con, artist_id, name):
-    """<artist>.jpg -- named after the artist, so a picture always says whose it is.
-    A second card with the same name gets its id added."""
-    file = safe_name(name) + ".jpg"
-    taken = con.execute("SELECT 1 FROM artists WHERE id != ? AND avatar = ?", (artist_id, file)).fetchone()
-    return "%s (%d).jpg" % (safe_name(name), artist_id) if taken else file
-
-
-def _save_avatar(artist_id, url, headers=None):
-    data = net.fetch_bytes(url, headers=headers)
+def _set_avatar(artist_id, url, headers=None):
+    """Where the site has the profile picture. Nothing is fetched or kept: the page shows it through /api/avatar,
+    which fetches it into memory when somebody looks."""
+    if not isinstance(url, str) or not url.startswith("https://"):
+        return
     with db.connect() as con:
-        row = con.execute("SELECT name, avatar FROM artists WHERE id = ?", (artist_id,)).fetchone()
-        if not row:
-            return
-        name = _avatar_name(con, artist_id, row["name"])
-        imaging.avatar(io.BytesIO(data), config.AVATARS / name)
-        if row["avatar"] and row["avatar"] != name:
-            (config.AVATARS / row["avatar"]).unlink(missing_ok=True)
-        con.execute("UPDATE artists SET avatar = ?, avatar_checked = ? WHERE id = ?",
-                    (name, _now(), artist_id))
-
-
-def name_avatar(artist_id):
-    """After a rename the picture's file follows the artist's name."""
-    with db.connect() as con:
-        row = con.execute("SELECT name, avatar FROM artists WHERE id = ?", (artist_id,)).fetchone()
-        if not row or not row["avatar"]:
-            return
-        name = _avatar_name(con, artist_id, row["name"])
-        if name == row["avatar"]:
-            return
-        try:
-            os.replace(config.AVATARS / row["avatar"], config.AVATARS / name)
-        except OSError:
-            name = None                    # gone: the next check fetches it again
-        con.execute("UPDATE artists SET avatar = ? WHERE id = ?", (name, artist_id))
-
-
-def name_avatars():
-    """Pictures saved as <id>.jpg before they were named after the artist (v0.5)."""
-    with db.connect() as con:
-        ids = [r[0] for r in con.execute("SELECT id FROM artists WHERE avatar IS NOT NULL")]
-    for artist_id in ids:
-        name_avatar(artist_id)
+        con.execute("UPDATE artists SET avatar_url = ?, avatar_headers = ?, avatar_checked = ? WHERE id = ?",
+                    (url, json.dumps(headers) if headers else None, _now(), artist_id))
 
 
 class Busy(Exception):
@@ -580,7 +615,7 @@ def merge(into_id, other_id, auto=False):
     if into_id == other_id:
         raise ValueError("Pick another card.")
     with _lock:       # looked at and taken off the waiting list in one step: the worker cannot pop it between
-        if (_current and _current["artist_id"] in (into_id, other_id)) or {into_id, other_id} & _starting:
+        if {into_id, other_id} & (set(_running) | _starting):
             raise Busy("The card is being synced. Try again when it is done.")
         _unqueue(other_id)
     moved = 0
@@ -614,19 +649,14 @@ def merge(into_id, other_id, auto=False):
         if not master and b["master_source_id"] and con.execute(
                 "SELECT 1 FROM sources WHERE id = ? AND artist_id = ?", (b["master_source_id"], into_id)).fetchone():
             master = b["master_source_id"]
-        con.execute("UPDATE artists SET listed = ?, master_source_id = ?, avatar = ?, last_activity = ?, favorite = ?, "
+        con.execute("UPDATE artists SET listed = ?, master_source_id = ?, avatar_url = ?, avatar_headers = ?, "
+                    "last_activity = ?, favorite = ?, "
                     "pending = (SELECT COALESCE(SUM(pending), 0) FROM sources WHERE artist_id = ?) WHERE id = ?",
-                    (1 if auto and a["listed"] and b["listed"] else 0, master, a["avatar"] or b["avatar"],
+                    (1 if auto and a["listed"] and b["listed"] else 0, master,
+                     a["avatar_url"] or b["avatar_url"], a["avatar_headers"] if a["avatar_url"] else b["avatar_headers"],
                      max(filter(None, [a["last_activity"], b["last_activity"]]), default=None),
                      1 if a["favorite"] or b["favorite"] else 0, into_id, into_id))      # a star stays on the merged card
         con.execute("DELETE FROM artists WHERE id = ?", (other_id,))
-    if b["avatar"] and not a["avatar"]:
-        name_avatar(into_id)                        # the picture came along: named after its new card
-    elif b["avatar"]:
-        try:
-            (config.AVATARS / b["avatar"]).unlink(missing_ok=True)
-        except OSError as e:                         # the merge is done: a picture left over is not worth failing for
-            log.info("picture of the merged card not removed: %s", e)
     if not auto:
         event("info", "%s is part of %s now" % (b["name"], a["name"]))
     return moved
@@ -652,7 +682,7 @@ def check_card(artist_id):
                         "last_level = ? WHERE id = ?", (error, level, row["id"]))
     try:
         if found:
-            _save_avatar(artist_id, found["avatar"], found.get("avatar_headers"))
+            _set_avatar(artist_id, found["avatar"], found.get("avatar_headers"))
     except Exception as e:
         log.info("no profile picture for card %d: %s", artist_id, e)
 
@@ -673,7 +703,7 @@ def refresh_avatar(artist_id, force=False):
         try:
             info = sources.profile(row["url"])
             if info and info.get("avatar"):
-                _save_avatar(artist_id, info["avatar"], info.get("avatar_headers"))
+                _set_avatar(artist_id, info["avatar"], info.get("avatar_headers"))
                 return
         except Exception as e:
             log.info("no profile picture from %s: %s", row["url"], net.reason(e))
@@ -698,7 +728,7 @@ def _space_out(where, artist_id, focused=False):
     if used and used[0] != artist_id:
         wait = random.uniform(*(FOCUS_GAP if focused else next_card())) - (time.monotonic() - used[1])
         if wait > 0:
-            _cancel.wait(wait)
+            (_cancels.get(artist_id) or threading.Event()).wait(wait)
 
 
 def _gave_up(artist_id, key, failed):
@@ -725,7 +755,6 @@ def _held(artist_id, keys):
 
 
 def _sync_artist(artist_id, auto=False, only=None, mode=None):
-    global _current
     with db.connect() as con:
         artist = con.execute("SELECT * FROM artists WHERE id = ?", (artist_id,)).fetchone()
         if not artist:
@@ -754,8 +783,9 @@ def _sync_artist(artist_id, auto=False, only=None, mode=None):
            "failed": 0, "existing": 0, "file": "", "size": 0, "found": 0,
            "mode": "download" if download else "refresh"}
     with _lock:
-        _current = cur
-        _speed.clear()
+        _running[artist_id] = cur
+        if len(_running) == 1:
+            _speed.clear()
     event("start", "Checking %d %s" % (len(srcs), "source" if len(srcs) == 1 else "sources"), artist)
     refresh_avatar(artist_id)
 
@@ -767,7 +797,7 @@ def _sync_artist(artist_id, auto=False, only=None, mode=None):
 
     def look(src):
         """One source looked at: what it found, or why not. None: left alone (cancelled, or too soon after the last sync)."""
-        if _cancel.is_set():
+        if _cancelled(cur):
             return None
         site = sources.site_for(src["url"])
         where = net.site_of(src["url"])
@@ -855,7 +885,7 @@ def _sync_artist(artist_id, auto=False, only=None, mode=None):
 
     def one(job):
         src, site, media = job
-        if _cancel.is_set():
+        if _cancelled(cur):
             return
         done = _fetch(artist, src, site, media, cur)
         settled = bool(done)
@@ -882,7 +912,7 @@ def _sync_artist(artist_id, auto=False, only=None, mode=None):
     for where in logins:
         _used[where] = (artist_id, time.monotonic())
 
-    cancelled = _cancel.is_set()
+    cancelled = _cancelled(cur)
     with db.connect() as con:
         # Complete only after a sync went all the way and got everything: until
         # then the next one walks the whole history again and finds what is missing.
@@ -918,7 +948,7 @@ def _glance(src, site, known, cur):
             # for the next pages (a refresh once read four pages of every artist to say "up to date"). The oldest, not
             # any: somebody who saved one new picture by hand has the rest of the page still to download.
             if (page and page[-1].remote_key in known) or len(items) >= REFRESH_ITEMS or number >= REFRESH_PAGES \
-                    or _cancel.is_set():
+                    or _cancelled(cur):
                 break
     finally:
         close = getattr(listing, "close", None)
@@ -941,13 +971,13 @@ def _set_pending(con, artist_id, counts, keys=None):
 
 def _looked(artist, todo, cur, logins, looked):
     """The end of a sync that only looked: how many posts wait for a download, shown on the card;
-    the previews follow the new snapshots. A card with auto-download never comes here. A look only
+    A card with auto-download never comes here. A look only
     reads the newest REFRESH_ITEMS posts of a source: a count above that is "at least"."""
     artist_id = artist["id"]
     found = collections.Counter(src["id"] for src, _site, _m in todo)
     for where in logins:
         _used[where] = (artist_id, time.monotonic())
-    cancelled = _cancel.is_set()
+    cancelled = _cancelled(cur)
     with db.connect() as con:
         con.execute("UPDATE artists SET last_sync = ? WHERE id = ?", (_now(), artist_id))
         if not cancelled:
@@ -956,9 +986,6 @@ def _looked(artist, todo, cur, logins, looked):
                 waits[src["id"]].add(m.remote_key)
             _set_pending(con, artist_id, {sid: found[sid] for sid in looked}, waits)
         waiting = con.execute("SELECT pending FROM artists WHERE id = ?", (artist_id,)).fetchone()[0]
-    if looked:
-        from . import previews                 # here: previews imports this module
-        previews.soon(artist_id, forced=False)  # the snapshots are fresh now: nothing to ask a site for
     if cancelled:
         event("cancelled", "Cancelled", artist)
     elif not looked:                               # every source rests, failed or was left alone for now
@@ -1030,7 +1057,7 @@ def _scan(src, site, known, cur, skip=frozenset(), retry=False):
             event("info", "%s: stopped after %d pages; the next sync carries on." % (
                 site.LABEL, number))
             return fresh, False, True
-        if _cancel.is_set():
+        if _cancelled(cur):
             return fresh, False, False
     return fresh, True, False
 

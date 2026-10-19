@@ -55,12 +55,12 @@ RETRIES = 4
 _local = threading.local()
 _lock = threading.Lock()
 _hosts = {}                 # (host, carries a login, small pictures) -> its limiter's state
-_limits = {"per_host": 2, "pace": 0.25}
+_limits = {"per_host": 4, "pace": 0.25}
 CAP = 300                   # the longest Retry-After waited out; a longer one pauses the site
 
 # Sites stricter than Settings: (requests at once, seconds apart). With
 # Settings, the gentler of the two wins.
-HOSTS = {"www.pixiv.net": (1, 1.5), "i.pximg.net": (1, 0.5), "www.patreon.com": (1, 1.5),
+HOSTS = {"www.pixiv.net": (1, 1.5), "i.pximg.net": (2, 0.4), "www.patreon.com": (1, 1.5),
          # A leading dot: every host below that domain (Patreon's and X's file servers).
          ".patreonusercontent.com": (2, 0.6), ".twimg.com": (2, 0.4),
          # The boorus' APIs: e621 asks for at most one request a second, the others
@@ -457,6 +457,18 @@ def interactive():
         _local.interactive -= 1
 
 
+@contextlib.contextmanager
+def watching(fn):
+    """fn(done, total) hears every chunk of the files this thread downloads (total 0: the site did not say) --
+    the gallery's ring round a tile's download button."""
+    before = getattr(_local, "watch", None)
+    _local.watch = fn
+    try:
+        yield
+    finally:
+        _local.watch = before
+
+
 def _own(host):
     """A host's own limits: its HOSTS entry, or its domain's (".twimg.com")."""
     if host in HOSTS:
@@ -710,12 +722,20 @@ def _stream(url, part, digest, mime_hint, progress, headers):
             raise RuntimeError("%s sent a web page instead of the file" % urllib.parse.urlparse(url).hostname)
         ext = extension(resp.headers.get("Content-Type") or mime_hint, url)
         name = _disposition_name(resp.headers.get("Content-Disposition"))
+        watch, done = getattr(_local, "watch", None), 0
+        try:
+            total = int(resp.headers.get("Content-Length") or 0)
+        except ValueError:
+            total = 0
         with open(part, "wb") as out:
             for chunk in resp.iter_content(1 << 16):
                 digest.update(chunk)
                 out.write(chunk)
                 if progress:
                     progress(len(chunk))
+                if watch:
+                    done += len(chunk)
+                    watch(done, total)
     except BaseException:
         part.unlink(missing_ok=True)
         raise

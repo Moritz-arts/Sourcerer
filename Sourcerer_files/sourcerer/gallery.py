@@ -42,8 +42,10 @@ import logging
 import os
 import queue
 import random
+import re
 import threading
 import time
+import urllib.parse
 import uuid
 
 import requests
@@ -278,6 +280,7 @@ class _Gallery:
         self.items = {}                        # item number -> (_Source, Media)
         self.spoken = 0
         self.keys = set()
+        self.progress = {}                     # item number -> (bytes so far, bytes in all or 0) of a download on its way
         self.saved = {}                        # (artist id, remote_key) -> the library's row, where there is one
         self.asked = set()                     # ... of these, the ones the library was asked about
         self.sharp = db.get_setting("grid_quality") != "fast"      # the grid shows the largest rendition, not the small one
@@ -393,7 +396,7 @@ class _Gallery:
     def item(self, number):
         s, m = self.items[number]
         d = {"id": number, "source": s.label, "src": s.row["id"], "posted": m.posted, "w": m.width,
-             "h": m.height, "video": bool(m.video), "post": m.post_url, "saved": False,
+             "h": m.height, "video": bool(m.video), "post": m.post_url, "saved": False, "fname": _fname(m),
              "artist": s.artist["name"], "artist_id": s.artist["id"]}
         mine = self.saved.get((s.artist["id"], m.remote_key))
         proxy = "/api/gallery/%s/%d/" % (self.id, number)
@@ -403,6 +406,8 @@ class _Gallery:
             d.update(thumb=proxy + "thumb", large=proxy + "large")
         else:
             d.update(thumb=m.thumb, large=m.large or m.thumb)
+        if getattr(s.site, "animation", None) and m.remote_key.endswith("_ugoira"):
+            d["anim"] = True                         # the large view plays it; the grid keeps the still
         if gif:
             # A GIF plays: the grid shows the file itself, not the site's still of it.
             animated = d["large"] if m.preview_headers is not None else (m.url or m.large or m.thumb)
@@ -461,6 +466,20 @@ def status(gallery_id):
     g.start_checks()                  # a source that could not be asked at the opening (its site was busy) goes on now
     return {"sources": g.state(), "new_posts": sum(s.new for s in g.sources),
             "loading": any(s.loading() for s in g.sources)}
+
+
+def _fname(m):
+    """The file's name on the site, as far as the listing knows it: the site's own (Media.filename), else the last
+    part of the address when that looks like a file, else the post's short id (pixiv: 12345_p0)."""
+    if m.filename:
+        return m.filename
+    tail = urllib.parse.unquote(urllib.parse.urlparse(m.url or "").path.rsplit("/", 1)[-1])
+    return tail if re.fullmatch(r".{1,200}\.[A-Za-z0-9]{2,5}", tail) else (m.name or "")
+
+
+def progress(gallery_id):
+    """{item number: [bytes so far, bytes in all or 0]} of the downloads on their way. Asks nobody."""
+    return {n: list(p) for n, p in dict(_get(gallery_id).progress).items()}
 
 
 def _get(gallery_id):
@@ -541,6 +560,14 @@ def picture(gallery_id, number, size):
     g = _get(gallery_id)
     s, m = g.items[number]
     thumb = size == "thumb"
+    animate = getattr(s.site, "animation", None)
+    if size == "large" and animate:                  # a site's animation (pixiv's ugoira) plays in the large view
+        try:
+            got = _once(gallery_id, (gallery_id, number, "animation", ""), lambda: animate(m))
+            if got:
+                return got
+        except Exception as e:
+            log.info("animation of %s: %s", m.post_url, net.reason(e))
     url = (m.thumb if thumb else "") or m.large or m.thumb or m.url
     if _gif(m) and m.url:
         url = m.url                                  # the GIF itself, for the grid and the viewer alike
@@ -586,8 +613,12 @@ def download(gallery_id, number):
     if seen and m.large and m.large == m.url and m.filename and not m.fetch:
         m = _from_memory(m, *seen)             # the large view already fetched the original: no second request
     # Somebody is waiting for this one: ahead of what waits in the site's lane, no reading break.
-    with net.interactive():
-        done = sync._fetch(artist, src or s.row, s.site, m, cur)
+    g.progress[number] = (0, 0)
+    try:
+        with net.interactive(), net.watching(lambda done, total: g.progress.__setitem__(number, (done, total))):
+            done = sync._fetch(artist, src or s.row, s.site, m, cur)
+    finally:
+        g.progress.pop(number, None)
     if not done:
         raise RuntimeError("the download did not go through -- see the activity log")
     with db.connect() as con:

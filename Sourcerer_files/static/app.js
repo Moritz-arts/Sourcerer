@@ -103,12 +103,21 @@ function avatarHtml(a, cls, id) {
   var name = (a && a.name) || "?", attr = (id ? ' id="' + id + '"' : "");
   cls = "avatar" + (cls ? " " + cls : "");
   if (a && a.avatar && a.id) {
-    return "<img" + attr + ' class="' + cls + '" alt="" loading="lazy" decoding="async" src="/api/avatar/' + a.id + "?v=" +
+    // The picture comes from the site, through memory (nothing is kept); when it does not come, the initials stand in.
+    return "<img" + attr + ' class="' + cls + '" alt="" loading="lazy" decoding="async" data-name="' + esc(name) + '" onerror="avatarFail(this)" src="/api/avatar/' + a.id + "?v=" +
       encodeURIComponent(a.avatar_checked || "") + '">';
   }
+  return initialsHtml(name, cls, attr);
+}
+function initialsHtml(name, cls, attr) {
   var c = colours(name);
-  return "<div" + attr + ' class="' + cls + '" style="background:' + c[0] + ";color:" + c[1] + '">' +
+  return "<div" + (attr || "") + ' class="' + cls + '" style="background:' + c[0] + ";color:" + c[1] + '">' +
     esc(initials(name)) + "</div>";
+}
+function avatarFail(img) {
+  var box = document.createElement("div");
+  box.innerHTML = initialsHtml(img.dataset.name || "?", img.className, img.id ? ' id="' + img.id + '"' : "");
+  img.replaceWith(box.firstChild);
 }
 
 var STATUS_TEXT = { ok: "reachable", error: "", warn: "", unsupported: "not supported yet",
@@ -192,6 +201,8 @@ function renderActivity() {
         q.slice(0, 4).map(function (id) { return avatarHtml(artistById(id) || { name: "?" }, "xs"); }).join("") +
         (q.length > 4 ? '<span class="more">+' + (q.length - 4) + "</span>" : "") + "</span>";
     }
+    var others = (s.active || []).length - 1;                  // cards that run at once, on other sites
+    if (others > 0) html += '<span class="num" title="' + esc((s.active || []).slice(1).map(function (c) { return c.name; }).join(", ")) + '">+' + others + " more</span>";
     html += '<button class="mini" data-act="cancel-current">' + icon("stop") + " Cancel</button>";
   } else {
     html = '<div class="state">' + icon("check", "ok") + "<b>Ready</b>" +
@@ -281,7 +292,7 @@ function loadSoon() {
 var lastKey = "";
 function poll() {
   api("GET", "/api/sync").then(function (s) {
-    var key = (s.current ? s.current.artist_id : "-") + "|" + s.running + "|" + (s.queue || []).join(",") +
+    var key = (s.active || []).map(function (c) { return c.artist_id; }).join("+") + "|" + s.running + "|" + (s.queue || []).join(",") +
       "|" + (s.log || []).length + "|" + s.follows + "|" + (s.pauses || []).map(function (p) { return p.site; }).join(",");
     // A sync that ended may have saved files: a gallery kept aside would still show them as not downloaded.
     if (S.sync.finished !== s.finished) {
@@ -457,7 +468,7 @@ document.addEventListener("click", function (e) {
   switch (btn.dataset.act) {
     case "add": openCard(null); break;
     case "cancel-current":
-      if (S.sync.current) api("POST", "/api/sync/cancel", { artist_id: S.sync.current.artist_id });
+      (S.sync.active || []).forEach(function (c) { api("POST", "/api/sync/cancel", { artist_id: c.artist_id }); });
       break;
     case "log": toggleLog(); break;
     case "accounts": e.preventDefault(); openAccounts(); break;
@@ -592,7 +603,7 @@ function galWatch() {
 var BR_HIDDEN = "sourcerer.browse.hidden";
 var BR_FIT = "sourcerer.browse.fit", BR_SIZE = "sourcerer.browse.size";
 var BR_SORT = "sourcerer.browse.sort", BR_COUNT = "sourcerer.browse.count", BR_LAST = "sourcerer.browse.last";
-function brOrder(v) { return /^(activity|favorites|source|logo|images|downloads|percent)$/.test(v) ? v : "name"; }
+function brOrder(v) { return v === "logo" ? "source" : /^(activity|favorites|source)$/.test(v) ? v : "name"; }      // ("logo" was Source's twin; the numbers are the second choice's)
 function brNumber(v) { return v === "files" ? "images" : /^(images|downloads|percent)$/.test(v) ? v : "sources"; }
 S.brArtist = 0; S.brFit = "square"; S.brSort = "name"; S.brCount = "sources";
 try {
@@ -666,31 +677,29 @@ function allText() {
   if (S.brCount === "percent") return tot ? Math.round(100 * done / tot) + "%" : "";
   return S.artists.length || "";
 }
-var NUMBER_SORT = { images: totalOf, downloads: downloadsOf, percent: shareOf };
 function renderBrowseList() {
-  var q = $("br-search").value.trim().toLowerCase(), bySite = S.brSort === "source" || S.brSort === "logo", sites = {};
+  var q = $("br-search").value.trim().toLowerCase(), bySite = S.brSort === "source", sites = {};
   var byStar = S.brSort === "favorites", stars = 0;
   var list = S.artists.filter(function (a) { return !q || a.name.toLowerCase().indexOf(q) >= 0; })
     .sort(function (x, y) {
       if (byStar && !x.favorite !== !y.favorite) return x.favorite ? -1 : 1;
       if (S.brSort === "activity") { var tx = activityKey(x), ty = activityKey(y); if (tx !== ty) return !tx ? 1 : !ty ? -1 : tx < ty ? 1 : -1; }
-      var by = NUMBER_SORT[S.brSort];
-      if (by && by(x) !== by(y)) return by(y) - by(x);
       if (bySite) { var sx = siteOf(x), sy = siteOf(y); if (sx !== sy) return !sx ? 1 : !sy ? -1 : sx.localeCompare(sy); }
       return x.name.localeCompare(y.name);
     });
   if (bySite) list.forEach(function (a) { var k = siteOf(a); sites[k] = (sites[k] || 0) + 1; });
   if (byStar) list.forEach(function (a) { if (a.favorite) stars++; });
-  var cur = S.sync.current && S.sync.current.artist_id, queue = S.sync.queue || [];
+  var active = (S.sync.active || []).map(function (c) { return c.artist_id; }), queue = S.sync.queue || [];
   function count(a) {
-    if (cur === a.id || queue.indexOf(a.id) >= 0) return '<i class="spin" title="' + (cur === a.id ? "Working…" : "Queued") + '"></i>';
+    var on = active.indexOf(a.id) >= 0;
+    if (on || queue.indexOf(a.id) >= 0) return '<i class="spin" title="' + (on ? "Working…" : "Queued") + '"></i>';
     return countText(a);
   }
   var html = (q ? "" : '<button type="button" class="br-item all' + (!S.brArtist ? " selected" : "") +
     '" data-id="0">' + icon("photo") + '<span class="br-name">All artists</span><span class="br-n">' + allText() + "</span></button>") +
     list.map(function (a, i) {
       var site = bySite ? siteOf(a) : "", head = bySite && (!i || siteOf(list[i - 1]) !== site) ?
-        '<div class="br-group">' + (S.brSort === "logo" ? siteLogo(site) || "" : "") + "<span>" + esc(site || "No source") + '</span><span class="num">' + sites[site] + "</span></div>" : "";
+        '<div class="br-group">' + (siteLogo(site) || "") + "<span>" + esc(site || "No source") + '</span><span class="num">' + sites[site] + "</span></div>" : "";
       if (byStar && stars && stars < list.length && (i === 0 || i === stars)) {         // Favorites, then everybody else
         head = '<div class="br-group">' + (i === 0 ? '<svg class="ic star"><use href="#i-star"/></svg><span>Favorites</span><span class="num">' + stars + "</span>"
           : '<span>Others</span><span class="num">' + (list.length - stars) + "</span>") + "</div>";
@@ -707,7 +716,7 @@ function renderBrowseList() {
 var brAvatar = "";
 function renderBrowseHead() {
   var a = G && G.artist, sup = !!a && a.sources.some(function (s) { return s.supported; });
-  var cur = S.sync.current && a && S.sync.current.artist_id === a.id ? S.sync.current : null;
+  var cur = a && (S.sync.active || []).filter(function (c) { return c.artist_id === a.id; })[0] || null;
   var queued = a && (S.sync.queue || []).indexOf(a.id) >= 0;
   $("br-progress").textContent = cur ? (cur.mode === "refresh" ? "Looking for new posts…" : cur.phase === "scan" ? "Checking sources…"
     : "Downloading " + cur.done + " / " + cur.total) : queued ? "Queued" : a && a.pending ? a.pending + (a.pending >= 120 ? "+" : "") + " to download" : "";
@@ -881,15 +890,16 @@ function tileHtml(it, i) {
     : '<span class="gal-noimg">' + icon(it.video ? "play" : "photo") + "</span>";
   var who = G.all ? it.artist + " · " + it.source : it.source;
   var name = G.all ? '<span class="gal-name">' + esc(it.artist) + "</span>" : "";      // "All artists": whose picture it is, beside the mark
-  return '<button type="button" class="gal-tile' + (G.hidden[it.source] ? " hidden" : "") + (G.sel && G.sel.has(i) ? " sel" : "") + '" data-i="' + i +
+  return '<button type="button" class="gal-tile' + (G.hidden[it.source] ? " hidden" : "") + (G.sel && G.sel.has(i) ? " sel" : "") +
+    (G.downloading[it.id] ? " busy" : "") + '" data-i="' + i +
     (it.w && it.h ? '" data-ar="' + galRatio(it.w, it.h) : "") +
-    '" data-src="' + esc(it.source) + '" title="' + esc(who + (it.posted ? " · " + it.posted.slice(0, 10) : "")) + '">' +
-    picture + (it.video && it.thumb ? '<span class="gal-play">' + icon("play") + "</span>" : "") +
+    '" data-src="' + esc(it.source) + '" title="' + esc(who + (it.posted ? " · " + it.posted.slice(0, 10) : "") + (it.fname ? " · " + it.fname : "")) + '">' +
+    picture + (it.fname ? '<span class="gal-fname">' + esc(it.fname) + "</span>" : "") + (it.video && it.thumb ? '<span class="gal-play">' + icon("play") + "</span>" : "") +
     '<span class="gal-tag">' + (siteLogo(it.source) || '<span class="gal-site">' + esc(it.source) + "</span>") + name + "</span>" +
     (it.saved ? '<span class="gal-saved" title="Downloaded">' + icon("tick") + "</span>"
               : '<span class="gal-dl" data-dl title="Download this picture">' + icon("download") + "</span>") +
     '<span class="gal-pick" data-pick title="Select">' + icon("tick") + "</span>" +
-    (it.gif ? '<span class="gal-badge">GIF</span>' : "") + "</button>";
+    (it.gif || it.anim ? '<span class="gal-badge">GIF</span>' : "") + "</button>";
 }
 
 // One chip per site the open gallery has a source of: switching it off hides its posts and
@@ -948,7 +958,7 @@ function viewItem(i) {
   $("gal-source").title = it.source;
   $("gal-who").innerHTML = avatarHtml(artistById(it.artist_id) || { name: it.artist }) + "<span>" + esc(it.artist) + "</span>";
   $("gal-info").textContent = [it.posted ? new Date(it.posted).toLocaleString() : "",
-    it.w ? it.w + " × " + it.h : "", (i + 1) + " / " + G.items.length + (G.done ? "" : "+")].filter(Boolean).join(" · ");
+    it.w ? it.w + " × " + it.h : "", it.fname || "", (i + 1) + " / " + G.items.length + (G.done ? "" : "+")].filter(Boolean).join(" · ");
   galDlState(it);
   $("gal-view").classList.remove("hidden");
   // Near the end of what is listed: the next page, before it is needed.
@@ -1041,7 +1051,7 @@ $("gal-sources").addEventListener("click", function (e) {
 });
 $("gal-view").addEventListener("click", function (e) {
   var b = e.target.closest("[data-gal]");
-  if (!b && G && !Z.moved && outsidePicture(e)) closeView();          // the dark around the picture closes it too
+  if (!b && G && !Z.moved && Date.now() - zoomLast.toggled > 700 && outsidePicture(e)) closeView();          // the dark around the picture closes it too
   if (!b || !G) return;
   var it = G.items[G.view];
   if (b.dataset.gal === "prev") step(-1);
@@ -1090,10 +1100,23 @@ function outsidePicture(e) {
   var box = zoomBox(), f = Math.min(box.w / img.naturalWidth, box.h / img.naturalHeight);
   return Math.abs(e.clientX - box.cx) > img.naturalWidth * f / 2 || Math.abs(e.clientY - box.cy) > img.naturalHeight * f / 2;
 }
-$("gal-stage").addEventListener("dblclick", function (e) {
-  if (!stageImage() || e.target.tagName !== "IMG") return;
+// A double-click zooms in, and on a picture that is zoomed (by this or the wheel) it puts the picture back to the fitted
+// size. Found from the mouse-downs as well as from the browser's dblclick: a window's engine may not send that one
+// for a press that was taken as the start of a drag. Whichever comes first acts; the other, within 600 ms, does not.
+var zoomLast = { at: 0, x: 0, y: 0, toggled: 0 };
+function zoomToggle(e) {
+  if (!stageImage() || !e.target.closest || !e.target.closest("#gal-stage") || e.target.tagName === "VIDEO") return;
+  if (Date.now() - zoomLast.toggled < 600) return;
+  zoomLast.toggled = Date.now();
   if (Z.s > 1) zoomReset(); else zoomAt(2.5, e.clientX, e.clientY);
-});
+}
+$("gal-stage").addEventListener("dblclick", zoomToggle);
+$("gal-stage").addEventListener("mousedown", function (e) {
+  if (e.button !== 0) return;
+  var now = Date.now(), twice = now - zoomLast.at < 450 && Math.abs(e.clientX - zoomLast.x) < 12 && Math.abs(e.clientY - zoomLast.y) < 12;
+  zoomLast.at = twice ? 0 : now; zoomLast.x = e.clientX; zoomLast.y = e.clientY;
+  if (twice) zoomToggle(e);
+}, true);
 $("gal-stage").addEventListener("wheel", function (e) {
   if (!stageImage()) return;
   e.preventDefault();
@@ -1127,6 +1150,7 @@ function galFetch(i) {
   var tile = g === G && document.querySelector('#gal-grid .gal-tile[data-i="' + i + '"]');
   if (tile) tile.classList.add("busy");
   if (g.view === i) galDlState(it);
+  galProgress(g);
   return api("POST", "/api/gallery/download", { gallery: g.id, item: it.id }).then(function (d) {
     delete g.downloading[it.id];
     g.items[i] = d.item;
@@ -1145,6 +1169,26 @@ function galFetch(i) {
     }
     throw err;
   });
+}
+// The ring round a tile's download button: how much of the file has come (0-100 %), asked of the server every 350 ms
+// while any download of the open gallery is on its way; a site that does not say how big the file is shows a turning arc.
+function galProgress(g) {
+  if (g.progressing) return;
+  g.progressing = true;
+  (function tick() {
+    if (!g.id || !Object.keys(g.downloading).length) { g.progressing = false; return; }
+    api("POST", "/api/gallery/progress", { gallery: g.id }).then(function (d) {
+      if (g === G) Object.keys(d.progress).forEach(function (n) { galRing(g, +n, d.progress[n]); });
+    }).catch(function () {}).then(function () { setTimeout(tick, 350); });
+  })();
+}
+function galRing(g, id, p) {
+  var i = g.items.findIndex(function (x) { return x.id === id; });
+  if (i < 0) return;
+  var pct = p[1] ? Math.min(100, Math.round(100 * p[0] / p[1])) : -1;
+  var dl = document.querySelector('#gal-grid .gal-tile[data-i="' + i + '"] .gal-dl');
+  if (dl) { dl.style.setProperty("--p", pct < 0 ? 0 : pct); dl.classList.toggle("indet", pct < 0); }
+  if (g.view === i) $("gal-download").querySelector("span").textContent = pct < 0 ? "Downloading…" : "Downloading " + pct + "%";
 }
 function galDownload(i) {
   if (i === undefined) i = G && G.view;               // the viewer's button and key: the picture open
@@ -1391,9 +1435,6 @@ $("br-search").addEventListener("input", renderBrowseList);
 $("br-add").addEventListener("click", function () { openCard(null); });
 $("br-sort").addEventListener("change", function () {
   S.brSort = brOrder(this.value);
-  // Ordered by a number: that number stands beside the names.
-  var shows = { images: "images", downloads: "downloads", percent: "percent" }[S.brSort];
-  if (shows) { S.brCount = shows; $("br-count").value = shows; try { localStorage.setItem(BR_COUNT, shows); } catch (e) {} }
   try { localStorage.setItem(BR_SORT, S.brSort); } catch (e) {}
   renderBrowseList();
 });
