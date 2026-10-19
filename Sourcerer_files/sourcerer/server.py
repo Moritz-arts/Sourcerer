@@ -3,7 +3,10 @@
 It listens on 127.0.0.1 only -- nothing here is meant to be reachable from
 another machine.
 """
+import collections
 import datetime
+import io
+import json
 import logging
 import os
 import platform
@@ -17,7 +20,7 @@ import urllib.parse
 
 from flask import Flask, abort, jsonify, request, send_file, send_from_directory
 
-from . import accounts, config, db, follows, gallery, imaging, net, previews, security, sources, sync, updater
+from . import accounts, config, db, follows, gallery, imaging, net, security, sources, sync, updater
 
 log = logging.getLogger(__name__)
 app = Flask(__name__, static_folder=None)
@@ -75,6 +78,8 @@ def _artists():
                 a["sources"].append(s)
             a["path"] = str(sync.artist_folder(a, lib))
             a["folder"] = a["folder"] or ""
+            a["avatar"] = 1 if a.pop("avatar_url", None) else 0      # the page only needs to know there is one (/api/avatar)
+            a.pop("avatar_headers", None)
     return artists
 
 
@@ -397,7 +402,6 @@ def create_artist():
         _save(con, artist_id, data)
     _absorb_listed(artist_id, data["urls"])
     _background(sync.check_card, artist_id)
-    previews.soon(artist_id)
     if body.get("download_now"):
         sync.enqueue([artist_id], mode="download")
     return jsonify(id=artist_id)
@@ -417,9 +421,7 @@ def update_artist(artist_id):
                      sync.artist_folder(dict(row, name=data["name"], folder=data["folder"])))
         _save(con, artist_id, data)
     _absorb_listed(artist_id, data["urls"])
-    sync.name_avatar(artist_id)                  # the picture's file is named after the artist
     _background(sync.check_card, artist_id)
-    previews.soon(artist_id)                     # another source may have newer pictures
     if body.get("download_now"):
         sync.enqueue([artist_id], mode="download")
     return jsonify(ok=True)
@@ -468,27 +470,57 @@ def delete_artist(artist_id):
     # for this artist takes them over instead of downloading them once more.
     sync.cancel(artist_id)
     with db.connect() as con:
-        row = con.execute("SELECT avatar FROM artists WHERE id = ?", (artist_id,)).fetchone()
         con.execute("INSERT OR REPLACE INTO archive (remote_key, sha256, path, post_url, posted, "
                     "phash, width, height, size) SELECT remote_key, sha256, path, post_url, posted, "
                     "phash, width, height, size FROM files WHERE artist_id = ? AND path IS NOT NULL",
                     (artist_id,))
         con.execute("DELETE FROM artists WHERE id = ?", (artist_id,))
-    if row and row["avatar"]:
-        (config.AVATARS / row["avatar"]).unlink(missing_ok=True)
-    previews.forget(artist_id)
     return jsonify(ok=True)
+
+
+_avatars = collections.OrderedDict()     # (artist id, address) -> the 128 px JPEG: memory only, nothing is kept on disk
+_avatar_hosts = {}                       # host -> whether it is a public one (net.public_https), for the run
+_avatar_failed = {}                      # (artist id, address) -> when the site did not give it: not asked again for 10 minutes
+_avatar_lock = threading.Lock()
+AVATARS_KEPT = 4000
 
 
 @app.get("/api/avatar/<int:artist_id>")
 def avatar(artist_id):
+    """The artist's profile picture, fetched from the address the site gave (artists.avatar_url) and made small in
+    memory. Sourcerer keeps no picture files: a restart asks the site again, for the cards that are looked at."""
     with db.connect() as con:
-        row = con.execute("SELECT avatar FROM artists WHERE id = ?", (artist_id,)).fetchone()
-    path = config.AVATARS / row["avatar"] if row and row["avatar"] else None
-    if not path or not path.is_file():
+        row = con.execute("SELECT avatar_url, avatar_headers FROM artists WHERE id = ?", (artist_id,)).fetchone()
+    url = row["avatar_url"] if row else None
+    if not url:
         abort(404)
-    resp = send_file(path, mimetype="image/jpeg")
-    resp.cache_control.max_age = 86400          # the page asks with ?v=<when it changed>
+    key = (artist_id, url)
+    with _avatar_lock:
+        data = _avatars.get(key)
+        if data is not None:
+            _avatars.move_to_end(key)
+    if data is None and time.monotonic() - _avatar_failed.get(key, -1e9) < 600:
+        abort(404)
+    if data is None:
+        host = urllib.parse.urlsplit(url).hostname or ""
+        if host not in _avatar_hosts:
+            _avatar_hosts[host] = net.public_https(url)      # an address a site handed out: never into this machine
+        if not _avatar_hosts[host]:
+            abort(404)
+        try:
+            _ctype, raw = net.fetch_picture(url, headers=json.loads(row["avatar_headers"]) if row["avatar_headers"] else None,
+                                            limit=6 << 20)
+            data = imaging.avatar(io.BytesIO(raw))
+        except Exception as e:
+            log.info("profile picture of card %d: %s", artist_id, net.reason(e))
+            _avatar_failed[key] = time.monotonic()
+            abort(404)
+        with _avatar_lock:
+            _avatars[key] = data
+            while len(_avatars) > AVATARS_KEPT:
+                _avatars.popitem(last=False)
+    resp = app.response_class(data, mimetype="image/jpeg")
+    resp.cache_control.max_age = 86400          # the page asks with ?v=<when the address was looked for>
     return resp
 
 
@@ -539,7 +571,6 @@ def merge_artist(artist_id):
         abort(404)
     except (ValueError, sync.Busy) as e:
         return jsonify(error=str(e)), 400
-    previews.forget(artist_id)
     return jsonify(ok=True, moved=moved)
 
 
@@ -557,7 +588,7 @@ def cancel_sync():
 
 @app.get("/api/sync")
 def sync_status():
-    return jsonify(dict(sync.status(), pauses=net.pauses(), previews=previews.version, follows=follows.version))
+    return jsonify(dict(sync.status(), pauses=net.pauses(), follows=follows.version))
 
 
 @app.get("/api/thumb/<int:file_id>")
@@ -573,17 +604,6 @@ def thumb(file_id):
         abort(404)
     resp = app.response_class(data, mimetype="image/jpeg")
     resp.cache_control.max_age = 7 * 86400       # the page asks with ?v=<the file's hash>
-    return resp
-
-
-@app.get("/api/preview/<int:artist_id>/<name>")
-def preview(artist_id, name):
-    """A card's kept picture of a post that is not downloaded (previews.py). The name is a
-    hash made here: nothing else is served from that folder."""
-    if not previews.NAME.match(name) or not (previews.folder(artist_id) / name).is_file():
-        abort(404)
-    resp = send_from_directory(previews.folder(artist_id), name, mimetype="image/jpeg")
-    resp.cache_control.max_age = 30 * 86400       # the name is the post's own: it never changes
     return resp
 
 
@@ -611,7 +631,15 @@ def _body():
 def gallery_open():
     try:
         # No artist: every card (All artists).
-        return jsonify(gallery.open_gallery(int(_body().get("artist_id") or 0) or None))
+        artist_id = int(_body().get("artist_id") or 0) or None
+        opened = gallery.open_gallery(artist_id)
+        if artist_id:                      # the address of its profile picture, when no look has found it yet
+            with db.connect() as con:
+                lacking = con.execute("SELECT 1 FROM artists WHERE id = ? AND avatar_url IS NULL AND avatar_checked IS NULL",
+                                      (artist_id,)).fetchone()
+            if lacking:
+                _background(sync.refresh_avatar, artist_id)
+        return jsonify(opened)
     except (TypeError, ValueError):
         abort(400)
     except KeyError:
@@ -633,6 +661,15 @@ def gallery_state():
     gallery_id = _body().get("gallery")
     try:
         return jsonify(gallery.status(gallery_id if isinstance(gallery_id, str) else ""))
+    except KeyError:
+        return jsonify(error="This gallery was closed; open it again."), 410
+
+
+@app.post("/api/gallery/progress")
+def gallery_progress():
+    gallery_id = _body().get("gallery")
+    try:
+        return jsonify(progress=gallery.progress(gallery_id if isinstance(gallery_id, str) else ""))
     except KeyError:
         return jsonify(error="This gallery was closed; open it again."), 410
 
@@ -683,6 +720,36 @@ def gallery_close():
     return jsonify(ok=True)
 
 
+HWND = [None]            # the window's handle, read on the window's own thread (desktop._custom_frame)
+
+
+def keep_taskbar(window):
+    """A window without its title bar maximizes over the whole monitor, taskbar included. WinForms lets the form say
+    where it goes when maximized (MaximizedBounds): the work area of the monitor it is on, as a position relative
+    to that monitor (what WM_GETMINMAXINFO wants). Set again before every maximize -- the window may have moved to
+    another monitor -- and once when the bar is taken off. The monitor is asked through user32 with the handle kept
+    from the window's own thread: reading `native.Handle` here, on a server thread, may be refused."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+        from System.Drawing import Rectangle
+
+        class MONITORINFO(ctypes.Structure):
+            _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT), ("rcWork", wintypes.RECT),
+                        ("dwFlags", wintypes.DWORD)]
+        user32 = ctypes.windll.user32
+        user32.MonitorFromWindow.argtypes = [wintypes.HWND, wintypes.DWORD]
+        user32.MonitorFromWindow.restype = wintypes.HANDLE
+        user32.GetMonitorInfoW.argtypes = [wintypes.HANDLE, ctypes.POINTER(MONITORINFO)]
+        info = MONITORINFO(ctypes.sizeof(MONITORINFO))
+        if not HWND[0] or not user32.GetMonitorInfoW(user32.MonitorFromWindow(HWND[0], 2), ctypes.byref(info)):   # 2: the nearest monitor
+            return
+        w, m = info.rcWork, info.rcMonitor
+        window.native.MaximizedBounds = Rectangle(w.left - m.left, w.top - m.top, w.right - w.left, w.bottom - w.top)
+    except Exception as e:
+        log.info("maximized bounds not set (the taskbar may be covered): %s", e)
+
+
 @app.post("/api/window")
 def window_action():
     """The buttons of the page's own title bar (CUSTOM_FRAME): minimize, maximize and back, close."""
@@ -697,6 +764,8 @@ def window_action():
     if action == "minimize":
         WINDOW.minimize()
     elif action == "maximize":
+        if not maximized:
+            keep_taskbar(WINDOW)
         (WINDOW.restore if maximized else WINDOW.maximize)()
         maximized = not maximized
     else:

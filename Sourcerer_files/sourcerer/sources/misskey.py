@@ -158,6 +158,38 @@ def start_login(host):
     return url, ask, finish
 
 
+FOLLOWING = 100          # the API's limit for a page of a list of accounts
+MAX_FOLLOW_PAGES = 200
+
+
+def following(key):
+    """(list name, pages) of the accounts the login follows, newest follow first: [{"url", "name", "avatar"}]. An account
+    of another server (a Mastodon one, which a Misskey can follow) is named by its own server's address."""
+    host = key.split(":", 1)[1]
+    me = _api(host, "i", {}, force=True)
+
+    def pages():
+        until, seen = None, set()
+        while len(seen) < MAX_FOLLOW_PAGES:
+            body = {"userId": me["id"], "limit": FOLLOWING}
+            if until:
+                body["untilId"] = until
+            rows = _api(host, "users/following", body)
+            if not rows or rows[-1]["id"] in seen:
+                return
+            seen.add(rows[-1]["id"])
+            out = []
+            for row in rows:
+                who = row.get("followee") or {}
+                if who.get("username"):
+                    out.append({"url": "https://%s/@%s" % (who.get("host") or host, who["username"]),
+                                "name": re.sub(r":[\w+-]+:", "", who.get("name") or "").strip() or who["username"],
+                                "avatar": who.get("avatarUrl") or ""})
+            yield out
+            until = rows[-1]["id"]
+    yield "", pages()
+
+
 def logout(key):
     """Take the token back on the server too, where it knows how (a Misskey of 2023 or later)."""
     data = accounts.load(key) or {}

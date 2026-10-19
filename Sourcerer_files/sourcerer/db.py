@@ -3,6 +3,7 @@
 One connection per call site and thread -- the server's request threads and the
 sync thread each open their own, and WAL lets them read while one writes.
 """
+import shutil
 import sqlite3
 
 from . import config
@@ -65,17 +66,6 @@ CREATE TABLE IF NOT EXISTS failures (
     count       INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (artist_id, remote_key)
 );
--- The newest posts of an artist's sources, as the card shows them (previews.py): what was
--- found on the sites, with or without a download. file: the kept small copy in
--- Userdata/Previews, NULL where the library has the picture.
-CREATE TABLE IF NOT EXISTS previews (
-    artist_id   INTEGER NOT NULL REFERENCES artists(id) ON DELETE CASCADE,
-    pos         INTEGER NOT NULL,
-    remote_key  TEXT NOT NULL,
-    posted      TEXT,
-    file        TEXT,
-    PRIMARY KEY (artist_id, pos)
-);
 -- The newest posts of a source as the last look at it left them (snapshots.py): Browse opens
 -- from this at once and checks the site meanwhile; cards count what is new from it.
 CREATE TABLE IF NOT EXISTS snapshots (
@@ -117,9 +107,11 @@ COLUMNS = {
         "last_new": "INTEGER NOT NULL DEFAULT 0",
         "last_failed": "INTEGER NOT NULL DEFAULT 0",
         "folder": "TEXT",                 # chosen on the card; NULL: <library>/<name>
-        "avatar": "TEXT",                 # file name in Userdata/Avatars
-        "avatar_checked": "TEXT",         # when the profile picture was last looked for
-        "previews_at": "TEXT",            # when the sites were last asked for the card's newest pictures
+        "avatar": "TEXT",                 # (v0.32 and older: a file name in Userdata/Avatars -- nothing is kept now)
+        "avatar_url": "TEXT",             # where the site has the profile picture: the page shows it through /api/avatar
+        "avatar_headers": "TEXT",         # JSON: what that address wants with the request (pixiv: a Referer)
+        "avatar_checked": "TEXT",         # when the profile picture's address was last looked for
+        "previews_at": "TEXT",            # (v0.32 and older: previews; unused)
         # 1: a sync that finds new posts downloads them too (sync alone only refreshes: it looks at the
         # sources and counts what is new). Cards made before this setting keep downloading: see init().
         "auto_download": "INTEGER NOT NULL DEFAULT 0",
@@ -169,6 +161,32 @@ def init():
         if not con.execute("SELECT 1 FROM settings WHERE key = 'auto_download_migrated'").fetchone():
             con.execute("UPDATE artists SET auto_download = 1")
             con.execute("INSERT INTO settings (key, value) VALUES ('auto_download_migrated', '1')")
+        _forget_what_was_kept(con)
+        # The speed settings were set to values worked out for the sites' limits (v0.33): whatever was chosen
+        # before -- most of it just the old defaults saved by a change of another row -- is dropped, once.
+        if not con.execute("SELECT 1 FROM settings WHERE key = 'speed_defaults_v2'").fetchone():
+            con.execute("DELETE FROM settings WHERE key IN ('parallel', 'per_host', 'pace_ms', 'login_gap')")
+            con.execute("INSERT INTO settings (key, value) VALUES ('speed_defaults_v2', '1')")
+
+
+def _forget_what_was_kept(con):
+    """Sourcerer keeps no pictures of its own: v0.32 and older kept a profile picture per artist (Userdata/Avatars) and
+    small copies of each card's newest posts (Userdata/Previews, table previews). The cards are gone and the page
+    shows a profile picture from the site's own address, through memory. Once: the address the follows list named
+    is taken from `followed`, the cards without one look for it again at the next sync, and the folders go."""
+    con.execute("DROP TABLE IF EXISTS previews")
+    shutil.rmtree(config.PREVIEWS, ignore_errors=True)
+    if con.execute("SELECT 1 FROM settings WHERE key = 'avatars_in_memory'").fetchone():
+        return
+    con.execute("UPDATE artists SET avatar_url = (SELECT f.avatar FROM followed f JOIN sources s ON lower(s.url) = f.url "
+                "WHERE s.artist_id = artists.id AND f.avatar != '' ORDER BY f.rowid DESC LIMIT 1), "
+                "avatar_headers = (SELECT NULLIF(f.headers, '') FROM followed f JOIN sources s ON lower(s.url) = f.url "
+                "WHERE s.artist_id = artists.id AND f.avatar != '' ORDER BY f.rowid DESC LIMIT 1), "
+                "avatar_checked = NULL WHERE avatar_url IS NULL")
+    con.execute("UPDATE artists SET avatar_checked = datetime('now') WHERE avatar_url IS NOT NULL")
+    con.execute("UPDATE artists SET avatar = NULL")
+    shutil.rmtree(config.AVATARS, ignore_errors=True)
+    con.execute("INSERT INTO settings (key, value) VALUES ('avatars_in_memory', '1')")
 
 
 def get_setting(key, default=None):

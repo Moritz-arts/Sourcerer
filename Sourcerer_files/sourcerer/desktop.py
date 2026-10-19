@@ -25,7 +25,7 @@ import webbrowser
 
 from werkzeug.serving import make_server
 
-from . import config, db, follows, net, previews, server, sync
+from . import config, db, follows, net, server, sync
 
 log = logging.getLogger("sourcerer")
 RUNNING = config.USERDATA / "running.json"
@@ -127,12 +127,14 @@ def _custom_frame(window):
         user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int,
                                         ctypes.c_int, wintypes.UINT]
         hwnd = wintypes.HWND(int(window.native.Handle.ToInt64()))
+        server.HWND[0] = hwnd
         GWL_STYLE, WS_CAPTION, WS_THICKFRAME, WS_MINIMIZEBOX, WS_MAXIMIZEBOX = -16, 0x00C00000, 0x00040000, 0x00020000, 0x00010000
         style = user32.GetWindowLongW(hwnd, GWL_STYLE)
         user32.SetWindowLongW(hwnd, GWL_STYLE, (style & ~WS_CAPTION) | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX)
         # SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED
         user32.SetWindowPos(hwnd, None, 0, 0, 0, 0, 0x0002 | 0x0001 | 0x0004 | 0x0010 | 0x0020)
         server.CUSTOM_FRAME = not (user32.GetWindowLongW(hwnd, GWL_STYLE) & WS_CAPTION)
+        server.keep_taskbar(window)               # (Win+Up maximizes too, without the page)
         log.info("window frame: %s", "the page's own bar" if server.CUSTOM_FRAME else "native (could not be removed)")
     except Exception as e:
         server.CUSTOM_FRAME = False
@@ -203,11 +205,9 @@ def main(argv=None):
     # Up to v0.5 the cards' pictures were copied into Userdata/Thumbs; they are
     # made in memory now, and the copies are only clutter.
     shutil.rmtree(config.USERDATA / "Thumbs", ignore_errors=True)
-    sync.name_avatars()
     _after_update()
     net.configure(per_host=db.setting_int("per_host", 1, 32), pace_ms=db.setting_int("pace_ms", 0, 5000))
     sync.scheduler()
-    previews.start()
     follows.start()
     httpd = make_server("127.0.0.1", args.port, server.app, threaded=True)
     url = "http://127.0.0.1:%d/" % httpd.server_port

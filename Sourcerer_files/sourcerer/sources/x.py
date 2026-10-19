@@ -31,6 +31,7 @@ OPTIONS = {"sleep-request": "2.0-4.0", "ratelimit": "abort", "locked": "abort",
 # gap of 2-4 s each, somebody opening an artist waited ten seconds. A person scrolling x.com asks
 # as often, so an open gallery reads at about half that gap -- still random, never regular.
 OPEN_SLEEP = "1.0-2.0"
+FOLLOWS_HOURS = 23        # follows.py reads the list of followed accounts at most this often
 LOGIN = ("required", "X shows a profile's media only to logged-in accounts.")
 FIELDS = {"url": "{_url!j}", "tweet": "{tweet_id!j}", "num": "{num!j}", "key": "{filename!j}",
           "ext": "{extension!j}", "date": '"{date:%Y-%m-%dT%H:%M:%SZ}"', "user": "{author[name]!j}",
@@ -81,6 +82,42 @@ def _run(fn, *args):
         if e.auth:
             raise LoginRequired("X: log in" + (" again" if accounts.logged_in("x") else "")) from e
         raise
+
+
+FOLLOW_TIMEOUT = 900     # seconds: a list of thousands, one request per hundred with gallery-dl's gaps
+
+
+def following(key):
+    """(list name, pages) of the accounts the login follows: [{"url", "name", "avatar"}], newest follow first. The
+    account is told by the login's own `twid` cookie, which gallery-dl takes as `id:<number>` in place of a name.
+    gallery-dl prints the whole list at the end (-j), so it is read in one go -- once a day at most (follows.HOURS)."""
+    twid = accounts.jar("x").get("twid") or ""
+    me = re.sub(r"\D", "", twid.rpartition("%3D")[2] or twid.rpartition("=")[2])
+    if not me or not _gdl.available():
+        return
+
+    def pages():
+        net._stopped("https://x.com")
+        messages = _run(_gdl.info, "https://x.com/id:%s/following" % me, "twitter", _options(), FOLLOW_TIMEOUT)
+        net.spend("https://x.com", max(1, len(messages) // 50))
+        out = []
+        for m in messages:
+            user = m[-1] if m and m[0] == 6 and isinstance(m[-1], dict) else None
+            if not user:
+                continue
+            legacy = user.get("legacy") if isinstance(user.get("legacy"), dict) else {}
+            core = user.get("core") if isinstance(user.get("core"), dict) else {}
+            name = core.get("screen_name") or legacy.get("screen_name") or user.get("screen_name") or user.get("name")
+            if not name or not _URL.match("https://x.com/%s" % name):
+                continue
+            picture = ((user.get("avatar") or {}).get("image_url") or legacy.get("profile_image_url_https") or
+                       user.get("profile_image") or "")
+            out.append({"url": "https://x.com/%s" % name,
+                        "name": core.get("name") or legacy.get("name") or user.get("nick") or name,
+                        "avatar": "" if "default_profile" in picture else picture.replace("_normal.", "_400x400.")})
+        for i in range(0, len(out), 100):
+            yield out[i:i + 100]
+    yield "", pages()
 
 
 def profile(url):

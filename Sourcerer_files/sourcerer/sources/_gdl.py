@@ -207,22 +207,22 @@ def _items(url, section, options, fmt):
         conf.unlink(missing_ok=True)
 
 
-def info(url, section, options):
-    """The JSON gallery-dl gives for a small listing (a profile's info): its messages."""
+def info(url, section, options, timeout=120):
+    """The JSON gallery-dl gives for a small listing (a profile's info, a list of followed accounts): its messages."""
     lock = _site_lock(section)
     if not lock.acquire(timeout=WAIT_INFO):
         raise net.SlowDown("busy with another listing of this site; try again in a moment")
     try:
-        return _info(url, section, options)
+        return _info(url, section, options, timeout)
     finally:
         lock.release()
 
 
-def _info(url, section, options):
+def _info(url, section, options, timeout=120):
     conf = _config(section, options)
     try:
         proc = _start(_command(conf, ["-j"], url))
-        out, err = proc.communicate(timeout=120)
+        out, err = proc.communicate(timeout=timeout)
     finally:
         conf.unlink(missing_ok=True)
     lines = err.decode("utf-8", "replace").splitlines()

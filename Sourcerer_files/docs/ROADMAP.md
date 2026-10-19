@@ -283,7 +283,7 @@ add the one that replaced it.
   at once, with no download, and accounts that belong to one artist must be mergeable. So: after a
   login (and every ~12 h, and when the Settings switch is turned on) Bluesky, Mastodon and pixiv
   list their follows and every account becomes a card once -- *listed* (`artists.listed`): in
-  no sweep (Sync all, automatic sync, previews, All artists) until the user edits, syncs or merges
+  no sweep (Sync all, automatic sync, All artists) until the user edits, syncs or merges
   it or turns auto-download on, because hundreds of cards read in the background would be hundreds
   of requests nobody asked for. What was added is remembered (`followed`), so a deleted card does
   not return. *Merge into...* (menu, `M`) moves a card's sources and files to another. X and Patreon
@@ -361,6 +361,14 @@ add the one that replaced it.
       Merge into... for accounts the sites did not show to be one artist
 - [x] Refresh one artist at a time, the opened artist first; only auto-download cards in sweeps; token logins
       (Bluesky, Mastodon, Misskey, boorus) no longer spaced like cookie logins; a cookie-login gap setting
+- [x] Cards are worked on up to three at once when they share no cookie-login / gallery-dl site; speed settings
+      worked out for the sites' limits (8 downloads, 4 per site, 0.25 s) and the old ones dropped once
+- [x] Sourcerer keeps no pictures: no Avatars, no Previews (the table and the folders go at the start); a profile
+      picture is an address, fetched into memory by /api/avatar
+- [x] Follows of Misskey, Fanbox, Fantia and X become listed cards (X and Patreon were open; Patreon still is)
+- [x] Pixiv's ugoira plays in the viewer (an animated WebP made in memory from pixiv's ZIP)
+- [x] The window maximizes inside the work area (the taskbar stays), a download shows a green ring on its tile, the file's
+      name shows on hover and in the viewer, the order list has four entries, the dot of a site's mark no longer cuts it
 - [x] Misskey login (MiAuth) per server; Fanbox and Fantia as sources with a cookie login
 - [x] Grid pictures in the largest rendition below the original (setting: Sharp / Quick); favorites
       (right-click, key F, star, order *Favorites*)
@@ -383,7 +391,7 @@ add the one that replaced it.
 
 ## Next
 
-- [ ] Follows of X and Patreon (gallery-dl's following list; Patreon's memberships), and a home
+- [ ] Follows of Patreon (memberships), and a home
       timeline ("Following") in Browse that shows the newest posts of everybody a login follows
       with one request per page instead of one source per account.
 - [ ] Standalone builds: an in-program update for macOS, the AppImage and the portable copies

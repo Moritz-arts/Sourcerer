@@ -190,6 +190,33 @@ def _media(work):
     return out
 
 
+MAX_FRAMES, ANIMATION_SIDE = 400, 1280
+
+
+def animation(media):
+    """What the gallery's large view plays for an ugoira (pixiv's animation): one animated WebP made in memory from the
+    ZIP pixiv hands out for viewing (img-original has a request per frame -- that is what a download uses). The
+    still stays the grid's picture. None for any other work."""
+    if not media.remote_key.endswith("_ugoira"):
+        return None
+    import zipfile
+    from PIL import Image
+    wid = media.remote_key.split(":", 1)[1].split("_")[0]
+    meta = _ajax("illust/%s/ugoira_meta" % wid)
+    data = net.fetch_bytes(meta.get("originalSrc") or meta["src"], limit=128 << 20, headers=REFERER)
+    frames, delays = [], []
+    with zipfile.ZipFile(io.BytesIO(data)) as zf:
+        for f in meta["frames"][:MAX_FRAMES]:
+            with Image.open(io.BytesIO(zf.read(f["file"]))) as img:
+                img = img.convert("RGB")
+            img.thumbnail((ANIMATION_SIDE, ANIMATION_SIDE))
+            frames.append(img)
+            delays.append(max(20, int(f["delay"])))        # (browsers play a frame under 20 ms as 100)
+    out = io.BytesIO()
+    frames[0].save(out, format="WEBP", save_all=True, append_images=frames[1:], duration=delays, loop=0, quality=85, method=4)
+    return "image/webp", out.getvalue()
+
+
 _lock = threading.Lock()
 
 

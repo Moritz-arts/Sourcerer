@@ -17,11 +17,11 @@ Sourcerer/                        <- what Sourcerer.zip unpacks to; move it free
     ├─ requirements.txt           the packages, one list for all three systems
     ├─ sourcerer/                 the Python package; layers listed in __init__.py
     │   ├─ config.py              paths, version, user agent, setting defaults
-    │   ├─ db.py                  SQLite: artists, sources, files, failed files, card previews, snapshots, settings
+    │   ├─ db.py                  SQLite: artists, sources, files, failed files, snapshots, settings
     │   │                           (also a site's pause, the day's requests, the next auto sync)
     │   ├─ net.py                 HTTP (requests, TLS 1.3 first): JSON, downloads, per-site
     │   │                           limits, a login's slow lane, site pauses, daily budgets
-    │   ├─ imaging.py             fingerprints, sizes, thumbnails, avatars (Pillow)
+    │   ├─ imaging.py             fingerprints, sizes, small copies made in memory (Pillow)
     │   ├─ sources/               one module per site
     │   │   ├─ __init__.py        Media, site_for, normalize, describe, profile
     │   │   ├─ mastodon.py        Mastodon / fediverse, its API; login per server (OAuth)
@@ -39,12 +39,10 @@ Sourcerer/                        <- what Sourcerer.zip unpacks to; move it free
     │   │                           automatic sync, link checks, profile pictures
     │   ├─ gallery.py             the gallery: all sources of a card in one stream,
     │   │                           straight from the sites, pictures in memory only
-    │   ├─ previews.py            looks at each card's sources in the background and keeps
-    │   │                           their snapshots fresh (its small copies are no longer shown)
     │   ├─ follows.py             the accounts a login follows become listed cards (Bluesky,
-    │   │                           Mastodon, pixiv); nothing is read or downloaded for them
+    │   │                           Mastodon, Misskey, pixiv, X, Fanbox, Fantia); nothing is read or downloaded for them
     │   ├─ snapshots.py           the newest posts of a source as last seen (pickled Media
-    │   │                           in the DB): Browse opens from it, previews use it
+    │   │                           in the DB): Browse opens from it
     │   ├─ accounts.py            logins: login window, cookies.txt, saved cookies
     │   ├─ security.py            master password (salted hash, unlock tokens in memory) and
     │   │                           the reset to a fresh install
@@ -73,9 +71,6 @@ Sourcerer/                        <- what Sourcerer.zip unpacks to; move it free
         │                           steps); setup.log (Inno Setup's own log of an
         │                           in-app update, Windows installed); console.log
         │                           (the program's own output)
-        ├─ Avatars/               profile pictures, <artist>.jpg
-        ├─ Previews/              a cache: <artist id>/<hash>.jpg, the small pictures
-        │                           cards show of posts that are not downloaded
         ├─ gallery-dl/            gallery-dl's cache (its login state) and the
         │                           config of a running listing (mode 600, deleted after)
         ├─ _update/               an update: new/ unpacked, old/ the version it

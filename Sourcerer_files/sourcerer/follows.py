@@ -5,7 +5,7 @@ pixiv list that (`following(key)` in their modules, yielding (list name, pages o
 "avatar"})). Every followed account becomes a card -- once -- so the list fills itself and a source
 needs no pasted link. Such a card is only *listed* (`artists.listed`): nothing reads its sites in
 the background and nothing downloads until the user does something with it, because hundreds of
-cards looked at by every sweep (Sync all, previews, All artists) would be hundreds of requests
+cards looked at by every sweep (Sync all, All artists) would be hundreds of requests
 nobody asked for.
 
 What is added is remembered (`followed`, by lower-cased profile URL), so a card the user deleted
@@ -20,7 +20,8 @@ accounts must be on different sites -- two accounts of one name on one site are 
 
 The lists are the sites' words, not ours: a link is taken only when it is a profile of the list's
 own site (never another site's address, which could cost a request on a login), and a picture only
-from a public https address.
+from a public https address. A card keeps the address of the account's picture (`artists.avatar_url`) and
+nothing else: the page shows it through /api/avatar, in memory.
 """
 import json
 import logging
@@ -35,12 +36,9 @@ from . import accounts, db, net, sources, sync
 
 log = logging.getLogger(__name__)
 HOURS = (10, 14)             # between two looks at the lists, while Sourcerer runs
-TRIES = 2                    # a picture that fails this often is let be
-version = 0                  # counts the changes the page should reload for (cards made, pictures saved)
+version = 0                  # counts the changes the page should reload for (cards made, combined)
 _bumped = 0.0
 _lock = threading.Lock()     # one look at a time
-_pic_lock = threading.Lock()
-_picturer = None
 
 
 def _touch(force=False):
@@ -142,7 +140,8 @@ def _add(page, kind, public, twins=None):
         # Only a profile of the list's own site: normalising another site's address (a pixiv work's)
         # is a request, and a hostile server could name any host.
         # (a Mastodon list names Misskey accounts too: Mastodon follows across the fediverse)
-        if site and (site.KIND == kind or (kind == "mastodon" and site.KIND == "misskey")):
+        # (a Mastodon or Misskey list names accounts of the other kind too: the fediverse follows across both)
+        if site and (site.KIND == kind or {kind, site.KIND} == {"mastodon", "misskey"}):
             host = urllib.parse.urlsplit(raw).hostname or ""
             if host not in public:
                 public[host] = net.public_https(raw)
@@ -164,13 +163,17 @@ def _add(page, kind, public, twins=None):
             have.add(key)
             name, site_kind = _name(f, url), sources.kind_of(url)
             twin = twins.find(name, {site_kind}) if twins else None
+            picture = f.get("avatar") if isinstance(f.get("avatar"), str) and f["avatar"].startswith("https://") else None
             if twin:                                        # the same artist on another site: one card
                 con.execute("INSERT INTO sources (artist_id, url, kind) VALUES (?, ?, ?)", (twin, url, site_kind))
+                if picture:
+                    con.execute("UPDATE artists SET avatar_url = ?, avatar_headers = ? WHERE id = ? AND avatar_url IS NULL",
+                                (picture, json.dumps(headers) if headers else None, twin))
                 twins.attach(twin, site_kind)
                 twins.attached += 1
                 continue
-            artist_id = con.execute("INSERT INTO artists (name, listed) VALUES (?, 1)",
-                                    (_unique(name, url, taken),)).lastrowid
+            artist_id = con.execute("INSERT INTO artists (name, listed, avatar_url, avatar_headers) VALUES (?, 1, ?, ?)",
+                                    (_unique(name, url, taken), picture, json.dumps(headers) if headers and picture else None)).lastrowid
             con.execute("INSERT INTO sources (artist_id, url, kind) VALUES (?, ?, ?)", (artist_id, url, site_kind))
             if twins:
                 twins.register(artist_id, name, True)
@@ -178,69 +181,14 @@ def _add(page, kind, public, twins=None):
             made.append(artist_id)
     if made or (twins and twins.attached):
         _touch()
-        _start_pictures()
     return len(made), bool(page) and known == len(page)
-
-
-# ---- profile pictures ---------------------------------------------------------------
-
-def _pending_picture():
-    with db.connect() as con:
-        return con.execute(
-            "SELECT f.url, f.avatar, f.headers, s.artist_id FROM followed f JOIN sources s ON lower(s.url) = f.url "
-            "JOIN artists a ON a.id = s.artist_id WHERE f.avatar != '' AND f.tried < ? AND a.avatar IS NULL "
-            "ORDER BY f.rowid DESC LIMIT 1", (TRIES,)).fetchone()
-
-
-def _pictures():
-    """The profile pictures the lists named, one at a time and unhurried -- they come from a CDN, but
-    there can be thousands. Found in the table, so a restart carries on and a failure is tried again
-    once; a site that rests ends the run (the next look starts it again)."""
-    global _picturer
-    saved, public = 0, {}
-    while True:
-        row = _pending_picture()
-        if row is None:
-            with _pic_lock:
-                row = _pending_picture()
-                if row is None:
-                    _picturer = None
-                    break
-        try:
-            host = urllib.parse.urlsplit(row["avatar"]).hostname or ""
-            if host not in public:
-                public[host] = net.public_https(row["avatar"])
-            if not public[host]:
-                raise ValueError("not a public https address")
-            sync._save_avatar(row["artist_id"], row["avatar"], json.loads(row["headers"]) if row["headers"] else None)
-            saved += 1
-            if saved % 20 == 0:
-                _touch()
-        except net.SlowDown:
-            with _pic_lock:
-                _picturer = None
-            break
-        except Exception as e:
-            log.info("no profile picture for card %d: %s", row["artist_id"], net.reason(e))
-            with db.connect() as con:
-                con.execute("UPDATE followed SET tried = tried + 1 WHERE url = ?", (row["url"],))
-        time.sleep(random.uniform(0.2, 0.6))
-    if saved:
-        _touch(True)
-
-
-def _start_pictures():
-    global _picturer
-    with _pic_lock:
-        if _picturer is None:
-            _picturer = threading.Thread(target=_pictures, daemon=True, name="follow-pictures")
-            _picturer.start()
 
 
 # ---- the lists ------------------------------------------------------------------------
 
 def _look(key):
     """One login's lists. Returns how many cards they made."""
+    db.set_setting("follows_at:" + key, str(time.time()))
     site, label, total, public, twins = _site(key), accounts.label(key), 0, {}, _Twins()
     # A list read to its end by *this* login (a new login is another account, maybe) may stop early.
     stamp = accounts.saved(key) or "-"
@@ -272,7 +220,6 @@ def combine():
     listed, a card the user made always does; two of the user's cards of one name are left to them (the
     merge dialog suggests it). A card that is syncing is skipped until the next time. Returns how many
     cards went."""
-    from . import previews
     twins, gone, done = _Twins(), set(), 0
     with db.connect() as con:
         listed = [r[0] for r in con.execute("SELECT id FROM artists WHERE listed = 1 ORDER BY id")]
@@ -294,7 +241,6 @@ def combine():
         except (sync.Busy, KeyError, ValueError) as e:
             log.info("cards %d and %d not combined: %s", target, card, e)
             continue
-        previews.forget(card)
         gone.add(card)
         done += 1
         twins.kinds[target] |= twins.kinds[card]
@@ -313,8 +259,10 @@ def look(only=None):
             for key in only or keys():
                 if net.paused(sync._site_url(key)):
                     continue
+                hours = getattr(_site(key), "FOLLOWS_HOURS", 0)      # a list that is costly to read is read less often
+                if hours and not only and time.time() - float(db.get_setting("follows_at:" + key, "0") or 0) < hours * 3600:
+                    continue
                 _look(key)
-        _start_pictures()                    # pictures a rest or a restart left behind
     with _lock:
         combine()
 

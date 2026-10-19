@@ -39,8 +39,10 @@ else:
     USERDATA = ROOT / "Userdata"
 DB_PATH = USERDATA / "sourcerer.db"
 LOG_DIR = USERDATA / "Logs"
+# Sourcerer keeps no pictures of its own. These two folders were made by v0.32 and older (profile pictures, small copies
+# of the newest posts); db.init removes them, and security.wipe still names them.
 AVATARS = USERDATA / "Avatars"
-PREVIEWS = USERDATA / "Previews"     # the pictures cards show before anything is downloaded (a cache)
+PREVIEWS = USERDATA / "Previews"
 # An update is unpacked here: inside Userdata, which the update carries
 # across, so the install folder never shows a stray staging folder.
 UPDATE_DIR = USERDATA / "_update"
@@ -68,9 +70,11 @@ DEFAULTS = {
     "auto_hours": "6",          # how often, in hours
     "import_follows": "1",      # '1': the accounts a login follows become artists in the list (follows.py)
     "last_auto": "",            # when it last did
-    "parallel": "4",            # downloads at once, all sites together
-    "per_host": "2",            # downloads at once from one site
-    "pace_ms": "250",           # pause between two requests to one site
+    # The speed settings: as fast as the sites' limits allow (a site that is touchier -- pixiv, Patreon, X, the
+    # boorus, every login -- keeps its own lower limit, net.HOSTS), so these only rule the sites that carry it.
+    "parallel": "8",            # downloads at once, all sites together
+    "per_host": "4",            # downloads at once from one site
+    "pace_ms": "250",           # pause between two requests to one site (times 1.0-1.6: a random gap, never a regular one)
     "channel": "stable",        # updates: 'stable' (the latest release) or 'beta' (the main branch)
     "gdl_updated": "",          # when gallery-dl was last brought up to date (weekly)
     "update_seen": "",          # the update helper's last run that was already reported

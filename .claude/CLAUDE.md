@@ -385,16 +385,23 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   slowed down (`Locked`, 429). It does **not** encrypt Userdata, and background syncs go on while locked
   (both said in Settings). **Reset** (`/api/reset`, typed `RESET`; works while locked, or a forgotten
   password would end the program) logs out of every site through the site's own `logout` too, deletes
-  every row (`PRAGMA foreign_keys = OFF` first) and the avatars, previews, gallery-dl cache and logs,
+  every row (`PRAGMA foreign_keys = OFF` first) and the gallery-dl cache and logs (and the folders v0.32 and older made),
   then restarts like Repair's restart. **Kept on purpose: the library** (it may be a TrackImage library
   or any folder the user chose; by default it sits inside Userdata, so Userdata is never removed
   whole) **and the backups / the updater's `_update`** ("a backup belongs to the user"). A new
   per-user thing Sourcerer stores belongs in `security.wipe`.
 - **A login's follows are cards, but only *listed* ones** (`follows.py`, `artists.listed`):
-  Bluesky (`getFollows`), Mastodon (`/following`, paged by the Link header: `net.get_json_next`) and
-  pixiv (`user/<id>/following`, public and private list) hand out pages of `{url, name, avatar}`
+  Bluesky (`getFollows`), Mastodon (`/following`, paged by the Link header: `net.get_json_next`),
+  Misskey (`users/following` of the token's own id; a Mastodon list names Misskey accounts and the other way round, so
+  `_add` takes either kind from either list), pixiv (`user/<id>/following`, public and private list), Fanbox
+  (`creator.listFollowing` and `plan.listSupporting`: the second is a bonus, its failure is ignored), Fantia (the plans
+  page `mypage/users/plans`, scraped like gallery-dl does; a fanclub the table `followed` knows costs no request for its
+  name) and X (gallery-dl `-j` on `x.com/id:<twid>/following`: **one go, the whole list**, so `FOLLOWS_HOURS` -- a module's
+  minimum between two looks, X 23 h, Fanbox/Fantia 11 h -- keeps it to once a day; **written from gallery-dl's source, not run
+  against a real X login**) hand out pages of `{url, name, avatar}`
   through `following(key)` -- it yields `(list name, pages)` -- and each account becomes a card once.
-  **A listed card is in no sweep**: `enqueue(None)` (Sync all, automatic sync), `previews._due` and "All
+  Patreon has no list of memberships to read yet.
+  **A listed card is in no sweep**: `enqueue(None)` (Sync all, automatic sync) and "All
   artists" (`gallery._Gallery`) skip `listed = 1`, because a thousand pixiv follows read in the
   background are a thousand requests nobody asked for. Anything the user does with the card clears
   it (`_save` on an edit, auto-download on, `enqueue` of that card by name, a merge); a card made by
@@ -420,10 +427,9 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   list's own site (`follows._add`: another site's address -- a pixiv work's -- would cost a request on
   a login inside a write transaction) and on a public https host (`net.public_https`; checked before
   the request, redirects are not); a Mastodon `Link: rel=next` is followed only on the same https host
-  (`net.get_json_next`), or the login's token would go wherever the server says. Profile pictures
-  come from the list itself, from the table `followed` (`avatar`, `tried`) one at a time by
-  `follows._pictures` -- a restart carries on, a failure is tried once more, a resting site ends the
-  run -- never a profile request per card. Names that would share a folder get the handle added.
+  (`net.get_json_next`), or the login's token would go wherever the server says. A profile picture is only an address:
+  the list's own, kept on the card (`artists.avatar_url`, see *Sourcerer keeps no pictures*) -- never a profile request per
+  card. Names that would share a folder get the handle added.
 - **Merge** (`sync.merge`, `/api/artists/<id>/merge`): the card's sources and files move to the picked
   card and the card is deleted; a link both have stays once; a file only the other card holds goes to
   the record of the same post that has none; downloaded files keep their paths (the old folder stays
@@ -537,8 +543,8 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
 - **Snapshots are the shared "newest posts"** (`snapshots.py`, table
   `snapshots`, one row per source, at most `KEEP` posts, merged so a short look
   does not throw away a longer one). Sync (`_scan` of a site that does not skip
-  known posts, `_glance`), the previews worker and Browse all write them;
-  Browse and the previews read them. They are **pickled `Media`** (pixiv's
+  known posts, `_glance`) and Browse write them;
+  Browse reads them. They are **pickled `Media`** (pixiv's
   `fetch` is a `functools.partial`; a closure or lambda would not pickle -- the
   snapshot is then simply not kept), read back through an unpickler that builds
   only what `snapshots.ALLOWED` names (`Media`, pixiv's two fetch functions,
@@ -575,13 +581,13 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   are Simple Icons (CC0, symbols `l-<site>` in the sprite; `SITE_LOGOS` in `app.js` maps a
   source's `LABEL` to one, a site without one shows its name). The forum and the booru draw a
   Tabler icon in their own colour. A new site adds its symbol there.
-- **Browse's list** (`renderBrowseList`): the order (*Alphabetic | Latest activity | Source | Source
-  (logo) | Image count | Downloads | Downloads (%)*) and the number beside a name (*Sources | Images |
-  Downloads | Downloads (%)*) are kept in localStorage; ordering by a number switches the number to it.
+- **Browse's list** (`renderBrowseList`): the order (*Alphabetic | Latest activity | Favorites | Source*; the logo
+  is part of Source's group heads) and the number beside a name (*Sources | Images | Downloads | Downloads (%)*, the
+  second choice) are kept in localStorage; the numbers are never an order (the user's wish: two clean lists).
   **Latest activity** is `activityKey`: the newest post a look saw (`sources.latest`, set by
   `snapshots.save` from the posts' dates), else the last download or look; a card with nothing known goes
   last -- its `created` is the day it was imported, and as a sort key it put every imported follow first.
-  *Source* groups under the site's name, a line and a count, *Source (logo)* adds the mark; an artist stands once,
+  *Source* groups under the site's mark, name, a line and a count; an artist stands once,
   under its master source, else its first readable one, no source last. **Images is the total, not what
   is downloaded**: `file_count + pending` (what the last look counted as still to download; a look reads
   the newest `REFRESH_ITEMS` posts of a source, so a long history shows a "+"), Downloads is `file_count`, the
@@ -615,8 +621,11 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   `/api/window`, `applyFrame`): `WS_CAPTION` is taken off the form (`WS_THICKFRAME` stays, so the edges still resize) and
   the style is read back -- only then does `/api/state` say `frame: "custom"`, the page draws minimize / maximize / close
   at its right edge and marks its bar as pywebview's drag region (`DRAG_REGION_DIRECT_TARGET_ONLY`: a drag starts on the
-  bar, not on its buttons; a double-click maximizes). If anything fails the native bar stays and nothing is doubled. Not seen
-  on a real Windows desktop yet. macOS and Linux keep their native bars.
+  bar, not on its buttons; a double-click maximizes). If anything fails the native bar stays and nothing is doubled. **A window without WS_CAPTION maximizes over the
+  whole monitor, taskbar included** (the user saw it): `server.keep_taskbar` gives the form `MaximizedBounds` -- the monitor's work
+  area as an offset from the monitor, found through user32 with the handle kept from the window's own thread
+  (`server.HWND`; `native.Handle` on a server thread may be refused) -- once when the bar is taken off and before every
+  maximize. Not seen on a real Windows desktop yet. macOS and Linux keep their native bars.
 - **Keys act on the open artist** (`S.brArtist`, `artistAct`): there is no card selection any
   more -- the cards' keys once did nothing in Browse, which was the "shortcuts don't work".
   Up/Down/Home/End pick the previous or next artist (the gallery opens 250 ms after the last key),
@@ -649,18 +658,26 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   deliberate: gallery-dl keeps its own browser emulation for X (a logged-in
   web session), and a forum's Cloudflare pass is sent with the login
   window's own User-Agent, which it is bound to.
-- **Refresh is one artist at a time, in an order that does not wait** (`sync._pick`, `_focused`, `focus`): the queue is
-  taken in order, except that the card Browse just opened goes first (`/api/sync/focus` from `browseOpen`; its sites'
-  pauses are the short `FOCUS_GAP`) and a card whose *careful*-login site is still cooling from the last card yields to
-  the first of the next `PICK_FROM` whose sites are not (so 100 pixiv cards no longer hold the Bluesky ones up).
+- **Refresh works on up to `WORKERS` (3) cards at once -- on different sites** (`sync._pick`, `_spawn`, `_running`,
+  `_cancels`; the page's `S.sync.active`): a card never starts while another running one shares an *exclusive* site
+  (`sync._exclusive`: a cookie login's, or one gallery-dl reads -- `GDL_KINDS` -- whose lock would turn a second listing
+  away), so an X artist's long download no longer holds pixiv up and nobody reads one account's site twice at once; the
+  other sites' lanes (`net`) pace whoever comes. A card just picked counts as running (`_starting`) before its sync begins,
+  or two workers would both take pixiv. Cancel is per card (`_cancels[artist_id]`, `_cancelled(cur)`); "Cancel" in the
+  activity bar cancels every running card. The queue is taken in order, except that the card Browse just opened goes first
+  (`/api/sync/focus` from `browseOpen`; its sites' pauses are the short `FOCUS_GAP`) and a card whose *careful*-login site
+  is still cooling from the last card yields to the first of the next `PICK_FROM` whose sites are not (so 100 pixiv cards
+  no longer hold the Bluesky ones up).
   A card's sources on different sites are read side by side (`_sync_artist.look_site`; the ones on one site one after the
   other); a look stops at the first page whose oldest post is in the library (`_glance`: an up-to-date card is one request per
   source -- 2 s for three sources, it was a minute). **Only a cookie login is spaced out between artists**
   (`accounts.careful`: pixiv, X, Patreon, Fanbox, Fantia, forums; `LOGIN_GAPS`, Settings > Sites & network
-  *Gap between artists on a cookie login*, default `normal` 10-40 s): a token or key (Bluesky, Mastodon, Misskey, boorus) is an API
+  *Gap between artists on a cookie login*, default `normal` 10-40 s -- the other speed settings were worked out the same way
+  in v0.33: 8 downloads at once, 4 per site, 0.25 s between requests (times 1.0-1.6), `net.HOSTS` keeping the touchy hosts
+  lower; `db.init` dropped what was saved before, once, `speed_defaults_v2`): a token or key (Bluesky, Mastodon, Misskey, boorus) is an API
   client with published limits and only gets `net.TOKEN_PACE` between requests, no reading breaks, no gap between cards
-  (`net._carries_login` says `True` / `"token"` / `False`; the token lane has its own key in `_hosts`). Previews and
-  galleries use the same test.
+  (`net._carries_login` says `True` / `"token"` / `False`; the token lane has its own key in `_hosts`). Galleries use
+  the same test.
 - **A logged-in account is what gets banned, so a login has its own lane**
   (`net._Polite`, `login=True`, cookie logins only): one request at a time, `LOGIN_PACE` after
   the previous one *ended* (a slow download must not let the next request
@@ -765,33 +782,17 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   back as a default (it would stop the `load` handler learning the real one), and
   `.gal-body` always shows its scrollbar (`overflow-y: scroll`): one that comes and goes
   changes the width the rows are laid out for, and the layout flickered for ever.
-- **Previews** (`previews.py`) once drew the 4 newest posts on a card; **the cards are gone, the
-  page no longer shows them** (`/api/state` no longer carries `thumbs`: with a thousand cards their two queries each were most of the
-  answer). They stay because their look at
-  a card's sources keeps its snapshots fresh, which is what lets Browse open at once -- but the
-  small JPEGs they make are now wasted requests: a candidate for trimming. How it works: one card at a
-  time in the background (`previews._loop`),
-  the first page of each source through the same lanes as a sync, a small JPEG
-  of each in `Userdata/Previews/<artist>/` (a cache: safe to delete, goes with
-  the card) and the rows in the `previews` table. A post that is downloaded shows
-  the library's copy (`card_thumbs` merges both, newest first), so a fresh
-  download appears at once. Sites that rest and logins that ran out are skipped;
-  a card is looked at again after `REFRESH_HOURS` only (`artists.previews_at`).
-  Previews read the sources' **snapshots** first (`snapshots.py`): a snapshot
-  younger than `REFRESH_HOURS` costs no request, so a card that was synced or
-  browsed needs no look of its own. A source behind a login is where an account
-  gets locked: a card never looked at (or never synced and without a snapshot)
-  gets one first look, after that the site is read only for a card somebody just
-  made or changed, or while automatic sync is on -- otherwise the old snapshot
-  stands in. Cards of one login site are spaced like sync's (`sync.next_card()`):
-  `previews._ready` says no, `refresh` puts the card in `_later` with the reason it was
-  asked for (forced or not), does not stamp `previews_at`, and `_next` brings it back
-  after `LATER_SECONDS` while the worker goes on to a card of another site. A sync's
-  `previews.soon(forced=False)` only reads the fresh snapshots -- it never reads a login
-  site the sync left alone. Posts are
-  ordered by their UTC time, not their text (`previews._order`). The page
-  never asks a site for a card picture -- it only reads what is kept, and
-  `previews.version` in `/api/sync` makes it reload its cards when that moves.
+- **Sourcerer keeps no pictures of its own** (the user's rule, v0.33): no thumbnails, no previews, no profile pictures on
+  disk. v0.32 and older kept `Userdata/Avatars/<artist>.jpg` and `Userdata/Previews/<artist>/*.jpg` (the cards' small
+  copies of the newest posts, which nothing showed any more, made by a background look at *every* card -- `previews.py`, now
+  gone); `db._forget_what_was_kept` drops the table and the folders at the start and fills `artists.avatar_url` /
+  `avatar_headers` from `followed` once (marker `avatars_in_memory`). A profile picture is **an address** the site named
+  (`sync._set_avatar`, from a follow list, `check_card`, `refresh_avatar` at a sync, `backfill_avatars` for cards made by
+  hand, one every 4-9 s through sites that are no login risk; opening an artist asks too), and `/api/avatar/<id>` fetches it
+  into an LRU in memory (`server._avatars`, 128 px JPEG, `AVATARS_KEPT`), through the preview lane, only for a public https
+  host (`net.public_https`, per host for the run), a failure not retried for 10 minutes; the page's `<img>` falls back to
+  the initials (`avatarFail`). What is saved on disk is what the user asked for: downloads, the database, logins, logs and
+  gallery-dl's login cache. A new thing that wants a file for a picture is a mistake.
 - **The page reloads `/api/state` at most every `LOAD_GAP` while a sync runs** (`loadSoon`): a sync
   changes the poll's key at nearly every card, and each reload was the whole state (a thousand cards,
   1.5 MB) parsed and redrawn -- the window stopped answering during "Refresh" of everything. The answer
@@ -808,6 +809,17 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   the stage's images; a drag's own click must not close the view: `Z.moved`); a new picture starts unzoomed.
   *Settings > Appearance > Site mark on the pictures* (`tile_logo`) hides the mark in the corner of the
   grid's tiles (`.no-tile-logo` on `<html>`); in "All artists" the artist's name stays.
+- **A tile's download shows its progress, and a tile says its file's name.** `net.watching(fn)` (a thread-local) hears
+  every chunk `net._stream` writes with the Content-Length; `gallery.download` keeps `(done, total)` per item
+  (`_Gallery.progress`) and `/api/gallery/progress` hands it out; the page asks every 350 ms while a download of the open
+  gallery runs (`galProgress`) and draws a green ring round the tile's button (`--p`, 0-100; a turning arc when the site
+  does not say how big the file is, `.indet`); the picture is not greyed. `item.fname` is the site's name for the file
+  (`gallery._fname`: `Media.filename`, else the address's last part if it looks like a file, else the post's short id), shown
+  along the top of a tile on hover and in the viewer's info line. **Pixiv's ugoira** plays in the viewer: the large view
+  asks `site.animation(media)` (`pixiv.animation`: pixiv's viewing ZIP -- one request, `originalSrc` -- into an animated WebP
+  in memory, at most 400 frames and 1280 px) while the grid keeps the still; a download still builds the lossless WebP from
+  the original frames (`_fetch_ugoira`). **Double-click** on the viewer's picture zooms or, when zoomed (also by the wheel),
+  fits it again; it is read from the mouse-downs too (`zoomToggle`) and a click within 700 ms of it never closes the view.
 - **The gallery fetches only what a listing handed out.** The proxy
   (`/api/gallery/<gallery>/<n>/thumb|large`) takes an item number, never a
   URL: any page could otherwise make Sourcerer fetch with the user's
@@ -920,7 +932,7 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   in the card's folder (`_local_names`, `Media.local`) is taken over.
 - **Never key a cached picture by row id alone.** SQLite hands out a deleted
   row's id again. Card pictures of downloads are made in memory from them
-  (`imaging.preview`, `?v=<sha>`); avatars are `Avatars/<artist>.jpg`.
+  (`imaging.preview`, `?v=<sha>`).
 - **A pasted link is normalised before it is stored.** `sources.normalize`
   turns any page of a profile (`/media`, a post) into the profile; dedupe
   happens after that. `remote_key` is untouched by it.

@@ -73,7 +73,7 @@
     <img class="logo" src="/static/logo.svg" alt="">
     <span class="brand">Sourcerer</span><span id="version" class="muted small"></span>
     <span class="grow"></span>
-    <button id="btn-sync-all" title="Refresh every artist with auto-download: look for new posts and download them, one artist after the other (F5). Other artists are looked at when you open them or refresh them yourself."><svg class="ic"><use href="#i-refresh"/></svg> Refresh</button>
+    <button id="btn-sync-all" title="Refresh every artist with auto-download: look for new posts and download them, one artist after the other (F5). Other artists are looked at when you open them or refresh them yourself."><svg class="ic"><use href="#i-refresh"/></svg> Refresh all</button>
     <button id="btn-accounts" title="Log in to your sites and keep the logins working"><svg class="ic"><use href="#i-key"/></svg> Manage Accounts<span id="acc-count" class="count hidden"></span></button>
     <button id="btn-quit" class="icon hidden" aria-label="Quit" title="Quit Sourcerer"><svg class="ic"><use href="#i-power"/></svg></button>
     <button id="btn-settings" class="icon" aria-label="Settings" title="Settings (Ctrl+,)"><svg class="ic"><use href="#i-settings"/></svg><span id="update-dot" class="dot hidden"></span></button>
@@ -98,10 +98,6 @@
           <option value="activity">Latest activity</option>
           <option value="favorites">Favorites</option>
           <option value="source">Source</option>
-          <option value="logo">Source (logo)</option>
-          <option value="images">Image count</option>
-          <option value="downloads">Downloads</option>
-          <option value="percent">Downloads (%)</option>
         </select>
         <select id="br-count" aria-label="The number beside each artist" title="The number beside each artist">
           <option value="sources">Sources</option>
@@ -150,7 +146,7 @@
       <div id="empty" class="empty hidden">
         <img class="logo-hero" src="/static/logo.svg" alt="">
         <h2>No artists yet</h2>
-        <p>Log in under Manage Accounts and the artists you follow on Bluesky, Mastodon and pixiv show up here
+        <p>Log in under Manage Accounts and the artists you follow on Bluesky, Mastodon, Misskey, pixiv, X, Fanbox and Fantia show up here
            by themselves. Or create a card and add the places an artist posts. Sourcerer downloads every
            picture and video from there into your library &ndash; and on every sync, only what is new.</p>
         <button type="button" class="primary" id="empty-add"><svg class="ic"><use href="#i-plus"/></svg> Create the first card</button>
@@ -365,7 +361,7 @@
         <h3>Sync</h3>
         <div class="row">
           <div><div class="row-title">Add the accounts I follow</div>
-            <p class="hint">After a login, and every half day, the accounts you follow on Bluesky, Mastodon and pixiv
+            <p class="hint">After a login, and every half day, the accounts you follow on Bluesky, Mastodon, Misskey, pixiv, X, Fanbox and Fantia
                join the list as artists. Nothing is read or downloaded for them until you open one or do something with it.</p></div>
           <label class="switch"><input type="checkbox" id="set-follows"><span></span></label>
         </div>
