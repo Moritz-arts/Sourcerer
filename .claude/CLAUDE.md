@@ -527,10 +527,12 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
 - **Browse's list** (`renderBrowseList`): the order (*Alphabetic | Latest activity*, by
   `activityOf`, | *Source*: groups under the site's logo, name, count and a line; an artist stands once,
   under its master source, else its first readable one, no source last) and the number beside a name (*Sources | Images*) are kept in localStorage. The
-  **auto-download cloud is always there, never a choice of the number**: green (`--dot-ok`) when
-  the card downloads by itself, dark grey when not; the artist's right-click menu (edit,
-  auto-download, refresh, download, open folder, merge, delete -- the same keys `Enter A U D O M Del`)
-  turns it on and off. A card that syncs shows a ring in place of its number. The list is
+  **green auto-download cloud marks a card that downloads by itself, and only that** (no grey one
+  for the others, and never a choice of the number); the switch *Auto-download* beside the head's
+  Download button (`#br-auto`) and the artist's right-click menu (edit, auto-download, refresh,
+  download, open folder, merge, delete -- the same keys `Enter A U D O M Del`) turn it on and off.
+  **There is no "Download all"**: the toolbar's Refresh (F5, Ctrl+R) looks at every card, and the
+  ones with auto-download on download what they find -- nothing downloads every artist on one click. A card that syncs shows a ring in place of its number. The list is
   replaced only when its markup changed (it is redrawn on every poll while a sync runs, and
   replacing it swallowed a click that began before). The *Add artist* button at the bottom
   opens the new-card dialog.
@@ -671,7 +673,8 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   `.gal-body` always shows its scrollbar (`overflow-y: scroll`): one that comes and goes
   changes the width the rows are laid out for, and the layout flickered for ever.
 - **Previews** (`previews.py`) once drew the 4 newest posts on a card; **the cards are gone, the
-  page no longer shows them** (`/api/state` still carries `thumbs`). They stay because their look at
+  page no longer shows them** (`/api/state` no longer carries `thumbs`: with a thousand cards their two queries each were most of the
+  answer). They stay because their look at
   a card's sources keeps its snapshots fresh, which is what lets Browse open at once -- but the
   small JPEGs they make are now wasted requests: a candidate for trimming. How it works: one card at a
   time in the background (`previews._loop`),
@@ -696,6 +699,16 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   ordered by their UTC time, not their text (`previews._order`). The page
   never asks a site for a card picture -- it only reads what is kept, and
   `previews.version` in `/api/sync` makes it reload its cards when that moves.
+- **The page reloads `/api/state` at most every `LOAD_GAP` while a sync runs** (`loadSoon`): a sync
+  changes the poll's key at nearly every card, and each reload was the whole state (a thousand cards,
+  1.5 MB) parsed and redrawn -- the window stopped answering during "Refresh" of everything. The answer
+  itself is one query for all sources, not one per card. A new per-card query in `server._artists` is a
+  freeze waiting for a long list.
+- **Right-click on a picture**: the grid offers *Download this picture*, the viewer also *Copy picture*
+  (`#picmenu`, `galCopy`: fetched through `/api/gallery/<g>/<n>/large` -- a CDN's own picture would taint the
+  canvas -- converted to PNG, the one format every program takes from the clipboard). The viewer's bottom
+  bar starts with the site's mark, then the artist's picture and name; the X that closes a dialog or
+  the picture is red.
 - **The gallery fetches only what a listing handed out.** The proxy
   (`/api/gallery/<gallery>/<n>/thumb|large`) takes an item number, never a
   URL: any page could otherwise make Sourcerer fetch with the user's
