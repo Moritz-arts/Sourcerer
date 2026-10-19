@@ -44,6 +44,8 @@ Sourcerer/                        <- what Sourcerer.zip unpacks to; move it free
     │   ├─ snapshots.py           the newest posts of a source as last seen (pickled Media
     │   │                           in the DB): Browse opens from it, previews use it
     │   ├─ accounts.py            logins: login window, cookies.txt, saved cookies
+    │   ├─ security.py            master password (salted hash, unlock tokens in memory) and
+    │   │                           the reset to a fresh install
     │   ├─ updater.py             updates and repair: Sourcerer.zip, the helper
     │   ├─ server.py              Flask: /api/* and the page
     │   └─ desktop.py             main(): server thread, window or browser

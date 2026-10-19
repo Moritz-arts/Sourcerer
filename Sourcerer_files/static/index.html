@@ -43,6 +43,7 @@
   <symbol id="i-palette" viewBox="0 0 24 24"><path d="M12 21a9 9 0 0 1 0 -18c4.97 0 9 3.582 9 8c0 1.06 -.474 2.078 -1.318 2.828c-.844 .75 -1.989 1.172 -3.182 1.172h-2.5a2 2 0 0 0 -1 3.75a1.3 1.3 0 0 1 -1 2.25"/><path d="M7.5 10.5a1 1 0 1 0 2 0a1 1 0 1 0 -2 0"/><path d="M11.5 7.5a1 1 0 1 0 2 0a1 1 0 1 0 -2 0"/><path d="M15.5 10.5a1 1 0 1 0 2 0a1 1 0 1 0 -2 0"/></symbol>
   <symbol id="i-tool" viewBox="0 0 24 24"><path d="M7 10h3v-3l-3.5 -3.5a6 6 0 0 1 8 8l6 6a2 2 0 0 1 -3 3l-6 -6a6 6 0 0 1 -8 -8l3.5 3.5"/></symbol>
   <symbol id="i-world" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0"/><path d="M3.6 9h16.8"/><path d="M3.6 15h16.8"/><path d="M11.5 3a17 17 0 0 0 0 18"/><path d="M12.5 3a17 17 0 0 1 0 18"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><path d="M5 13a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2v6a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2z"/><path d="M11 16a1 1 0 1 0 2 0a1 1 0 0 0 -2 0"/><path d="M8 11v-4a4 4 0 1 1 8 0v4"/></symbol>
   <symbol id="i-copy" viewBox="0 0 24 24"><path d="M7 9.667a2.667 2.667 0 0 1 2.667 -2.667h8.666a2.667 2.667 0 0 1 2.667 2.667v8.666a2.667 2.667 0 0 1 -2.667 2.667h-8.666a2.667 2.667 0 0 1 -2.667 -2.667z"/><path d="M4.012 16.737a2.005 2.005 0 0 1 -1.012 -1.737v-10c0 -1.1 .9 -2 2 -2h10c.75 0 1.158 .385 1.5 1"/></symbol>
   <symbol id="i-cloud-down" viewBox="0 0 24 24"><path d="M19 18a3.5 3.5 0 0 0 0 -7h-1a5 4.5 0 0 0 -11 -2a4.6 4.4 0 0 0 -2.1 8.4"/><path d="M12 13l0 9"/><path d="M9 19l3 3l3 -3"/></symbol>
   <symbol id="i-external" viewBox="0 0 24 24"><path d="M12 6h-6a2 2 0 0 0 -2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-6"/><path d="M11 13l9 -9"/><path d="M15 4h5v5"/></symbol>
@@ -299,10 +300,17 @@
       <button data-pane="sync"><svg class="ic"><use href="#i-refresh"/></svg> Sync</button>
       <button data-pane="network"><svg class="ic"><use href="#i-world"/></svg> Sites &amp; network</button>
       <button data-pane="appearance"><svg class="ic"><use href="#i-palette"/></svg> Appearance</button>
+      <button data-pane="security"><svg class="ic"><use href="#i-lock"/></svg> Security</button>
       <button data-pane="keys"><svg class="ic"><use href="#i-keyboard"/></svg> Keyboard &amp; mouse</button>
       <button data-pane="updates"><svg class="ic"><use href="#i-cloud-down"/></svg> Updates<span id="update-dot-2" class="dot hidden"></span></button>
       <button data-pane="repair"><svg class="ic"><use href="#i-tool"/></svg> Repair</button>
       <button data-pane="about"><svg class="ic"><use href="#i-info"/></svg> About</button>
+      <div class="promo">
+        <div class="promo-head"><svg class="ic"><use href="#i-photo"/></svg><b>TrackImage</b></div>
+        <p>Your local, danbooru-style image library: tags, duplicates, a gallery you can search. No account,
+           no cloud, no telemetry. What Sourcerer downloads fits right in.</p>
+        <button type="button" class="primary" id="promo-go"><svg class="ic"><use href="#i-external"/></svg> Get TrackImage</button>
+      </div>
     </nav>
     <div class="panes">
       <section data-pane="library">
@@ -350,9 +358,11 @@
         </div>
         <div class="row">
           <div><div class="row-title">Parallel downloads</div>
-            <p class="hint">Files downloaded at the same time. More is faster on a fast line.</p></div>
+            <p class="hint">Files downloaded at the same time. More is faster on a fast line; a very high number
+               only helps with many artists at once, and some sites then slow down or refuse you.</p></div>
           <select id="set-parallel" class="narrow">
             <option>1</option><option>2</option><option>4</option><option>6</option><option>8</option>
+            <option>12</option><option>16</option><option>24</option><option>32</option><option>48</option><option>64</option>
           </select>
         </div>
       </section>
@@ -365,9 +375,11 @@
           an account is never mistaken for an attack.</p>
         <div class="row">
           <div><div class="row-title">Connections per site</div>
-            <p class="hint">Requests to one site at the same time.</p></div>
+            <p class="hint">Requests to one site at the same time. Sites that are touchy about it (pixiv, Patreon, logins)
+               keep their own lower limit whatever this says.</p></div>
           <select id="set-perhost" class="narrow">
-            <option>1</option><option>2</option><option>3</option><option>4</option>
+            <option>1</option><option>2</option><option>3</option><option>4</option><option>6</option>
+            <option>8</option><option>12</option><option>16</option><option>24</option><option>32</option>
           </select>
         </div>
         <div class="row">
@@ -396,6 +408,37 @@
           <div><div class="row-title">Site mark on the pictures</div>
             <p class="hint">Shows which site a picture comes from, in its corner. In &ldquo;All artists&rdquo; the artist's name stays.</p></div>
           <label class="switch"><input type="checkbox" id="set-tilelogo"><span></span></label>
+        </div>
+      </section>
+
+      <section data-pane="security">
+        <h3>Security</h3>
+        <div class="field">
+          <div class="row-title">Master password</div>
+          <p class="hint" id="sec-state"></p>
+          <p class="hint">It stops other people from using Sourcerer's window. Your files in Userdata are not encrypted,
+             and a sync that is set to run on its own keeps running while Sourcerer is locked.</p>
+          <div class="sec-form">
+            <input type="password" id="sec-current" placeholder="Current password" autocomplete="current-password">
+            <input type="password" id="sec-new" placeholder="New password" autocomplete="new-password">
+            <input type="password" id="sec-repeat" placeholder="New password again" autocomplete="new-password">
+            <div class="sec-buttons">
+              <button type="button" class="primary" id="sec-save">Set password</button>
+              <button type="button" id="sec-remove" class="hidden">Remove password</button>
+              <button type="button" id="sec-lock" class="hidden"><svg class="ic"><use href="#i-lock"/></svg> Lock now</button>
+            </div>
+          </div>
+        </div>
+        <div class="field danger-zone">
+          <div class="row-title">Reset Sourcerer</div>
+          <p class="hint">Starts over as if it had just been installed: logs out of every site (and tells the site, where it
+             has a way), forgets all artists, their sources and the settings, removes the master password, the profile
+             pictures, caches and log files, and restarts. <b>Your downloaded pictures stay</b> in the library folder, and so do
+             the backups of the updater; delete those yourself if you want them gone. This cannot be undone.</p>
+          <div class="sec-form">
+            <input type="text" id="reset-confirm" placeholder="Type RESET to confirm" autocomplete="off">
+            <div class="sec-buttons"><button type="button" class="danger" id="reset-go" disabled>Reset Sourcerer</button></div>
+          </div>
         </div>
       </section>
 
@@ -481,6 +524,25 @@
     </div>
   </div>
 </dialog>
+
+<div id="lock" class="overlay lock hidden"><div class="overlay-box">
+  <img class="logo-hero" src="/static/logo.svg" alt="">
+  <h2>Sourcerer is locked</h2>
+  <form id="lock-form">
+    <input type="password" id="lock-pass" placeholder="Master password" autocomplete="current-password">
+    <button type="submit" class="primary">Unlock</button>
+  </form>
+  <p id="lock-msg" class="error"></p>
+  <button type="button" class="linky" id="lock-forgot">Forgot the password?</button>
+  <div id="lock-reset" class="hidden">
+    <p class="hint">The only way back in is to start over: this logs out of every site, forgets all artists and settings
+       and removes the password. Your downloaded pictures stay in the library folder.</p>
+    <form id="lock-reset-form">
+      <input type="text" id="lock-reset-confirm" placeholder="Type RESET" autocomplete="off">
+      <button type="submit" class="danger">Reset Sourcerer</button>
+    </form>
+  </div>
+</div></div>
 
 <div id="overlay" class="overlay hidden"><div class="overlay-box">
   <img class="logo-hero spin" src="/static/logo.svg" alt="">

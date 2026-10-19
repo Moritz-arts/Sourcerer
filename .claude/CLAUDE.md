@@ -375,6 +375,21 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
 
 ### Program
 
+- **The master password gates the server, not just the page** (`security.py`, `server._locked`): set in
+  Settings > Security it is kept as a salted PBKDF2 hash in the settings table (a key outside
+  `config.DEFAULTS`, so `/api/settings` never shows it); until somebody has unlocked, every call but
+  `_OPEN` (the page, `/api/ping`, `/api/focus`, the lock's own calls and `/api/reset`) answers 401 with
+  `locked: true`, which the page turns into the lock screen (`lockedNow`; it also asks before it loads
+  anything at the start). An unlock is a random token in memory, sent as an HttpOnly SameSite=Strict
+  cookie -- a restart locks again, another program calling the API has no cookie -- and wrong tries are
+  slowed down (`Locked`, 429). It does **not** encrypt Userdata, and background syncs go on while locked
+  (both said in Settings). **Reset** (`/api/reset`, typed `RESET`; works while locked, or a forgotten
+  password would end the program) logs out of every site through the site's own `logout` too, deletes
+  every row (`PRAGMA foreign_keys = OFF` first) and the avatars, previews, gallery-dl cache and logs,
+  then restarts like Repair's restart. **Kept on purpose: the library** (it may be a TrackImage library
+  or any folder the user chose; by default it sits inside Userdata, so Userdata is never removed
+  whole) **and the backups / the updater's `_update`** ("a backup belongs to the user"). A new
+  per-user thing Sourcerer stores belongs in `security.wipe`.
 - **A login's follows are cards, but only *listed* ones** (`follows.py`, `artists.listed`):
   Bluesky (`getFollows`), Mastodon (`/following`, paged by the Link header: `net.get_json_next`) and
   pixiv (`user/<id>/following`, public and private list) hand out pages of `{url, name, avatar}`

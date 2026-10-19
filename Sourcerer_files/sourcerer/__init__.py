@@ -12,6 +12,7 @@ Layers, each importing only the ones above it:
     sync       runs the sources of an artist, downloads what is new, dedupes
     previews   the newest pictures of a card, found on the sites before any download
     follows    the accounts a login follows, made into listed cards (nothing read for them)
+    security   the master password (the server answers 401 until it is given) and the reset
     updater    updates and repair: Sourcerer.zip, swapped in by a helper
     server     the Flask app the window talks to (API + static files)
     desktop    main(): starts the server, opens the window or the browser

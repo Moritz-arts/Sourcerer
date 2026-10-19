@@ -17,7 +17,7 @@ import urllib.parse
 
 from flask import Flask, abort, jsonify, request, send_file, send_from_directory
 
-from . import accounts, config, db, follows, gallery, imaging, net, previews, sources, sync, updater
+from . import accounts, config, db, follows, gallery, imaging, net, previews, security, sources, sync, updater
 
 log = logging.getLogger(__name__)
 app = Flask(__name__, static_folder=None)
@@ -30,8 +30,8 @@ DEDUPES = ("keep_all", "best", "master")
 CHOICES = {"filenames": ("original", "dated"), "theme": ("system", "light", "dark"),
            "auto_sync": ("0", "1"), "import_follows": ("0", "1"), "channel": ("stable", "beta"),
            "tile_logo": ("0", "1")}
-RANGES = {"card_size": (160, 800), "auto_hours": (1, 168), "parallel": (1, 16),
-          "per_host": (1, 8), "pace_ms": (0, 5000)}
+RANGES = {"card_size": (160, 800), "auto_hours": (1, 168), "parallel": (1, 64),
+          "per_host": (1, 32), "pace_ms": (0, 5000)}
 
 
 def _background(fn, *args):
@@ -213,6 +213,86 @@ def _same_origin():
     if seen is not None and (seen.hostname not in _LOCAL or seen.port != host.port):
         abort(403)
     return None
+
+
+# What answers while the master password has not been given: the page itself, the launcher's ping and
+# focus, the lock's own calls, and the reset (the way out of a forgotten password).
+_OPEN = ("/", "/favicon.ico", "/api/ping", "/api/focus", "/api/lock", "/api/unlock", "/api/reset")
+
+
+@app.before_request
+def _locked():
+    if not security.enabled() or request.path in _OPEN or request.path.startswith("/static/"):
+        return None
+    if security.valid(request.cookies.get(security.COOKIE)):
+        return None
+    return jsonify(error="Sourcerer is locked.", locked=True), 401
+
+
+def _unlocked_answer(token, **fields):
+    resp = jsonify(ok=True, **fields)
+    if token:
+        resp.set_cookie(security.COOKIE, token, httponly=True, samesite="Strict")
+    else:
+        resp.delete_cookie(security.COOKIE)
+    return resp
+
+
+@app.get("/api/lock")
+def lock_state():
+    on = security.enabled()
+    return jsonify(enabled=on, locked=on and not security.valid(request.cookies.get(security.COOKIE)))
+
+
+@app.post("/api/unlock")
+def unlock():
+    try:
+        token = security.unlock(str((request.get_json(silent=True) or {}).get("password") or ""))
+    except security.Locked as e:
+        return jsonify(error=str(e), wait=e.wait), 429
+    if token is None:
+        return jsonify(error="That is not the password."), 401
+    return _unlocked_answer(token)
+
+
+@app.post("/api/security/password")
+def master_password():
+    """Set, change or (new empty) remove the master password; the one who does it stays unlocked."""
+    body = request.get_json(silent=True) or {}
+    try:
+        token = security.set_password(str(body.get("new") or ""), str(body.get("current") or ""))
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
+    return _unlocked_answer(token, enabled=security.enabled())
+
+
+@app.post("/api/security/lock")
+def lock_now():
+    security.lock(request.cookies.get(security.COOKIE))
+    return _unlocked_answer(None)
+
+
+@app.post("/api/reset")
+def reset_everything():
+    """A fresh install: logged out of everything, cards, settings, caches, logs and the master password
+    gone; the library stays. Answers while locked too -- a forgotten password must not end the program --
+    and asks for the word RESET so no click does it by accident."""
+    if str((request.get_json(silent=True) or {}).get("confirm") or "") != "RESET":
+        return jsonify(error="Type RESET to confirm."), 400
+    if sync.status()["running"]:
+        return jsonify(error="Wait for the running sync to finish, or cancel it."), 409
+    try:
+        done = security.wipe()
+    except Exception as e:
+        log.exception("reset failed")
+        return jsonify(error="The reset stopped: %s" % net.reason(e)), 500
+    try:
+        updater.restart()
+    except Exception as e:
+        log.exception("restart after the reset failed")
+        return jsonify(ok=True, done=done, message="Sourcerer was reset. Close it and start it again."), 200
+    _shutdown()
+    return jsonify(ok=True, done=done, message="Sourcerer was reset and restarts in a moment.")
 
 
 @app.get("/api/ping")
@@ -633,7 +713,7 @@ def save_settings():
         db.set_setting(key, value)
     if clean.get("import_follows") == "1":
         follows.look_async()
-    net.configure(per_host=db.setting_int("per_host", 1, 8), pace_ms=db.setting_int("pace_ms", 0, 5000))
+    net.configure(per_host=db.setting_int("per_host", 1, 32), pace_ms=db.setting_int("pace_ms", 0, 5000))
     return get_settings()
 
 
