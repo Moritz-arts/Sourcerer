@@ -128,6 +128,7 @@ COLUMNS = {
         "last_level": "TEXT",
         "walked": "TEXT",                 # when a sync last went through all of it
         "links": "TEXT",                  # JSON: the accounts its own profile names (sources.profile_links): who is the same artist
+        "alias": "TEXT",                  # the name the site shows for the account: a card is named by its @name, this still finds it
         "pending": "INTEGER NOT NULL DEFAULT 0",   # its newest posts a look found that are not in the library
         "pending_keys": "TEXT",            # JSON: the remote_keys of those (at most sync.PENDING_KEYS), so a download from Browse can tell
         "latest": "TEXT",                  # when its newest post was made (UTC, "YYYY-MM-DD HH:MM:SS"), from the last look at it
@@ -167,6 +168,11 @@ def init():
         if not con.execute("SELECT 1 FROM settings WHERE key = 'follow_links_v1'").fetchone():
             con.execute("DELETE FROM settings WHERE key LIKE 'follows_read:%'")
             con.execute("INSERT INTO settings (key, value) VALUES ('follow_links_v1', '1')")
+        # A card is named by its @name now (follows.card_name); the display name it had stays with its first source.
+        if not con.execute("SELECT 1 FROM settings WHERE key = 'aliases_v1'").fetchone():
+            con.execute("UPDATE sources SET alias = (SELECT a.name FROM artists a WHERE a.id = sources.artist_id) WHERE alias IS NULL "
+                        "AND id = (SELECT MIN(s.id) FROM sources s WHERE s.artist_id = sources.artist_id)")
+            con.execute("INSERT INTO settings (key, value) VALUES ('aliases_v1', '1')")
         # The speed settings were set to values worked out for the sites' limits (v0.33): whatever was chosen
         # before -- most of it just the old defaults saved by a change of another row -- is dropped, once.
         if not con.execute("SELECT 1 FROM settings WHERE key = 'speed_defaults_v2'").fetchone():

@@ -120,7 +120,10 @@ def _clean(body):
         # Compared after normalising: "site/@a/media" and "https://site/@a" are one.
         if url and url not in urls:
             urls.append(url)
-    name = _display_name(body.get("name")) or _guess_name(urls)
+    name, shown = _display_name(body.get("name")), ""
+    if not name:                                          # named by the artist's @name where an address has one; the name the site shows stays an alias
+        shown = _guess_name(urls)
+        name = follows.card_name(urls, shown)
     if not name:
         return None, "Give the card a name or at least one link."
     folder = (body.get("folder") or "").strip()
@@ -130,7 +133,7 @@ def _clean(body):
             os.makedirs(folder, exist_ok=True)
         except OSError as e:
             return None, "This folder cannot be used: %s" % e
-    return {"name": name, "urls": urls, "master": sources.normalize(body.get("master") or ""),
+    return {"name": name, "shown": shown, "urls": urls, "master": sources.normalize(body.get("master") or ""),
             "folder": folder or None,
             "layout": body.get("layout") if body.get("layout") in LAYOUTS else "together",
             "dedupe": body.get("dedupe") if body.get("dedupe") in DEDUPES else "best",
@@ -146,8 +149,8 @@ def _save(con, artist_id, data):
             con.execute("DELETE FROM sources WHERE id = ?", (sid,))
     for url in data["urls"]:
         if url not in current:
-            con.execute("INSERT INTO sources (artist_id, url, kind) VALUES (?, ?, ?)",
-                        (artist_id, url, sources.kind_of(url)))
+            con.execute("INSERT INTO sources (artist_id, url, kind, alias) VALUES (?, ?, ?, ?)",
+                        (artist_id, url, sources.kind_of(url), (data["shown"] or None) if url == data["urls"][0] and not current else None))
     master = con.execute("SELECT id FROM sources WHERE artist_id = ? AND url = ?",
                          (artist_id, data["master"])).fetchone()
     con.execute("UPDATE artists SET name = ?, layout = ?, dedupe = ?, master_source_id = ?, "
