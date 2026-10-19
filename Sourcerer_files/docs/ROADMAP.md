@@ -15,7 +15,7 @@ sources, into a TrackImage library.
 
 | Site | Status |
 |---|---|
-| XenForo Media Gallery | **works** — media gallery, albums, threads (gallery-dl); login per forum; forums behind a Cloudflare challenge only with the login window's pass |
+| XenForo Media Gallery | **works** — media gallery, albums, threads (gallery-dl); login per forum; forums behind a Cloudflare challenge only with the login window's pass; forums that route only through `index.php?` (a guard) and forums in a folder log in, keep their login across redirects and list (base named to gallery-dl) |
 | Mastodon (and the fediverse) | **works** — public posts, originals; login per server (OAuth) for members-only servers and followers-only posts |
 | Patreon | **works** — own code on Patreon's JSON; originals (`download_url`), uploader's names; patron posts with a login |
 | Bluesky | **works** — public posts, original blobs incl. video; login with an app password |

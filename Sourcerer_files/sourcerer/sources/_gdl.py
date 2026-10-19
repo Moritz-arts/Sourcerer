@@ -97,10 +97,13 @@ def _python():
 
 
 def _config(section, options):
+    """section: the extractor's category -- gallery-dl reads extractor.<category> for it. None: the options
+    are for whichever extractor the URL finds (extractor.<option>): a forum is found by a name of its own
+    making, or by one gallery-dl knows it under, and options kept under another name were ignored."""
     DIR.mkdir(parents=True, exist_ok=True)
     _count[0] += 1
     path = DIR / ("run-%d-%d.json" % (os.getpid(), _count[0]))
-    conf = {"extractor": {"input": False, section: options}}
+    conf = {"extractor": dict({"input": False}, **options) if section is None else {"input": False, section: options}}
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(conf, f)
@@ -137,14 +140,16 @@ def _failure(code, errors, lines=()):
     return Failed(text, auth=auth, slow=slow)
 
 
-def items(url, section, options, fields):
+def items(url, section, options, fields, lock=None):
     """Yield pages (lists) of dicts, one per file, newest first.
 
     fields: {name: gallery-dl format expression}, e.g. {"url": "{_url!j}"}.
+    lock: what one read at a time is per (the site; a forum is one host, though gallery-dl's section for
+    every forum is the same), by default the section.
     Stopping early -- closing this generator -- ends the gallery-dl process.
     """
     fmt = "prepare:{{" + ",".join('"%s":%s' % (k, v) for k, v in fields.items()) + "}}"
-    lock = _site_lock(section)
+    lock = _site_lock(lock or section)
     listing = _items(url, section, options, fmt)
     try:
         while True:
