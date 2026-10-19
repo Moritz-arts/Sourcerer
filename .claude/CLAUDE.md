@@ -650,8 +650,16 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
 - **The site's mark is the only label on a tile** -- in "All artists" the artist's name sits beside it
   (`.gal-name`, cut with an ellipsis): `siteLogo(label)`, no pill, nothing else; a site without a mark
   shows its name. The artist's picture stands beside the title in Browse's head (`#gal-avatar`,
-  `renderBrowseHead`, replaced only when its markup changed). The downloaded
-  tick is green (`--fill-ok`), the viewer's Download turns into a green *Downloaded*. A chip
+  `renderBrowseHead`, replaced only when its markup changed). **A picture in the library wears the download button itself, green**
+  (`.gal-dl.saved`, `--fill-ok`: the same circle in the same corner, always there, white arrow -- not a tick; the grey button that
+  turns blue under the pointer is what an unsaved one shows), and the viewer's Download turns into a green *Downloaded* with the
+  same arrow. **Saved means the file is still there** (`_Gallery._there`: its path exists, or -- a byte-identical duplicate that
+  was not kept -- the file it duplicates does), so a file the user deletes loses its green button; the library changes behind
+  the page's back (a sync saves pictures, the file manager deletes them), so `galSavedRefresh` asks `/api/gallery/saved`
+  (`_Gallery.refresh_saved`: asks the library again, answers only the items whose state changed, asks no site) when the window
+  gets the focus, when a sync ended, every 20 s while the page is shown and when a gallery comes back from aside --
+  which is why a finished sync no longer throws the galleries aside away. `sync._record` keeps a files row's place but points
+  it at the new file when the old one is gone (deleted and downloaded again, maybe under another name). A chip
   has no hover circle (`.chip.logo:hover` keeps its background transparent).
   Manage Accounts rows wear the same mark with the status dot on its corner (`accMark`).
 - **`.spin` is the ring that circles; only `.logo-hero.spin` bobs.** A global `.spin` rule meant

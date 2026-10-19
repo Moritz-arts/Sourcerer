@@ -333,12 +333,11 @@ function poll() {
   api("GET", "/api/sync").then(function (s) {
     var key = (s.active || []).map(function (c) { return c.artist_id; }).join("+") + "|" + s.running + "|" + (s.queue || []).join(",") +
       "|" + (s.log || []).length + "|" + s.follows + "|" + (s.pauses || []).map(function (p) { return p.site; }).join(",");
-    // A sync that ended may have saved files: a gallery kept aside would still show them as not downloaded.
-    if (S.sync.finished !== s.finished) {
-      Object.keys(GS).forEach(function (k) { GS[k].stale = true; });
-      if (G) G.stale = true;                       // (the open one is let go of when it is left)
-    }
+    // A sync that ended may have saved files: the open gallery asks the library again (the green buttons appear), and one kept
+    // aside does it when it comes back (galResume) -- nothing is thrown away, so a switch still finds the artist where it was.
+    var syncEnded = S.sync.finished !== s.finished;
     S.sync = s;
+    if (syncEnded) galSavedRefresh();
     if (s.pauses) S.pauses = s.pauses;
     if (key !== lastKey) { lastKey = key; return loadSoon(); }
     renderBrowseList(); renderBrowseHead(); renderActivity();
@@ -879,6 +878,7 @@ function galResume(g, a) {
   galWatch(); galLayout();
   $("gal-body").scrollTop = g.scroll || 0;
   if (!g.id) return;                            // still waiting for its opening: the answer shows it
+  galSavedRefresh();                            // what the library has may have changed while it was aside
   galPoll(g);
   if (!g.busy && !g.done && galEndNear()) moreGallery();
 }
@@ -955,7 +955,9 @@ function tileHtml(it, i) {
     '" data-src="' + esc(it.source) + '" title="' + esc(who + (it.posted ? " · " + it.posted.slice(0, 10) : "") + (it.fname ? " · " + it.fname : "")) + '">' +
     picture + (it.fname ? '<span class="gal-fname">' + esc(it.fname) + "</span>" : "") + (it.video && it.thumb ? '<span class="gal-play">' + icon("play") + "</span>" : "") +
     '<span class="gal-tag">' + (siteLogo(it.source) || '<span class="gal-site">' + esc(it.source) + "</span>") + name + "</span>" +
-    (it.saved ? '<span class="gal-saved" title="Downloaded">' + icon("tick") + "</span>"
+    // The download button's own place and shape: grey (blue under the pointer) while the picture is not in the library, green
+    // for good once it is -- however it got there. It is gone again when the file is deleted (galSavedRefresh).
+    (it.saved ? '<span class="gal-dl saved" title="Downloaded">' + icon("download") + "</span>"
               : '<span class="gal-dl" data-dl title="Download this picture">' + icon("download") + "</span>") +
     '<span class="gal-pick" data-pick title="Select">' + icon("tick") + "</span>" +
     (it.gif || it.anim ? '<span class="gal-badge">GIF</span>' : "") + "</button>";
@@ -1029,7 +1031,7 @@ function galDlState(it) {
   var b = $("gal-download"), busy = !!G.downloading[it.id];
   b.disabled = it.saved || busy;
   b.classList.toggle("done", !!it.saved);
-  b.querySelector("svg use").setAttribute("href", it.saved ? "#i-tick" : "#i-download");
+  b.querySelector("svg use").setAttribute("href", "#i-download");
   b.querySelector("span").textContent = it.saved ? "Downloaded" : busy ? "Downloading…" : "Download";
 }
 
@@ -1229,6 +1231,33 @@ function galFetch(i) {
     throw err;
   });
 }
+// What the library has changes behind the page's back -- a sync saves pictures, the user deletes files in the file manager --
+// so the open gallery asks again when the window comes back, when a sync ended, and every 20 s while it is shown: the tiles
+// whose "downloaded" changed are drawn again (the green button appears or goes). Asks no site.
+function galSavedRefresh() {
+  var g = G;
+  if (!g || !g.id || g.refreshing || document.hidden) return;
+  g.refreshing = true;
+  api("POST", "/api/gallery/saved", { gallery: g.id }).then(function (d) {
+    g.refreshing = false;
+    var changed = false;
+    Object.keys(d.items).forEach(function (n) {
+      var i = g.items.findIndex(function (x) { return x.id === +n; });
+      if (i < 0) return;
+      g.items[i] = d.items[n];
+      changed = true;
+      if (g !== G) return;
+      var t = document.querySelector('#gal-grid .gal-tile[data-i="' + i + '"]');
+      if (t) t.outerHTML = tileHtml(d.items[n], i);
+      if (g.view === i) viewItem(i);
+    });
+    if (changed && g === G) { galWatch(); galLayout(); }
+  }).catch(function () { g.refreshing = false; });
+}
+window.addEventListener("focus", galSavedRefresh);
+document.addEventListener("visibilitychange", galSavedRefresh);
+setInterval(galSavedRefresh, 20000);
+
 // The ring round a tile's download button: how much of the file has come (0-100 %), asked of the server every 350 ms
 // while any download of the open gallery is on its way; a site that does not say how big the file is shows a turning arc.
 function galProgress(g) {

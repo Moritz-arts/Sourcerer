@@ -252,9 +252,8 @@ input[type=range] { accent-color: var(--fill-accent); cursor: pointer; }
 .sel-bar { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 4; display: flex; align-items: center; gap: 8px;
   padding: 8px 10px 8px 16px; border-radius: 12px; background: var(--surface-3); border: .5px solid var(--border-strong); box-shadow: var(--shadow); white-space: nowrap; }
 .sel-bar #sel-text { font-weight: 500; margin-right: 6px; }
-.gal-saved { position: absolute; right: 6px; top: 6px; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center;
-  justify-content: center; background: var(--fill-ok); color: #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, .45); }
-.gal-saved .ic { width: 15px; height: 15px; stroke-width: 3; }
+/* In the library: the download button's place and shape, green, always there (not only under the pointer). */
+.gal-dl.saved, .gal-dl.saved:hover { opacity: 1; background: var(--fill-ok); cursor: default; }
 .gal-end { text-align: center; padding: 20px; color: var(--text-muted); font-size: 13px; }
 .gal-view { position: absolute; inset: 0; z-index: 5; display: flex; align-items: center; background: rgba(0, 0, 0, .93); color: #eee; }
 .gal-stage { flex: 1; align-self: stretch; display: flex; align-items: center; justify-content: center; min-width: 0; padding: 64px 0 12px;

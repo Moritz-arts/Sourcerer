@@ -1118,12 +1118,23 @@ def _fetch(artist, src, site, media, cur):
                 part.unlink(missing_ok=True)
                 with _lock:
                     cur["duplicates"] += 1
-            con.execute("INSERT OR IGNORE INTO files (artist_id, source_id, remote_key, sha256, path, "
-                        "post_url, posted, phash, width, height, size) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                        (artist["id"], src["id"], media.remote_key, sha, str(path) if keep else None,
-                         media.post_url, media.posted, phash, width, height, size))
+            _record(con, artist, src, media, sha, str(path) if keep else None, phash, width, height, size)
     return True
+
+
+def _record(con, artist, src, media, sha, path, phash, width, height, size):
+    """The file's row. One that exists keeps its place -- unless its file is gone (the user deleted it and downloaded it again,
+    maybe under another name): then it points at the new one, or the picture would stay "not downloaded"."""
+    old = con.execute("SELECT id, path FROM files WHERE artist_id = ? AND remote_key = ?",
+                      (artist["id"], media.remote_key)).fetchone()
+    if old is None:
+        con.execute("INSERT INTO files (artist_id, source_id, remote_key, sha256, path, post_url, posted, phash, "
+                    "width, height, size) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (artist["id"], src["id"], media.remote_key, sha, path, media.post_url, media.posted,
+                     phash, width, height, size))
+    elif path and not (old["path"] and os.path.isfile(old["path"])):
+        con.execute("UPDATE files SET source_id = ?, sha256 = ?, path = ?, phash = ?, width = ?, height = ?, size = ? "
+                    "WHERE id = ?", (src["id"], sha, path, phash, width, height, size, old["id"]))
 
 
 def _local_names(media):
@@ -1166,10 +1177,7 @@ def _adopt(artist, src, media, folder, cur):
                 return False
             sha, size = _sha256(path), os.path.getsize(path)
             phash, width, height = imaging.info(path)
-        con.execute("INSERT OR IGNORE INTO files (artist_id, source_id, remote_key, sha256, path, "
-                    "post_url, posted, phash, width, height, size) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (artist["id"], src["id"], media.remote_key, sha, path, media.post_url, media.posted,
-                     phash, width, height, size))
+        _record(con, artist, src, media, sha, path, phash, width, height, size)
         con.execute("DELETE FROM archive WHERE remote_key = ?", (media.remote_key,))
     with _lock:
         cur["existing"] += 1
