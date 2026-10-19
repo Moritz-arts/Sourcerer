@@ -359,6 +359,11 @@ add the one that replaced it.
 
 - [x] Follows import: Bluesky, Mastodon and pixiv follows become listed cards after a login;
       Merge into... for accounts the sites did not show to be one artist
+- [x] Refresh one artist at a time, the opened artist first; only auto-download cards in sweeps; token logins
+      (Bluesky, Mastodon, Misskey, boorus) no longer spaced like cookie logins; a cookie-login gap setting
+- [x] Misskey login (MiAuth) per server; Fanbox and Fantia as sources with a cookie login
+- [x] Grid pictures in the largest rendition below the original (setting: Sharp / Quick); favorites
+      (right-click, key F, star, order *Favorites*)
 - [x] Misskey (misskey.io and forks) as a source: notes with files, no login; a Mastodon list's
       Misskey accounts are cards too; unknown Misskey servers are learned
 - [x] Accounts of one name on different sites are combined on one card by themselves (as a login's

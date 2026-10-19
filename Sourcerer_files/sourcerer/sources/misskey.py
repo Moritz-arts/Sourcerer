@@ -1,5 +1,7 @@
 """Misskey and the servers built on it (Sharkey, Firefish, Iceshrimp...): misskey.io, misskey.design...
-Public notes need no login. Mastodon follows some of them -- an artist on misskey.io shows up in a
+Public notes need no login; a server that shows them to its members only needs the MiAuth login
+(`start_login`: Sourcerer's own window opens the server's "allow Sourcerer" page, the token is read
+from the server). Mastodon follows some of them -- an artist on misskey.io shows up in a
 Baraag follow list -- and answers nothing a Mastodon client asks, so they need a module of their own.
 
 A profile URL is https://<server>/@<user>, exactly Mastodon's, so a server counts as Misskey only when
@@ -14,14 +16,16 @@ its `thumbnailUrl` a small WebP.
 """
 import re
 import urllib.parse
+import uuid
 
 import requests
 
-from .. import db, net
+from .. import accounts, db, net
 
 KIND = "misskey"
 LABEL = "Misskey"
 PAGE = 30           # notes a request (the API allows 100; a sync reads a few pages only)
+PERMISSION = "read:account"     # what MiAuth asks the user to allow: enough to tell the token works
 
 HOSTS = {"misskey.io", "misskey.design", "nijimiss.moe", "sushi.ski", "misskey.gg"}
 _URL = re.compile(r"^https?://([^/\s]+)/@([^/@?#\s]+)(?:@([^/?#\s]+))?", re.I)
@@ -84,9 +88,28 @@ def probe(host):
     return False
 
 
-def _api(host, endpoint, body):
+_dead = {}           # server -> the token it refused: not sent again (a new login is another token)
+
+
+def account_key(url):
+    return "misskey:" + _parse(url)[0]
+
+
+def _token(host, force=False):
+    data = accounts.secrets("misskey:" + host.lower())
+    if not data or (not force and _dead.get(host.lower()) == data["token"]):
+        return None
+    return data["token"]
+
+
+def _api(host, endpoint, body, force=False):
+    token = _token(host, force)
+    send = dict(body, i=token) if token else body
+    # The token goes in the body (every version reads it there) and in the header, which is how net knows it
+    # is a login's request and paces it.
+    headers = {"Authorization": "Bearer " + token} if token else None
     try:
-        return net.post_read("https://%s/api/%s" % (host, endpoint), json=body)
+        return net.post_read("https://%s/api/%s" % (host, endpoint), json=send, headers=headers)
     except requests.HTTPError as e:
         r = e.response
         code = ""
@@ -96,9 +119,71 @@ def _api(host, endpoint, body):
             pass
         if code == "NO_SUCH_USER":
             raise LookupError("%s has no such account" % host) from e
+        # A token the server took back refuses even public reads: read as a visitor from now on. The account
+        # check says the login ran out.
+        if token and not force and code == "AUTHENTICATION_FAILED":
+            _dead[host.lower()] = token
+            return _api(host, endpoint, body)
         # A server that shows its notes to members only (401/403 with a JSON answer, not a bot check's page).
         if r is not None and r.status_code in (401, 403) and "json" in r.headers.get("Content-Type", ""):
-            raise RuntimeError("%s shows this to its logged-in users only (Sourcerer cannot log in to Misskey yet)" % host) from e
+            from . import LoginRequired
+            raise LoginRequired("%s shows this to its logged-in users only" % host) from e
+        raise
+
+
+# ---- logging in (Manage Accounts) ---------------------------------------------------
+
+def start_login(host):
+    """MiAuth: the page where the user lets Sourcerer read, and what the window waits for. The page shows no code
+    and has no address to read it from, so the server is asked for the session's answer: (url, ask, finish)."""
+    session = str(uuid.uuid4())
+    url = "https://%s/miauth/%s?%s" % (host, session, urllib.parse.urlencode({
+        "name": "Sourcerer", "permission": PERMISSION}))
+    tick = [0]
+
+    def ask(_window):
+        tick[0] += 1
+        if tick[0] % 2:                    # every 3 s, not with every look of the window
+            return None
+        try:
+            answer = net.post_read("https://%s/api/miauth/%s/check" % (host, session), json={})
+        except Exception:
+            return None
+        return answer if isinstance(answer, dict) and answer.get("ok") and answer.get("token") else None
+
+    def finish(answer):
+        user = answer.get("user") or {}
+        accounts.save_token("misskey:" + host, "login window", token=answer["token"],
+                            user="@%s@%s" % (user.get("username", "?"), host))
+    return url, ask, finish
+
+
+def logout(key):
+    """Take the token back on the server too, where it knows how (a Misskey of 2023 or later)."""
+    data = accounts.load(key) or {}
+    if not data.get("token"):
+        return
+    host = key.split(":", 1)[1]
+    try:
+        net.post_read("https://%s/api/i/revoke-token" % host, json={"token": data["token"], "i": data["token"]},
+                      headers={"Authorization": "Bearer " + data["token"]})
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).info("%s: token not revoked: %s", key, net.reason(e))
+
+
+def still_logged_in(key):
+    host = key.split(":", 1)[1]
+    try:
+        _api(host, "i", {}, force=True)
+        return True
+    except requests.HTTPError as e:
+        if e.response is not None and e.response.status_code in (401, 403):
+            return False
+        raise
+    except Exception as e:
+        if e.__class__.__name__ == "LoginRequired":
+            return False
         raise
 
 

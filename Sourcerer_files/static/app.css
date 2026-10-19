@@ -11,7 +11,7 @@
   --bg-warning: #f9dca4; --text-warning: #734500; --dot-warn: #d89000;
   --bg-danger: #f6d3d3; --text-danger: #8e2626; --dot-bad: #d93a3a;
   --shadow: 0 6px 24px rgba(0, 0, 0, .14);
-  --radius: 8px; --fill-ok: #1f8f36;
+  --radius: 8px; --fill-ok: #1f8f36; --star: #e0a100;
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
   color-scheme: light;
@@ -141,6 +141,9 @@ input[type=range] { accent-color: var(--fill-accent); cursor: pointer; }
 .br-group .num { font-weight: 400; color: var(--text-muted); }
 .br-n { min-width: 22px; text-align: right; font-size: 11px; color: var(--text-muted); }
 .br-item.selected .br-n { color: inherit; opacity: .8; }
+.br-fav { display: inline-flex; flex: none; color: var(--star); }
+.br-fav .ic { width: 14px; height: 14px; fill: currentColor; }
+.br-group .ic.star { width: 14px; height: 14px; fill: var(--star); stroke: var(--star); }
 .br-auto { display: inline-flex; flex: none; color: var(--dot-ok); }
 .br-auto .ic { width: 15px; height: 15px; }
 .br-item .spin { width: 13px; height: 13px; }

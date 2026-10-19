@@ -25,11 +25,13 @@ Sourcerer/                        <- what Sourcerer.zip unpacks to; move it free
     │   ├─ sources/               one module per site
     │   │   ├─ __init__.py        Media, site_for, normalize, describe, profile
     │   │   ├─ mastodon.py        Mastodon / fediverse, its API; login per server (OAuth)
-    │   │   ├─ misskey.py         Misskey and its forks (misskey.io...), public notes; no login yet
+    │   │   ├─ misskey.py         Misskey and its forks (misskey.io...), public notes; login per server (MiAuth)
     │   │   ├─ bluesky.py         Bluesky, its API, original blobs; login with an app password
     │   │   ├─ pixiv.py           Pixiv, its own pages' JSON; originals need a Referer
     │   │   ├─ patreon.py         Patreon, its own pages' JSON; media download_url
     │   │   ├─ x.py               X, listed by gallery-dl, logged in
+│   │   ├─ fanbox.py          Fanbox, listed by gallery-dl, cookie login (FANBOXSESSID)
+│   │   ├─ fantia.py          Fantia fanclubs, listed by gallery-dl, cookie login (the page says who is in)
     │   │   ├─ xenforo.py         XenForo forums (media gallery, albums, threads)
     │   │   ├─ booru.py           boorus: Danbooru / e621, Gelbooru 0.2, Moebooru; API keys
     │   │   └─ _gdl.py            gallery-dl as a separate process: lists, never downloads

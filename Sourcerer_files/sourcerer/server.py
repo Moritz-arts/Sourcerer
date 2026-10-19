@@ -30,7 +30,8 @@ DEDUPES = ("keep_all", "best", "master")
 # What Settings may change, and the values each may take.
 CHOICES = {"filenames": ("original", "dated"), "theme": ("system", "light", "dark"),
            "auto_sync": ("0", "1"), "import_follows": ("0", "1"), "channel": ("stable", "beta"),
-           "tile_logo": ("0", "1"), "scan_on_start": ("0", "1")}
+           "tile_logo": ("0", "1"), "scan_on_start": ("0", "1"), "grid_quality": ("best", "fast"),
+           "login_gap": ("careful", "normal", "fast")}
 RANGES = {"card_size": (160, 800), "auto_hours": (1, 168), "parallel": (1, 64),
           "per_host": (1, 32), "pace_ms": (0, 5000)}
 
@@ -515,6 +516,16 @@ def set_auto_download(artist_id):
     return jsonify(ok=True, auto_download=on)
 
 
+@app.post("/api/artists/<int:artist_id>/favorite")
+def set_favorite(artist_id):
+    """The star: only a mark in the list -- it changes nothing about syncing."""
+    on = 1 if _body().get("on") else 0
+    with db.connect() as con:
+        if not con.execute("UPDATE artists SET favorite = ? WHERE id = ?", (on, artist_id)).rowcount:
+            abort(404)
+    return jsonify(ok=True, favorite=on)
+
+
 @app.post("/api/artists/<int:artist_id>/merge")
 def merge_artist(artist_id):
     """The card becomes part of the card named in "into": its sources and files move over."""
@@ -530,6 +541,12 @@ def merge_artist(artist_id):
         return jsonify(error=str(e)), 400
     previews.forget(artist_id)
     return jsonify(ok=True, moved=moved)
+
+
+@app.post("/api/sync/focus")
+def focus_sync():
+    """Browse opened this artist: if it waits in the queue it is next."""
+    return jsonify(ok=sync.focus(int(_body().get("artist_id") or 0)))
 
 
 @app.post("/api/sync/cancel")
@@ -551,7 +568,7 @@ def thumb(file_id):
     if not row or not row["path"] or not os.path.isfile(row["path"]):
         abort(404)
     try:
-        data = imaging.preview(row["path"])
+        data = imaging.preview(row["path"], max(240, min(1600, request.args.get("s", 480, type=int))))
     except Exception:
         abort(404)
     resp = app.response_class(data, mimetype="image/jpeg")
@@ -798,7 +815,7 @@ def info():
 
 # Sites where a login shows posts a visitor never sees: R-18 works, a patron's
 # posts, a forum's members-only media, followers-only posts, a booru's hidden files.
-REVEALS = ("pixiv", "patreon", "xenforo:", "mastodon:", "booru:")
+REVEALS = ("pixiv", "patreon", "fanbox", "fantia", "xenforo:", "mastodon:", "misskey:", "booru:")
 
 
 def _login_changed(key, how="new"):
@@ -844,6 +861,9 @@ def _account_key(body):
     elif body.get("server"):
         from .sources import mastodon
         key = "mastodon:" + mastodon.server_of(body["server"])
+    elif body.get("misskey"):
+        from .sources import mastodon
+        key = "misskey:" + mastodon.server_of(body["misskey"])
     elif body.get("booru"):
         from .sources import booru
         try:
@@ -889,7 +909,7 @@ def get_accounts():
         rest = net.paused(host)
         a["rest"] = {"until": rest[0], "why": rest[1]} if rest else None
     boorus = [dict(b, **booru.login_help("booru:" + b["host"])) for b in booru.LOGIN_SITES]
-    types = [{"type": t, "label": label, "kind": how, "many": t in ("mastodon", "xenforo", "booru")}
+    types = [{"type": t, "label": label, "kind": how, "many": t in ("mastodon", "misskey", "xenforo", "booru")}
              for t, label, how in accounts.TYPES]
     return jsonify(accounts=rows, types=types, window=WINDOW is not None, boorus=boorus)
 
@@ -919,7 +939,14 @@ def account_login():
                        key=key), 501
     if accounts.waiting(key):              # its window is open already
         return jsonify(ok=True, key=key)
-    if how == "oauth":
+    if key.startswith("misskey:"):
+        from .sources import misskey
+        server = key.split(":", 1)[1]
+        if not misskey.probe(server):
+            return jsonify(error="%s does not look like a Misskey server." % server), 400
+        url, ask, finish = misskey.start_login(server)
+        accounts.login_in_window(key, url=url, finish=finish, ask=ask)
+    elif how == "oauth":
         from .sources import mastodon
         server = key.split(":", 1)[1]
         try:

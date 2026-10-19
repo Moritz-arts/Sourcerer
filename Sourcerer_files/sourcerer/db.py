@@ -128,6 +128,7 @@ COLUMNS = {
         # background (previews, Sync all, automatic sync) and not in "All artists" until the user does
         # something with the card (edits it, syncs it, turns auto-download on, merges it).
         "listed": "INTEGER NOT NULL DEFAULT 0",
+        "favorite": "INTEGER NOT NULL DEFAULT 0",   # 1: starred by the user (the list can put these first)
     },
     "snapshots": {"tail": "TEXT"},
     "sources": {
