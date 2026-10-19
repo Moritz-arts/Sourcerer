@@ -366,6 +366,10 @@ add the one that replaced it.
 - [x] Settings: parallel downloads up to 64 and connections per site up to 32 (sites with their own lower
       limit keep it); Security pane with a master password (asked at every start, enforced by the server)
       and a reset to a fresh install; TrackImage's card in the settings rail
+- [x] Browse: download one picture (arrow on the tile), several (select mode, Ctrl/Shift-click) or the whole artist; GIFs
+      play; right-click copy in the grid too; more orders (Source, Source (logo), Image count, Downloads, Downloads %) with
+      the matching numbers, "All artists" totals, images = total not downloaded; latest activity by the newest post;
+      every start looks for new posts; no New card button; the window's title bar is the page's own on Windows
 - [x] Viewer: bar on top, click on the dark closes it, double-click / wheel zoom, drag to move; Settings >
       Appearance: switch for the site mark on the pictures
 - [x] Merge dialog: likely twins (same name but for emoji / marks / case, shared account name) listed at

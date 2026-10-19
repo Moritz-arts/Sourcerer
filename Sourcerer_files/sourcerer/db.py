@@ -136,6 +136,7 @@ COLUMNS = {
         "walked": "TEXT",                 # when a sync last went through all of it
         "pending": "INTEGER NOT NULL DEFAULT 0",   # its newest posts a look found that are not in the library
         "pending_keys": "TEXT",            # JSON: the remote_keys of those (at most sync.PENDING_KEYS), so a download from Browse can tell
+        "latest": "TEXT",                  # when its newest post was made (UTC, "YYYY-MM-DD HH:MM:SS"), from the last look at it
     },
     "files": {
         "phash": "TEXT",                  # imaging fingerprint; NULL for video

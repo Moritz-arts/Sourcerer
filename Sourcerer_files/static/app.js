@@ -132,7 +132,13 @@ function applySettings() {
 function artistById(id) { return S.artists.filter(function (a) { return a.id === id; })[0]; }
 
 // When something last happened on a card: a download, else a sync, else its making.
-function activityOf(a) { return a.last_activity || a.last_sync || a.created || ""; }
+// When an artist last did something, as one string to compare ("YYYY-MM-DD HH:MM:SS", UTC): the newest post a look at
+// their sources saw, else the last download or look. "" is nothing known -- a card that was only just listed -- and
+// it goes last: its "created" says when it was imported, not when the artist posted (it once put them all first).
+function activityKey(a) {
+  var latest = a.sources.reduce(function (m, s) { return s.latest && s.latest > m ? s.latest : m; }, "");
+  return latest || a.last_activity || a.last_sync || "";
+}
 
 function renderAll() {
   $("empty").classList.toggle("hidden", S.artists.length > 0);
@@ -231,6 +237,7 @@ function load() {
   lastLoad = Date.now();
   return api("GET", "/api/state").then(function (d) {
     S.artists = d.artists; S.sync = d.sync; S.library = d.library; S.window = d.window;
+    S.frame = d.frame; applyFrame();
     S.sep = d.sep; S.sites = d.sites; S.fields = d.fields; S.settings = d.settings; S.logins = d.logins || []; S.pauses = d.pauses || [];
     $("version").textContent = "v" + d.version;
     $("btn-quit").classList.toggle("hidden", S.window);
@@ -489,6 +496,9 @@ document.addEventListener("keydown", function (e) {
   var dialog = document.querySelector("dialog[open]");
   if (k === "Escape") {
     closeMenu();
+    if (!dialog && G && G.sel && (G.sel.size || S.brSelect) && $("gal-view").classList.contains("hidden")) {
+      S.brSelect = false; G.sel.clear(); selPaint();
+    }
     if (!dialog && t === $("br-search")) { t.value = ""; t.blur(); renderBrowseList(); }
     return;                                   // an open dialog closes itself
   }
@@ -496,6 +506,7 @@ document.addEventListener("keydown", function (e) {
   if (!dialog && ctrl && k === "-") { e.preventDefault(); return galSize(+$("gal-size").value - 20); }
   if (!dialog && ctrl && k === "0") { e.preventDefault(); return galSize(DEFAULT_GAL); }
   if (dialog) return;
+  if (ctrl && low === "a" && !typing && G && $("gal-view").classList.contains("hidden")) { e.preventDefault(); return selAll(); }
   if ((ctrl && low === "n") || (!ctrl && !e.altKey && !typing && low === "n")) { e.preventDefault(); return openCard(null); }
   if ((ctrl && low === "f") || (k === "/" && !typing)) { e.preventDefault(); $("br-search").focus(); return $("br-search").select(); }
   if (k === "F5" || (ctrl && low === "r")) { e.preventDefault(); return sync(null); }
@@ -570,11 +581,12 @@ function galWatch() {
 var BR_HIDDEN = "sourcerer.browse.hidden";
 var BR_FIT = "sourcerer.browse.fit", BR_SIZE = "sourcerer.browse.size";
 var BR_SORT = "sourcerer.browse.sort", BR_COUNT = "sourcerer.browse.count", BR_LAST = "sourcerer.browse.last";
-function brOrder(v) { return v === "activity" || v === "source" ? v : "name"; }
+function brOrder(v) { return /^(activity|source|logo|images|downloads|percent)$/.test(v) ? v : "name"; }
+function brNumber(v) { return v === "files" ? "images" : /^(images|downloads|percent)$/.test(v) ? v : "sources"; }
 S.brArtist = 0; S.brFit = "square"; S.brSort = "name"; S.brCount = "sources";
 try {
   S.brSort = brOrder(localStorage.getItem(BR_SORT));
-  S.brCount = localStorage.getItem(BR_COUNT) === "files" ? "files" : "sources";   // (older versions also had "auto": the cloud is always shown now)
+  S.brCount = brNumber(localStorage.getItem(BR_COUNT));   // ("files" was the images; "auto" is gone: the cloud is always shown)
   S.brArtist = +localStorage.getItem(BR_LAST) || 0;                              // the artist that was open when Sourcerer was closed
 } catch (e) {}
 $("br-sort").value = S.brSort; $("br-count").value = S.brCount;
@@ -622,11 +634,35 @@ function siteOf(a) {
   var s = a.sources.filter(function (x) { return x.master; })[0] || a.sources.filter(function (x) { return x.supported; })[0] || a.sources[0];
   return s ? s.label : "";
 }
+// The numbers an artist has: the images it has in all (downloaded and still to download, as the last look counted
+// them: a look reads the newest posts only, so a long history shows a "+"), the ones downloaded, and their share.
+function totalOf(a) { return (a.file_count || 0) + (a.pending || 0); }
+function downloadsOf(a) { return a.file_count || 0; }
+function shareOf(a) { var t = totalOf(a); return t ? downloadsOf(a) / t : 0; }
+function cutOff(a) { return a.sources.some(function (s) { return (s.pending || 0) >= 120; }); }
+function countText(a) {
+  if (S.brCount === "images") return totalOf(a) ? totalOf(a) + (cutOff(a) ? "+" : "") : "";
+  if (S.brCount === "downloads") return downloadsOf(a) || "";
+  if (S.brCount === "percent") return totalOf(a) ? Math.round(100 * shareOf(a)) + "%" : "";
+  return a.sources.filter(function (s) { return s.supported; }).length || "";
+}
+// "All artists" gets the same number for the whole list: how many artists, how many images, how many downloaded, what share.
+function allText() {
+  var tot = 0, done = 0, plus = false;
+  S.artists.forEach(function (a) { tot += totalOf(a); done += downloadsOf(a); plus = plus || cutOff(a); });
+  if (S.brCount === "images") return tot ? tot + (plus ? "+" : "") : "";
+  if (S.brCount === "downloads") return done || "";
+  if (S.brCount === "percent") return tot ? Math.round(100 * done / tot) + "%" : "";
+  return S.artists.length || "";
+}
+var NUMBER_SORT = { images: totalOf, downloads: downloadsOf, percent: shareOf };
 function renderBrowseList() {
-  var q = $("br-search").value.trim().toLowerCase(), bySite = S.brSort === "source", sites = {};
+  var q = $("br-search").value.trim().toLowerCase(), bySite = S.brSort === "source" || S.brSort === "logo", sites = {};
   var list = S.artists.filter(function (a) { return !q || a.name.toLowerCase().indexOf(q) >= 0; })
     .sort(function (x, y) {
-      if (S.brSort === "activity") { var tx = activityOf(x), ty = activityOf(y); if (tx !== ty) return tx < ty ? 1 : -1; }
+      if (S.brSort === "activity") { var tx = activityKey(x), ty = activityKey(y); if (tx !== ty) return !tx ? 1 : !ty ? -1 : tx < ty ? 1 : -1; }
+      var by = NUMBER_SORT[S.brSort];
+      if (by && by(x) !== by(y)) return by(y) - by(x);
       if (bySite) { var sx = siteOf(x), sy = siteOf(y); if (sx !== sy) return !sx ? 1 : !sy ? -1 : sx.localeCompare(sy); }
       return x.name.localeCompare(y.name);
     });
@@ -634,14 +670,13 @@ function renderBrowseList() {
   var cur = S.sync.current && S.sync.current.artist_id, queue = S.sync.queue || [];
   function count(a) {
     if (cur === a.id || queue.indexOf(a.id) >= 0) return '<i class="spin" title="' + (cur === a.id ? "Working…" : "Queued") + '"></i>';
-    if (S.brCount === "files") return a.file_count || "";
-    return a.sources.filter(function (s) { return s.supported; }).length || "";
+    return countText(a);
   }
   var html = (q ? "" : '<button type="button" class="br-item all' + (!S.brArtist ? " selected" : "") +
-    '" data-id="0">' + icon("photo") + '<span class="br-name">All artists</span></button>') +
+    '" data-id="0">' + icon("photo") + '<span class="br-name">All artists</span><span class="br-n">' + allText() + "</span></button>") +
     list.map(function (a, i) {
       var site = bySite ? siteOf(a) : "", head = bySite && (!i || siteOf(list[i - 1]) !== site) ?
-        '<div class="br-group">' + (siteLogo(site) || "") + "<span>" + esc(site || "No source") + '</span><span class="num">' + sites[site] + "</span></div>" : "";
+        '<div class="br-group">' + (S.brSort === "logo" ? siteLogo(site) || "" : "") + "<span>" + esc(site || "No source") + '</span><span class="num">' + sites[site] + "</span></div>" : "";
       return head + '<button type="button" class="br-item' + (S.brArtist === a.id ? " selected" : "") + '" data-id="' + a.id + '">' +
         avatarHtml(a) + '<span class="br-name" title="' + esc(a.name) + '">' + esc(a.name) + "</span>" +
         '<span class="br-n">' + count(a) + "</span>" +
@@ -661,6 +696,8 @@ function renderBrowseHead() {
   var av = a ? avatarHtml(a) : "";
   if (av !== brAvatar) { brAvatar = av; $("gal-avatar").innerHTML = av; }
   ["br-download", "br-edit", "br-refresh", "br-folder", "br-auto"].forEach(function (id) { $(id).classList.toggle("hidden", !a); });
+  $("br-select").classList.toggle("hidden", !G);
+  renderSelBar();
   $("br-auto").classList.toggle("on", !!(a && a.auto_download));
   $("br-auto").setAttribute("aria-checked", a && a.auto_download ? "true" : "false");
   $("br-download").disabled = $("br-refresh").disabled = !sup;
@@ -720,7 +757,7 @@ function browseOpen(id, fresh) {
   if (kept && (fresh || kept.stale || Date.now() - kept.at > GS_AGE)) { galDrop(S.brArtist); kept = null; }
   if (kept) { delete GS[S.brArtist]; return galResume(kept, a); }
   G = { key: S.brArtist, artist: a, all: !id, id: null, items: [], busy: false, done: false, hidden: S.brHidden, view: -1, sources: null,
-        downloading: {}, loading: true, newPosts: 0, polling: false };
+        downloading: {}, loading: true, newPosts: 0, polling: false, sel: new Set(), last: -1 };
   $("gal-title").textContent = a ? a.name : "All artists";
   $("gal-grid").innerHTML = ""; $("gal-sources").innerHTML = "";
   $("gal-body").scrollTop = 0;
@@ -824,12 +861,15 @@ function tileHtml(it, i) {
     : '<span class="gal-noimg">' + icon(it.video ? "play" : "photo") + "</span>";
   var who = G.all ? it.artist + " · " + it.source : it.source;
   var name = G.all ? '<span class="gal-name">' + esc(it.artist) + "</span>" : "";      // "All artists": whose picture it is, beside the mark
-  return '<button type="button" class="gal-tile' + (G.hidden[it.source] ? " hidden" : "") + '" data-i="' + i +
+  return '<button type="button" class="gal-tile' + (G.hidden[it.source] ? " hidden" : "") + (G.sel && G.sel.has(i) ? " sel" : "") + '" data-i="' + i +
     (it.w && it.h ? '" data-ar="' + galRatio(it.w, it.h) : "") +
     '" data-src="' + esc(it.source) + '" title="' + esc(who + (it.posted ? " · " + it.posted.slice(0, 10) : "")) + '">' +
     picture + (it.video && it.thumb ? '<span class="gal-play">' + icon("play") + "</span>" : "") +
     '<span class="gal-tag">' + (siteLogo(it.source) || '<span class="gal-site">' + esc(it.source) + "</span>") + name + "</span>" +
-    (it.saved ? '<span class="gal-saved" title="Downloaded">' + icon("tick") + "</span>" : "") + "</button>";
+    (it.saved ? '<span class="gal-saved" title="Downloaded">' + icon("tick") + "</span>"
+              : '<span class="gal-dl" data-dl title="Download this picture">' + icon("download") + "</span>") +
+    '<span class="gal-pick" data-pick title="Select">' + icon("tick") + "</span>" +
+    (it.gif ? '<span class="gal-badge">GIF</span>' : "") + "</button>";
 }
 
 // One chip per site the open gallery has a source of: switching it off hides its posts and
@@ -938,7 +978,12 @@ function closeView() {
 
 $("gal-grid").addEventListener("click", function (e) {
   var tile = e.target.closest(".gal-tile");
-  if (tile) viewItem(+tile.dataset.i);
+  if (!tile) return;
+  var i = +tile.dataset.i;
+  if (e.target.closest("[data-dl]")) return void galDownload(i);                      // the arrow on the tile: this one picture
+  // Select mode, the tile's own tick, Ctrl or Shift: select instead of opening (Shift: everything in between).
+  if (S.brSelect || e.ctrlKey || e.metaKey || e.shiftKey || e.target.closest("[data-pick]")) return selToggle(i, e.shiftKey);
+  viewItem(i);
 });
 // A picture the browser was not handed (a CDN's bot check, a hotlink rule):
 // once more through Sourcerer, then a placeholder instead of a broken image.
@@ -1053,29 +1098,111 @@ document.addEventListener("mouseup", function () {
   setTimeout(function () { Z.moved = false; }, 0);              // after the click that ends a drag
 });
 
-function galDownload(i) {
-  var g = G, it;
-  if (i === undefined) i = G && G.view;               // the viewer's button and key: the picture open
-  it = g && g.items[i];
-  if (!it || it.saved || g.downloading[it.id]) return;
+// The one place a picture is saved from the gallery: the viewer's button and key, the arrow on a tile, the menu and
+// the selection all come here. Resolves to the answer ({item, kept}), rejects with the failure.
+function galFetch(i) {
+  var g = G, it = g && g.items[i];
+  if (!it || it.saved || g.downloading[it.id]) return Promise.reject(new Error("Already downloaded or on its way."));
   g.downloading[it.id] = true;
+  var tile = g === G && document.querySelector('#gal-grid .gal-tile[data-i="' + i + '"]');
+  if (tile) tile.classList.add("busy");
   if (g.view === i) galDlState(it);
-  api("POST", "/api/gallery/download", { gallery: g.id, item: it.id }).then(function (d) {
+  return api("POST", "/api/gallery/download", { gallery: g.id, item: it.id }).then(function (d) {
     delete g.downloading[it.id];
     g.items[i] = d.item;
     if (g === G) {                               // (left meanwhile: it shows the file saved when it comes back)
-      var tile = document.querySelector('#gal-grid .gal-tile[data-i="' + i + '"]');
-      if (tile) { tile.outerHTML = tileHtml(d.item, i); galWatch(); galLayout(); }
+      var t = document.querySelector('#gal-grid .gal-tile[data-i="' + i + '"]');
+      if (t) { t.outerHTML = tileHtml(d.item, i); galWatch(); galLayout(); }
       if (g.view === i) viewItem(i);
     }
-    toast(d.kept ? "Saved in " + d.item.artist + "'s folder" : "Not saved: the same picture is already in the folder");
-    load();
-  }).catch(function (err) {
-    fail(err);
+    return d;
+  }, function (err) {
     delete g.downloading[it.id];
-    if (g === G && g.view === i) galDlState(it);
+    if (g === G) {
+      var t = document.querySelector('#gal-grid .gal-tile[data-i="' + i + '"]');
+      if (t) t.classList.remove("busy");
+      if (g.view === i) galDlState(it);
+    }
+    throw err;
   });
 }
+function galDownload(i) {
+  if (i === undefined) i = G && G.view;               // the viewer's button and key: the picture open
+  if (!G || !G.items[i] || G.items[i].saved) return;
+  galFetch(i).then(function (d) {
+    toast(d.kept ? "Saved in " + d.item.artist + "'s folder" : "Not saved: the same picture is already in the folder");
+    load();
+  }).catch(fail);
+}
+// Several pictures, three at a time (each one is a request to its site: the site's own lane still sets the pace).
+function galDownloadMany(ids) {
+  var g = G, todo = ids.filter(function (i) { var it = g.items[i]; return it && !it.saved && !g.downloading[it.id]; });
+  if (!todo.length) return toast("Those are in the library already.");
+  var n = todo.length, done = 0, kept = 0, failed = 0, lastError = "";
+  S.brBusy = "Downloading 0 / " + n;
+  renderSelBar();
+  function next() {
+    var i = todo.shift();
+    if (i === undefined) return Promise.resolve();
+    return galFetch(i).then(function (d) { if (d.kept) kept++; }, function (e) { failed++; lastError = e.message; })
+      .then(function () { done++; S.brBusy = "Downloading " + done + " / " + n; renderSelBar(); return next(); });
+  }
+  Promise.all([next(), next(), next()]).then(function () {
+    S.brBusy = "";
+    if (g.sel) g.sel.clear();
+    S.brSelect = false;
+    selPaint();
+    toast(plural(kept, "picture") + " saved" + (n - kept - failed ? ", " + (n - kept - failed) + " already there" : "") +
+          (failed ? ", " + failed + " failed (" + lastError + ")" : ""), !!failed && !kept);
+    load();
+  });
+}
+
+// ---- selecting pictures: Select button, Ctrl / Shift click, the tick on a tile ----------------
+function selToggle(i, range) {
+  var g = G, it = g && g.items[i];
+  if (!it || g.hidden[it.source]) return;
+  if (range && g.last !== undefined && g.last >= 0) {
+    var lo = Math.min(g.last, i), hi = Math.max(g.last, i), on = !g.sel.has(i);
+    for (var k = lo; k <= hi; k++) {
+      var t = g.items[k];
+      if (!t || g.hidden[t.source]) continue;
+      if (on) g.sel.add(k); else g.sel.delete(k);
+    }
+  } else if (g.sel.has(i)) g.sel.delete(i); else g.sel.add(i);
+  g.last = i;
+  selPaint();
+}
+function selPaint() {
+  $$("#gal-grid .gal-tile").forEach(function (t) { t.classList.toggle("sel", !!(G && G.sel && G.sel.has(+t.dataset.i))); });
+  $("gal-grid").classList.toggle("selecting", !!S.brSelect || !!(G && G.sel && G.sel.size));
+  $("br-select").classList.toggle("on", !!S.brSelect);
+  $("br-select").setAttribute("aria-pressed", S.brSelect ? "true" : "false");
+  renderSelBar();
+}
+function renderSelBar() {
+  var n = G && G.sel ? G.sel.size : 0, on = !!G && (S.brSelect || n > 0);
+  $("sel-bar").classList.toggle("hidden", !on);
+  if (!on) return;
+  $("sel-text").textContent = S.brBusy || (n ? plural(n, "picture") + " selected" : "Click pictures to select them");
+  $("sel-download").disabled = !n || !!S.brBusy;
+}
+function selAll() {
+  if (!G) return;
+  G.items.forEach(function (it, i) { if (it && !it.saved && !G.hidden[it.source]) G.sel.add(i); });
+  selPaint();
+}
+$("br-select").addEventListener("click", function () {
+  S.brSelect = !S.brSelect;
+  if (!S.brSelect && G && G.sel) G.sel.clear();
+  selPaint();
+});
+$("sel-download").addEventListener("click", function () {
+  if (G && G.sel.size) galDownloadMany(Array.from(G.sel).sort(function (a, b) { return a - b; }));
+});
+$("sel-all").addEventListener("click", selAll);
+$("sel-clear").addEventListener("click", function () { if (G) G.sel.clear(); selPaint(); });
+$("sel-done").addEventListener("click", function () { S.brSelect = false; if (G) G.sel.clear(); selPaint(); });
 // Right-click on a picture: the grid's offers to download it, the viewer's also to copy it (as a PNG, the one
 // format every program takes from the clipboard). The copy is fetched through Sourcerer -- a CDN's picture
 // would taint the canvas -- like the viewer's own fallback.
@@ -1084,7 +1211,7 @@ function openPicMenu(i, viewer, x, y) {
   var it = G && G.items[i], m = $("picmenu");
   if (!it) return;
   picAt = i;
-  m.querySelector('[data-pic="copy"]').classList.toggle("hidden", !viewer || !!it.video);
+  m.querySelector('[data-pic="copy"]').classList.toggle("hidden", !!it.video);
   var d = m.querySelector('[data-pic="download"]');
   d.disabled = !!it.saved || !!G.downloading[it.id];
   d.querySelector("span").textContent = it.saved ? "Already downloaded" : "Download this picture";
@@ -1244,11 +1371,14 @@ $("br-search").addEventListener("input", renderBrowseList);
 $("br-add").addEventListener("click", function () { openCard(null); });
 $("br-sort").addEventListener("change", function () {
   S.brSort = brOrder(this.value);
+  // Ordered by a number: that number stands beside the names.
+  var shows = { images: "images", downloads: "downloads", percent: "percent" }[S.brSort];
+  if (shows) { S.brCount = shows; $("br-count").value = shows; try { localStorage.setItem(BR_COUNT, shows); } catch (e) {} }
   try { localStorage.setItem(BR_SORT, S.brSort); } catch (e) {}
   renderBrowseList();
 });
 $("br-count").addEventListener("change", function () {
-  S.brCount = this.value === "files" ? "files" : "sources";
+  S.brCount = brNumber(this.value);
   try { localStorage.setItem(BR_COUNT, S.brCount); } catch (e) {}
   renderBrowseList();
 });
@@ -1556,6 +1686,7 @@ function fillSettings() {
   $("btn-browse").classList.toggle("hidden", !S.window);
   fillSecurity();
   $("set-follows").checked = st.import_follows === "1";
+  $("set-scanstart").checked = st.scan_on_start !== "0";
   $("set-tilelogo").checked = st.tile_logo !== "0";
   $("set-auto").checked = st.auto_sync === "1";
   $("set-hours").value = st.auto_hours; $("set-hours").disabled = st.auto_sync !== "1";
@@ -1599,6 +1730,7 @@ $("btn-browse").addEventListener("click", function () {
   }).catch(fail);
 });
 $("set-tilelogo").addEventListener("change", function () { saveSetting({ tile_logo: this.checked ? "1" : "0" }); });
+$("set-scanstart").addEventListener("change", function () { saveSetting({ scan_on_start: this.checked ? "1" : "0" }); });
 $("set-follows").addEventListener("change", function () { saveSetting({ import_follows: this.checked ? "1" : "0" }); });
 $("set-auto").addEventListener("change", function () { saveSetting({ auto_sync: this.checked ? "1" : "0" }); });
 $("set-hours").addEventListener("change", function () { saveSetting({ auto_hours: this.value }); });
@@ -2087,7 +2219,6 @@ $$("[data-log]").forEach(function (b) {
     renderLog();
   });
 });
-$("btn-add").addEventListener("click", function () { openCard(null); });
 $("btn-accounts").addEventListener("click", function () { openAccounts(); });
 $("btn-acc-check").addEventListener("click", function () {
   accCheck(((S.accData || {}).accounts || []).filter(function (a) { return a.logged_in; }).map(function (a) { return a.key; }));
@@ -2102,6 +2233,31 @@ $("btn-quit").addEventListener("click", function () {
   }).catch(fail);
 });
 $("btn-sync-all").addEventListener("click", function () { sync(null); });
+
+// ---- the window's own title bar (Windows) ------------------------------------------------
+// desktop.py takes the native title bar off and says so (frame: "custom"): the page's bar is then the top of the
+// window -- it drags it (pywebview's drag region, on the bar itself, not on its buttons), a double-click maximizes
+// -- and draws minimize, maximize and close at the right edge. Anything else keeps its native bar.
+function applyFrame() {
+  var custom = S.frame === "custom";
+  document.documentElement.classList.toggle("frameless", custom);
+  $("winctl").classList.toggle("hidden", !custom);
+  $$("#toolbar, #toolbar .logo, #toolbar .brand, #toolbar #version, #toolbar .grow").forEach(function (el) {
+    el.classList.toggle("pywebview-drag-region", custom);
+  });
+}
+function windowAct(action) {
+  api("POST", "/api/window", { action: action }).then(function (d) {
+    $("win-max").querySelector("use").setAttribute("href", d.maximized ? "#i-copy" : "#i-square");
+    $("win-max").title = $("win-max").ariaLabel = d.maximized ? "Restore" : "Maximize";
+  }).catch(fail);
+}
+$("win-min").addEventListener("click", function () { windowAct("minimize"); });
+$("win-max").addEventListener("click", function () { windowAct("maximize"); });
+$("win-close").addEventListener("click", function () { windowAct("close"); });
+$("toolbar").addEventListener("dblclick", function (e) {
+  if (S.frame === "custom" && e.target.classList.contains("pywebview-drag-region")) windowAct("maximize");
+});
 
 // ---- the master password, and the reset ------------------------------------------------
 // The server answers 401 "locked" to everything until the password was given (security.py): the page asks

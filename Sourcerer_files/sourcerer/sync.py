@@ -292,6 +292,12 @@ def scheduler():
     def run():
         time.sleep(random.uniform(20, 60))    # the window first, and not the start's own second
         check_accounts_at_start()
+        if db.get_setting("scan_on_start") == "1":           # as Refresh: a card with auto-download downloads what it finds
+            try:
+                if enqueue(auto=True):
+                    event("info", "Looking for new posts, as at every start")
+            except Exception:
+                log.exception("scan at start")
         next_check = time.monotonic() + random.uniform(*ACCOUNT_HOURS) * 3600
         while True:
             time.sleep(60)

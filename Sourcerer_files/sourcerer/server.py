@@ -22,6 +22,7 @@ from . import accounts, config, db, follows, gallery, imaging, net, previews, se
 log = logging.getLogger(__name__)
 app = Flask(__name__, static_folder=None)
 WINDOW = None          # set by desktop.py when a pywebview window is open
+CUSTOM_FRAME = False   # desktop.py took the window's title bar off: the page draws the buttons for it
 URL = ""               # where this server answers, for a second start to open
 LAST_SEEN = [time.monotonic()]   # when a page last asked for anything
 LAYOUTS = ("together", "per_source")
@@ -29,7 +30,7 @@ DEDUPES = ("keep_all", "best", "master")
 # What Settings may change, and the values each may take.
 CHOICES = {"filenames": ("original", "dated"), "theme": ("system", "light", "dark"),
            "auto_sync": ("0", "1"), "import_follows": ("0", "1"), "channel": ("stable", "beta"),
-           "tile_logo": ("0", "1")}
+           "tile_logo": ("0", "1"), "scan_on_start": ("0", "1")}
 RANGES = {"card_size": (160, 800), "auto_hours": (1, 168), "parallel": (1, 64),
           "per_host": (1, 32), "pace_ms": (0, 5000)}
 
@@ -335,7 +336,8 @@ def state():
                    fields=[{"label": label, "example": example, "logged_in": on.get(label, False)}
                            for label, example in sources.FIELDS],
                    logins=accounts.problems(rows), pauses=net.pauses(),
-                   artists=_artists(), sync=sync.status(), window=WINDOW is not None)
+                   artists=_artists(), sync=sync.status(), window=WINDOW is not None,
+                   frame="custom" if CUSTOM_FRAME and WINDOW is not None else "native")
 
 
 # ---- artist cards --------------------------------------------------------------
@@ -662,6 +664,27 @@ def gallery_download():
 def gallery_close():
     gallery.close((request.get_json(force=True) or {}).get("gallery") or "")
     return jsonify(ok=True)
+
+
+@app.post("/api/window")
+def window_action():
+    """The buttons of the page's own title bar (CUSTOM_FRAME): minimize, maximize and back, close."""
+    action = (request.get_json(silent=True) or {}).get("action")
+    if WINDOW is None or action not in ("minimize", "maximize", "close"):
+        abort(400)
+    maximized = False
+    try:
+        maximized = int(WINDOW.native.WindowState) == 2          # WinForms' FormWindowState.Maximized
+    except Exception:
+        pass
+    if action == "minimize":
+        WINDOW.minimize()
+    elif action == "maximize":
+        (WINDOW.restore if maximized else WINDOW.maximize)()
+        maximized = not maximized
+    else:
+        _background(WINDOW.destroy)            # as the window's own close: the program ends with it
+    return jsonify(ok=True, maximized=maximized)
 
 
 @app.post("/api/open-url")

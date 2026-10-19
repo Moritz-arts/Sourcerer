@@ -44,6 +44,8 @@
   <symbol id="i-tool" viewBox="0 0 24 24"><path d="M7 10h3v-3l-3.5 -3.5a6 6 0 0 1 8 8l6 6a2 2 0 0 1 -3 3l-6 -6a6 6 0 0 1 -8 -8l3.5 3.5"/></symbol>
   <symbol id="i-world" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0"/><path d="M3.6 9h16.8"/><path d="M3.6 15h16.8"/><path d="M11.5 3a17 17 0 0 0 0 18"/><path d="M12.5 3a17 17 0 0 1 0 18"/></symbol>
   <symbol id="i-lock" viewBox="0 0 24 24"><path d="M5 13a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2v6a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2z"/><path d="M11 16a1 1 0 1 0 2 0a1 1 0 0 0 -2 0"/><path d="M8 11v-4a4 4 0 1 1 8 0v4"/></symbol>
+  <symbol id="i-select" viewBox="0 0 24 24"><path d="M9 11l3 3l8 -8"/><path d="M20 12v6a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2v-12a2 2 0 0 1 2 -2h9"/></symbol>
+  <symbol id="i-square" viewBox="0 0 24 24"><path d="M5 5m0 2a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2v10a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2z"/></symbol>
   <symbol id="i-copy" viewBox="0 0 24 24"><path d="M7 9.667a2.667 2.667 0 0 1 2.667 -2.667h8.666a2.667 2.667 0 0 1 2.667 2.667v8.666a2.667 2.667 0 0 1 -2.667 2.667h-8.666a2.667 2.667 0 0 1 -2.667 -2.667z"/><path d="M4.012 16.737a2.005 2.005 0 0 1 -1.012 -1.737v-10c0 -1.1 .9 -2 2 -2h10c.75 0 1.158 .385 1.5 1"/></symbol>
   <symbol id="i-cloud-down" viewBox="0 0 24 24"><path d="M19 18a3.5 3.5 0 0 0 0 -7h-1a5 4.5 0 0 0 -11 -2a4.6 4.4 0 0 0 -2.1 8.4"/><path d="M12 13l0 9"/><path d="M9 19l3 3l3 -3"/></symbol>
   <symbol id="i-external" viewBox="0 0 24 24"><path d="M12 6h-6a2 2 0 0 0 -2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-6"/><path d="M11 13l9 -9"/><path d="M15 4h5v5"/></symbol>
@@ -64,15 +66,20 @@
 </svg>
 
 <div class="app">
-  <header class="toolbar">
+  <header class="toolbar" id="toolbar">
     <img class="logo" src="/static/logo.svg" alt="">
     <span class="brand">Sourcerer</span><span id="version" class="muted small"></span>
     <span class="grow"></span>
-    <button id="btn-add" title="New card (Ctrl+N)"><svg class="ic"><use href="#i-plus"/></svg> New card</button>
     <button id="btn-sync-all" title="Refresh every artist: look for new posts; artists with auto-download download them (F5)"><svg class="ic"><use href="#i-refresh"/></svg> Refresh</button>
     <button id="btn-accounts" title="Log in to your sites and keep the logins working"><svg class="ic"><use href="#i-key"/></svg> Manage Accounts<span id="acc-count" class="count hidden"></span></button>
     <button id="btn-quit" class="icon hidden" aria-label="Quit" title="Quit Sourcerer"><svg class="ic"><use href="#i-power"/></svg></button>
     <button id="btn-settings" class="icon" aria-label="Settings" title="Settings (Ctrl+,)"><svg class="ic"><use href="#i-settings"/></svg><span id="update-dot" class="dot hidden"></span></button>
+    <!-- The window's own buttons, when the window has no title bar (Windows: the page's bar is the top of the window). -->
+    <span id="winctl" class="winctl hidden">
+      <button type="button" class="wc" id="win-min" aria-label="Minimize" title="Minimize"><svg class="ic"><use href="#i-minus"/></svg></button>
+      <button type="button" class="wc" id="win-max" aria-label="Maximize" title="Maximize"><svg class="ic"><use href="#i-square"/></svg></button>
+      <button type="button" class="wc close" id="win-close" aria-label="Close" title="Close"><svg class="ic"><use href="#i-x"/></svg></button>
+    </span>
   </header>
 
   <!-- Browse: the artists on the left, their posts from every source on the right. -->
@@ -87,10 +94,16 @@
           <option value="name">Alphabetic</option>
           <option value="activity">Latest activity</option>
           <option value="source">Source</option>
+          <option value="logo">Source (logo)</option>
+          <option value="images">Image count</option>
+          <option value="downloads">Downloads</option>
+          <option value="percent">Downloads (%)</option>
         </select>
         <select id="br-count" aria-label="The number beside each artist" title="The number beside each artist">
           <option value="sources">Sources</option>
-          <option value="files">Images</option>
+          <option value="images">Images</option>
+          <option value="downloads">Downloads</option>
+          <option value="percent">Downloads (%)</option>
         </select>
       </div>
       <div id="br-list" class="br-list"></div>
@@ -108,8 +121,9 @@
         <button type="button" id="gal-new" class="pill accent hidden" title="Show them: the gallery opens again"></button>
         <span class="grow"></span>
         <span id="br-progress" class="muted small"></span>
+        <button type="button" id="br-select" class="hidden" aria-pressed="false" title="Click pictures to select several, then download them (or Ctrl-click, Shift-click for a range)"><svg class="ic"><use href="#i-select"/></svg> Select</button>
         <button type="button" id="br-auto" class="hidden" role="switch" aria-checked="false" title="Auto-download: a refresh of this artist also downloads what it finds (A)"><svg class="ic"><use href="#i-cloud-down"/></svg><span>Auto-download</span><i class="track"></i></button>
-        <button type="button" id="br-download" class="primary" title="Download everything that is not in the library yet from the sources that are switched on (D)"><svg class="ic"><use href="#i-download"/></svg> Download selected source(s)</button>
+        <button type="button" id="br-download" class="primary" title="Download everything of this artist that is not in the library yet, from the sources that are switched on (D)"><svg class="ic"><use href="#i-download"/></svg> Download whole artist</button>
         <div class="br-view">
           <div class="seg" id="gal-fit" role="group" aria-label="Pictures">
             <button type="button" data-fit="square" title="Square tiles, cropped to fill">Squares</button>
@@ -117,6 +131,13 @@
           </div>
           <input type="range" id="gal-size" min="120" max="420" step="20" value="200" title="Picture size" aria-label="Picture size">
         </div>
+      </div>
+      <div id="sel-bar" class="sel-bar hidden">
+        <span id="sel-text"></span>
+        <button type="button" class="primary" id="sel-download"><svg class="ic"><use href="#i-download"/></svg> Download</button>
+        <button type="button" id="sel-all">Select all</button>
+        <button type="button" id="sel-clear">Clear</button>
+        <button type="button" class="icon flat" id="sel-done" aria-label="Done selecting" title="Done (Esc)"><svg class="ic"><use href="#i-x"/></svg></button>
       </div>
       <div class="gal-body" id="gal-body">
         <div id="gal-grid" class="gal-grid"></div>
@@ -342,6 +363,12 @@
             <p class="hint">After a login, and every half day, the accounts you follow on Bluesky, Mastodon and pixiv
                join the list as artists. Nothing is read or downloaded for them until you open one or do something with it.</p></div>
           <label class="switch"><input type="checkbox" id="set-follows"><span></span></label>
+        </div>
+        <div class="row">
+          <div><div class="row-title">Look for new posts at every start</div>
+            <p class="hint">Every time Sourcerer is opened it looks at every artist, as Refresh does (cards with
+               auto-download also download what they find). Sourcerer checks for its own updates at every start anyway.</p></div>
+          <label class="switch"><input type="checkbox" id="set-scanstart"><span></span></label>
         </div>
         <div class="row">
           <div><div class="row-title">Automatic sync</div>
