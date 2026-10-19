@@ -372,12 +372,24 @@ function removeArtist(a) {
 // Accounts the sites did not show to be one artist (the follows come in as one card each): the open card and the ones
 // ticked here become one. The card marked "Stays" gets every source and file, the others are gone. There is no further
 // question -- the button at the bottom is the confirmation, so several cards go in one go.
-var M = { from: 0, picked: [], keep: 0, key: "", base: "", handles: [], links: [], urls: [], suggested: [], why: {} };
+var M = { from: 0, picked: [], keep: 0, key: "", names: [], handles: [], stems: [], links: [], urls: [], suggested: [], why: {} };
 
 // Two names are one when only what is no letter or digit differs: emoji, spaces, marks, width, case
 // ("👹 青林檎テル" is "青林檎テル"). The base leaves out a "(handle)" at the end, which a card gets when another had its name.
 function nameKey(name) { return String(name || "").normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ""); }
 function baseKey(name) { return nameKey(String(name || "").replace(/\s*[(\[（【][^)\]）】]*[)\]）】]\s*$/, "")); }
+// Every name a card is known by: its own, which is the artist's @name, and what the sites show for its accounts (`alias`).
+// The list's search finds a card by its name or by what a site shows for any of its accounts.
+function nameHit(a, q) {
+  return a.name.toLowerCase().indexOf(q) >= 0 || a.sources.some(function (s) { return s.alias && String(s.alias).toLowerCase().indexOf(q) >= 0; });
+}
+function namesOf(a) {
+  var out = [];
+  [a.name].concat(a.sources.map(function (s) { return s.alias; })).forEach(function (n) {
+    [nameKey(n), baseKey(n)].forEach(function (k) { if (k.length >= 2 && out.indexOf(k) < 0) out.push(k); });
+  });
+  return out;
+}
 // The account names in a card's links: "foo" in bsky.app/profile/foo.bsky.social, x.com/foo, mastodon.social/@foo and
 // foo.fanbox.cc -- what a display name is not (an artist known as "Mew" is @Mewnet). Numbers (pixiv's ids) and short ones
 // say nothing. (`follows.handle_key` does the same for the automatic combining, with a longer minimum.)
@@ -396,6 +408,13 @@ function handlesOf(a) {
   });
   return out;
 }
+// The same without the digits at the end: @Blackmoon, @blackmoon_77 and @BlackMoon1985 are one artist's accounts (the number is
+// whatever was free on each site). (`follows.stem_key`.)
+function stemsOf(a) {
+  var out = [];
+  handlesOf(a).forEach(function (h) { var t = h.replace(/\d+$/, ""); if (t !== h && t.length >= 4 && out.indexOf(t) < 0) out.push(t); });
+  return out;
+}
 // The accounts a card's profiles name themselves (pixiv's declared twitter, a Mastodon field, Fanbox's links), lower-cased.
 function linksOf(a) {
   var out = [];
@@ -405,23 +424,27 @@ function linksOf(a) {
   return out;
 }
 function urlsOf(a) { return a.sources.map(function (s) { return String(s.url).toLowerCase(); }); }
-// How likely b is the open card's artist: 5 a profile names the other's account, 4 the same name, 3 the same but for a
-// "(handle)" or a shared account name, 2 a name that is the other's account name, 1 one name inside the other. 0: nothing.
+// How likely b is the open card's artist: 6 a profile names the other's account, 5 a name in common (the name a site shows
+// counts), 4 the same account name, 3 the same but for the digits at its end, 2 a name that is the other's account name,
+// 1 one name inside the other. 0: nothing.
 function sameness(b) {
-  var kb = nameKey(b.name), hb = handlesOf(b);
+  var nb = namesOf(b), hb = handlesOf(b), sb = stemsOf(b), kb = nameKey(b.name);
   var theirs = urlsOf(b), mine = M.urls || [];
-  if (M.links.some(function (u) { return theirs.indexOf(u) >= 0; }) || linksOf(b).some(function (u) { return mine.indexOf(u) >= 0; })) return 5;
-  if (M.key && M.key === kb) return 4;
-  if ((M.base && M.base === baseKey(b.name)) || M.handles.some(function (h) { return hb.indexOf(h) >= 0; })) return 3;
-  if (hb.indexOf(M.key) >= 0 || M.handles.indexOf(kb) >= 0) return 2;
+  var has = function (list) { return function (x) { return list.indexOf(x) >= 0; }; };
+  if (M.links.some(has(theirs)) || linksOf(b).some(has(mine))) return 6;
+  if (M.names.some(has(nb))) return 5;
+  if (M.handles.some(has(hb))) return 4;
+  if (M.stems.some(has(sb)) || M.stems.some(has(hb)) || M.handles.some(has(sb))) return 3;
+  if (M.names.some(has(hb)) || nb.some(has(M.handles))) return 2;
   var lo = M.key.length < kb.length ? M.key : kb, hi = lo === M.key ? kb : M.key;
   return lo.length >= 3 && lo.length * 2 >= hi.length && hi.indexOf(lo) >= 0 ? 1 : 0;
 }
-var WHY = { 5: "its profile names the other account", 4: "the same name", 3: "the same account name", 2: "a name that is the other's account name", 1: "a similar name" };
+var WHY = { 6: "its profile names the other account", 5: "the same name", 4: "the same account name", 3: "the same account name but for the numbers",
+            2: "a name that is the other's account name", 1: "a similar name" };
 function openMerge(a) {
   closeMenu();
-  M = { from: a.id, picked: [], keep: 0, key: nameKey(a.name), base: baseKey(a.name), handles: handlesOf(a), links: linksOf(a), urls: urlsOf(a),
-        suggested: [], why: {} };
+  M = { from: a.id, picked: [], keep: 0, key: nameKey(a.name), names: namesOf(a), handles: handlesOf(a), stems: stemsOf(a), links: linksOf(a),
+        urls: urlsOf(a), suggested: [], why: {} };
   var scored = S.artists.filter(function (b) { return b.id !== a.id; })
     .map(function (b) { return [sameness(b), b]; }).filter(function (x) { return x[0]; })
     .sort(function (x, y) { return y[0] - x[0] || x[1].name.localeCompare(y[1].name); }).slice(0, 10);
@@ -448,7 +471,7 @@ function renderMerge() {
       '<span class="br-n">' + (a.sources.filter(function (s) { return s.supported; }).length || "") + "</span></button>" +
       (on && group ? (keeper === a.id ? '<span class="keeps">Stays</span>' : '<button type="button" class="keep" data-keep="' + a.id + '">Keep this one</button>') : "") + "</div>";
   }
-  var me = artistById(M.from), others = S.artists.filter(function (a) { return a.id !== M.from && (!q || a.name.toLowerCase().indexOf(q) >= 0); });
+  var me = artistById(M.from), others = S.artists.filter(function (a) { return a.id !== M.from && (!q || nameHit(a, q)); });
   var sug = M.suggested.map(artistById).filter(function (a) { return a && others.indexOf(a) >= 0; });
   var rest = others.filter(function (a) { return sug.indexOf(a) < 0; }).sort(function (x, y) { return x.name.localeCompare(y.name); });
   box.innerHTML = (me ? row(me, true) : "") +
@@ -739,7 +762,7 @@ function allText() {
 function renderBrowseList() {
   var q = $("br-search").value.trim().toLowerCase(), bySite = S.brSort === "source", sites = {};
   var byStar = S.brSort === "favorites", stars = 0;
-  var list = S.artists.filter(function (a) { return !q || a.name.toLowerCase().indexOf(q) >= 0; })
+  var list = S.artists.filter(function (a) { return !q || nameHit(a, q); })
     .sort(function (x, y) {
       if (byStar && !x.favorite !== !y.favorite) return x.favorite ? -1 : 1;
       if (S.brSort === "activity") { var tx = activityKey(x), ty = activityKey(y); if (tx !== ty) return !tx ? 1 : !ty ? -1 : tx < ty ? 1 : -1; }

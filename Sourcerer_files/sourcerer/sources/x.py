@@ -93,8 +93,11 @@ def following(key):
     gallery-dl prints the whole list at the end (-j), so it is read in one go -- once a day at most (follows.HOURS)."""
     twid = accounts.jar("x").get("twid") or ""
     me = re.sub(r"\D", "", twid.rpartition("%3D")[2] or twid.rpartition("=")[2])
-    if not me or not _gdl.available():
-        return
+    # Said, not skipped: a list that silently never came was a month of "my X follows are missing".
+    if not me:
+        raise RuntimeError("the saved login has no twid cookie, so X's own account is unknown -- log in to X again in Manage Accounts")
+    if not _gdl.available():
+        raise RuntimeError("X's list needs gallery-dl, which did not install: Settings > Repair")
 
     def pages():
         net._stopped("https://x.com")

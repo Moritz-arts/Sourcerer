@@ -425,15 +425,32 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   links, only profile addresses of sites Sourcerer knows count, a pixiv work's link does not; Mastodon's, Misskey's and Fanbox's
   lists of follows carry them, `check_card` / `refresh_avatar` / `backfill_avatars` store them from the profile, and the lists were
   read to their end once more -- `follow_links_v1` -- so cards imported before learn theirs): an account that names a card's account, or is named by
-  one, is that card's; (2) **the account name in the address** (`follows.handle_key`: @Mewnet on Mastodon, x.com/mewnet, Bluesky's
+  one, is that card's; (2) **the account name in the address** (`follows.handle_text` / `handle_key`: @Mewnet on Mastodon, x.com/mewnet, Bluesky's
   handle without the domain, mewnet.fanbox.cc; at least 4 letters, never a number, only on sites whose address names the account --
   not a booru's `/posts`; `handlesOf` in app.js is its twin with a minimum of 3, for suggestions only); (3) the display name
   by `follows.name_key` (letters and digits only, NFKC, case-folded -- `nameKey` in `app.js` is its twin for the merge dialog's
   suggestions: keep them alike), at least 3 characters. Names and account names live in one index, so an account name matches a
-  display name too. And **never on the same site twice**, whatever the evidence (two pixiv accounts are more likely two people, also
+  display name too. **The digits at the end of an account name are dropped for a second match** (`follows.stem_key`: @Blackmoon,
+  @blackmoon_77 and @BlackMoon1985 are one artist -- the number is whatever was free on each site; the stem has at least 5
+  letters, `stemsOf` in app.js is its twin). **Every name a site showed stays with its account** (`sources.alias`, set when a
+  card or a joined account comes in; v0.34 filled the first source from the card's name once, `aliases_v1`), because a card is
+  named by its @name now and "Marimo" must still find the card whose Mastodon account is shown as Marimo (`_Twins.url_keys`,
+  `namesOf` in app.js, and the list's search). Where the accounts share no name at all (@Marimo, @manmosumario, a pixiv name in
+  kanji) only a profile that names the other (1) or the merge dialog helps -- there is nothing more to compute.
+  And **never on the same site twice**, whatever the evidence (two pixiv accounts are more likely two people, also
   when one names the other) -- a name shared by a listed card and two cards the user made is left alone. The user's own cards are
-  never merged away; they only gain a source. The merge dialog's *Possibly the same artist* says why (`WHY`): 5 a profile names the
-  other account, 4 the same name, 3 the same account name, 2 a name that is the other's account name, 1 a similar name.
+  never merged away; they only gain a source. The merge dialog's *Possibly the same artist* says why (`WHY`): 6 a profile names the
+  other account, 5 a name in common (the names the sites show count), 4 the same account name, 3 the same but for the numbers
+  at its end, 2 a name that is the other's account name, 1 a similar name.
+- **A card is called by its @name** (`follows.card_name`, `rename_listed`): the account name in the address of its first account
+  on a site that has one (order of `HANDLE_KINDS`: X, Bluesky, Mastodon, Misskey, Patreon, Fanbox, forum), without the digits at
+  its end when two accounts agree on the name but for them; a card whose accounts have no @name (pixiv) keeps the name the site
+  shows. A card from a follow list, one made by hand without a name typed, and -- after every look -- every *listed* card
+  (nothing of it is downloaded, so its name and folder are free to change; one the user touched keeps its name) are named so.
+  A name two cards would share gets the account in brackets (`_unique`).
+- **X's follows said nothing when they failed** (no `twid` cookie in the saved login, gallery-dl missing): `x.following` returned
+  without a word, and "my X follows are missing" had no trace. It raises now, the log says why, and a failed look of a list
+  with `FOLLOWS_HOURS` is tried again in about four hours instead of the next day. Still not run against a real X login.
 - **A follow list is the site's word, not ours.** A link is taken only when it is a profile of the
   list's own site (`follows._add`: another site's address -- a pixiv work's -- would cost a request on
   a login inside a write transaction) and on a public https host (`net.public_https`; checked before

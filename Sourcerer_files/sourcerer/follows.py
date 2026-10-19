@@ -97,22 +97,55 @@ def _base_key(name):
 
 
 HANDLE_MIN = 4                           # an account name shorter than this says too little to join two cards by it
-HANDLE_KINDS = ("bluesky", "mastodon", "misskey", "x", "patreon", "fanbox", "xenforo")     # sites whose address names the account
+STEM_MIN = 5                             # ... and one without its trailing digits says it only from here
+HANDLE_KINDS = ("x", "bluesky", "mastodon", "misskey", "patreon", "fanbox", "xenforo")     # sites whose address names the account, the best known first
 
 
-def handle_key(url):
-    """The account's own name in its address, as a name key: "mewnet" for mastodon.social/@Mewnet, x.com/Mewnet,
-    bsky.app/profile/mewnet.bsky.social and mewnet.fanbox.cc -- what a display name ("Mew") is not, and the surest thing two
-    accounts of one artist share when the display names differ (an artist known by several names). Numbers (pixiv's ids)
-    and short names say nothing: "". (`handlesOf` in app.js is its twin for the merge dialog's suggestions.)"""
+def handle_text(url):
+    """The account's own name in its address, as written: "Mewnet" for mastodon.social/@Mewnet, x.com/Mewnet,
+    bsky.app/profile/mewnet.bsky.social and mewnet.fanbox.cc -- what a display name ("Mew") is not. "" where the address
+    names no account (pixiv's number, a booru's search). `card_name` names the card by it."""
     if sources.kind_of(url) not in HANDLE_KINDS:
         return ""
     parts = urllib.parse.urlsplit(url)
     host = (parts.hostname or "").lower()
     last = host.split(".")[0] if host.endswith(".fanbox.cc") else \
         urllib.parse.unquote(parts.path.rstrip("/").rsplit("/", 1)[-1])
-    key = name_key(last.lstrip("@").split("@")[0].split(".")[0])
-    return key if len(key) >= HANDLE_MIN and not key.isdigit() else ""
+    text = last.lstrip("@").split("@")[0].split(".")[0]
+    key = name_key(text)
+    return text if key and not key.isdigit() else ""
+
+
+def handle_key(url):
+    """The account name as a name key -- the surest thing two accounts of one artist share when the display names differ
+    (an artist known by several names). Short ones say nothing: "". (`handlesOf` in app.js is its twin for the merge
+    dialog's suggestions.)"""
+    key = name_key(handle_text(url))
+    return key if len(key) >= HANDLE_MIN else ""
+
+
+def stem_key(url):
+    """The account name without the digits at its end: an artist is @Blackmoon on one site and @blackmoon_77 on
+    another, and the number is whatever was free. "" when nothing was cut (the account name itself says it) or too little is left."""
+    key = name_key(handle_text(url))
+    stem = key.rstrip("0123456789")
+    return stem if stem != key and len(stem) >= STEM_MIN else ""
+
+
+def card_name(urls, display=""):
+    """What a card is called: the artist's @name -- the account name of its first account on a site that has one (HANDLE_KINDS
+    in that order), else `display`, the name the site shows. Where several accounts agree on a name but for the digits at its
+    end (@Blackmoon, @blackmoon_77), the name without them: the one the artist is known by."""
+    ranked = sorted(urls, key=lambda u: HANDLE_KINDS.index(sources.kind_of(u)) if sources.kind_of(u) in HANDLE_KINDS else 99)
+    found = [h for h in (handle_text(u) for u in ranked) if h]
+    if not found:
+        return display
+    stems = {name_key(h).rstrip("0123456789") for h in found}
+    if len(found) > 1 and len(stems) == 1 and len(next(iter(stems))) >= STEM_MIN:
+        plain = next((h for h in found if name_key(h) in stems), None)         # one of them is the plain name already
+        cut = re.sub(r"[\d_.\-\s]+$", "", found[0])
+        return plain or (cut if name_key(cut) in stems else found[0])
+    return found[0]
 
 
 def _loads(text):
@@ -134,12 +167,12 @@ class _Twins:
 
     def __init__(self):
         self.names, self.kinds, self.listed, self.attached = {}, {}, {}, 0
-        self.owner, self.urls, self.declared, self.named_by = {}, {}, {}, {}
+        self.owner, self.urls, self.declared, self.named_by, self.alias = {}, {}, {}, {}, {}
         with db.connect() as c:
             for r in c.execute("SELECT id, name, listed FROM artists ORDER BY id"):
                 self.register(r["id"], r["name"], bool(r["listed"]))
-            for r in c.execute("SELECT artist_id, url, links FROM sources"):
-                self.attach(r["artist_id"], sources.kind_of(r["url"]), r["url"], _loads(r["links"]))
+            for r in c.execute("SELECT artist_id, url, links, alias FROM sources"):
+                self.attach(r["artist_id"], sources.kind_of(r["url"]), r["url"], _loads(r["links"]), r["alias"])
 
     def register(self, artist_id, name, listed):
         self.listed[artist_id] = listed
@@ -148,16 +181,22 @@ class _Twins:
             if len(key) >= self.MIN:
                 self.names.setdefault(key, []).append(artist_id)
 
-    def attach(self, artist_id, kind, url=None, links=()):
+    def url_keys(self, url):
+        """The names an account is found by: the name the site shows, its account name and that without the digits."""
+        alias = self.alias.get(url) or ""
+        return {k for k in (name_key(alias), _base_key(alias), handle_key(url), stem_key(url)) if len(k) >= self.MIN}
+
+    def attach(self, artist_id, kind, url=None, links=(), alias=None):
         self.kinds.setdefault(artist_id, set()).add(kind)
         if not url:
             return
         url = url.lower()
         self.owner[url] = artist_id
         self.urls.setdefault(artist_id, set()).add(url)
-        handle = handle_key(url)
-        if handle:
-            self.names.setdefault(handle, []).append(artist_id)        # found as a name is
+        if alias:
+            self.alias[url] = alias
+        for key in self.url_keys(url):
+            self.names.setdefault(key, []).append(artist_id)           # found as a name is
         for link in links:
             self.declared.setdefault(artist_id, set()).add(link)
             self.named_by.setdefault(link, set()).add(artist_id)
@@ -180,7 +219,7 @@ class _Twins:
         said = self.said(links, url, kinds)
         if said:
             return self.pick(said)
-        keys = {name_key(name), _base_key(name), handle_key(url or "")} - {""}
+        keys = {name_key(name), _base_key(name), handle_key(url or ""), stem_key(url or "")} - {""}
         ids = {i for key in keys for i in self.names.get(key, ())}
         return self.pick([i for i in sorted(ids) if not (self.kinds[i] & kinds)])
 
@@ -191,8 +230,8 @@ class _Twins:
         for url in self.urls.pop(card, ()):
             self.owner[url] = target
             self.urls.setdefault(target, set()).add(url)
-            if handle_key(url):
-                self.names.setdefault(handle_key(url), []).append(target)
+            for key in self.url_keys(url):
+                self.names.setdefault(key, []).append(target)
         self.declared.setdefault(target, set()).update(self.declared.pop(card, ()))
         for named in self.named_by.values():
             if card in named:
@@ -239,21 +278,21 @@ def _add(page, kind, public, twins=None):
             twin = twins.find(name, {site_kind}, url, links) if twins else None
             picture = f.get("avatar") if isinstance(f.get("avatar"), str) and f["avatar"].startswith("https://") else None
             if twin:                                        # the same artist on another site: one card
-                con.execute("INSERT INTO sources (artist_id, url, kind, links) VALUES (?, ?, ?, ?)",
-                            (twin, url, site_kind, json.dumps(links) if links else None))
+                con.execute("INSERT INTO sources (artist_id, url, kind, links, alias) VALUES (?, ?, ?, ?, ?)",
+                            (twin, url, site_kind, json.dumps(links) if links else None, name))
                 if picture:
                     con.execute("UPDATE artists SET avatar_url = ?, avatar_headers = ? WHERE id = ? AND avatar_url IS NULL",
                                 (picture, json.dumps(headers) if headers else None, twin))
-                twins.attach(twin, site_kind, url, links)
+                twins.attach(twin, site_kind, url, links, name)
                 twins.attached += 1
                 continue
             artist_id = con.execute("INSERT INTO artists (name, listed, avatar_url, avatar_headers) VALUES (?, 1, ?, ?)",
-                                    (_unique(name, url, taken), picture, json.dumps(headers) if headers and picture else None)).lastrowid
-            con.execute("INSERT INTO sources (artist_id, url, kind, links) VALUES (?, ?, ?, ?)",
-                        (artist_id, url, site_kind, json.dumps(links) if links else None))
+                                    (_unique(card_name([url], name), url, taken), picture, json.dumps(headers) if headers and picture else None)).lastrowid
+            con.execute("INSERT INTO sources (artist_id, url, kind, links, alias) VALUES (?, ?, ?, ?, ?)",
+                        (artist_id, url, site_kind, json.dumps(links) if links else None, name))
             if twins:
                 twins.register(artist_id, name, True)
-                twins.attach(artist_id, site_kind, url, links)
+                twins.attach(artist_id, site_kind, url, links, name)
             made.append(artist_id)
     if made or (twins and twins.attached):
         _touch()
@@ -280,6 +319,9 @@ def _look(key):
                 db.set_setting(done, stamp)
     except Exception as e:
         why = net.reason(e)
+        hours = getattr(site, "FOLLOWS_HOURS", 0)
+        if hours:                                     # a failed look of a costly list is tried again in about four hours, not a day
+            db.set_setting("follows_at:" + key, str(time.time() - max(0, hours - 4) * 3600))
         log.info("%s: the list of followed accounts stopped: %s", key, why)
         sync.event("warn", "%s: the list of followed accounts stopped (%s); the next look carries on" % (label, why))
     if total or twins.attached:
@@ -314,7 +356,7 @@ def combine():
         if said:
             target = twins.pick(said)
         else:
-            keys = {name_key(names[card]), _base_key(names[card])} | {handle_key(u) for u in twins.urls.get(card, ())}
+            keys = {name_key(names[card]), _base_key(names[card])}.union(*(twins.url_keys(u) for u in twins.urls.get(card, ())))
             near = {i for key in keys if len(key) >= twins.MIN for i in twins.names.get(key, ())} - {card} - gone
             target = twins.pick([i for i in sorted(near) if fits(i)])
         if target is None:
@@ -333,6 +375,32 @@ def combine():
     return done
 
 
+def rename_listed():
+    """Every *listed* card is called by its @name (`card_name`): nothing of it is downloaded, so the name -- and the folder
+    that follows from it -- is free to change, and it follows the accounts a card gains by combining. A card the user touched
+    keeps what it is called. Returns how many were renamed."""
+    done = 0
+    with db.connect() as con:
+        cards = con.execute("SELECT id, name FROM artists WHERE listed = 1 ORDER BY id").fetchall()
+        taken = {}
+        for r in con.execute("SELECT id, name FROM artists"):
+            taken[r["id"]] = sync.safe_name(r["name"]).lower()
+        for card in cards:
+            urls = [r[0] for r in con.execute("SELECT url FROM sources WHERE artist_id = ? ORDER BY id", (card["id"],))]
+            want = card_name(urls, card["name"])
+            if not urls or want == card["name"]:
+                continue
+            others = {v for k, v in taken.items() if k != card["id"]}
+            name = _unique(want, urls[0], others)
+            if name != card["name"]:
+                con.execute("UPDATE artists SET name = ? WHERE id = ?", (name, card["id"]))
+                taken[card["id"]] = sync.safe_name(name).lower()
+                done += 1
+    if done:
+        _touch(True)
+    return done
+
+
 def look(only=None):
     """Every login's followed accounts (or those of the keys in only), one login after another;
     then the cards that turn out to be one artist are combined."""
@@ -347,6 +415,7 @@ def look(only=None):
                 _look(key)
     with _lock:
         combine()
+        rename_listed()
 
 
 def look_async(only=None):

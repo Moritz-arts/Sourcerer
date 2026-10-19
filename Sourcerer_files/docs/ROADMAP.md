@@ -377,6 +377,9 @@ add the one that replaced it.
 - [x] An entry of the activity log that names a failed file jumps to its picture in the artist's gallery (or its post)
 - [x] The same artist is found by what the profiles name (declared twitter, Mastodon fields, Fanbox links), then by the
       account name in the address (@Mewnet), then by the display name -- in the automatic combining and the merge dialog
+- [x] Cards are called by the artist's @name (X, Bluesky, Mastodon, Misskey, Patreon, Fanbox, forum), the digits at its end
+      dropped where accounts agree (@Blackmoon / @blackmoon_77); the names the sites show stay as aliases and still
+      find the card (combining, merge suggestions, the list's search); X's follow list says why when it fails
 - [x] Misskey login (MiAuth) per server; Fanbox and Fantia as sources with a cookie login
 - [x] Grid pictures in the largest rendition below the original (setting: Sharp / Quick); favorites
       (right-click, key F, star, order *Favorites*)
@@ -399,7 +402,8 @@ add the one that replaced it.
 
 ## Next
 
-- [ ] Follows of Patreon (memberships), and a home
+- [ ] Follows of Patreon (memberships: the endpoint of the page "Memberships" is not documented and needs a real
+      login to read; nothing is guessed until then), and a home
       timeline ("Following") in Browse that shows the newest posts of everybody a login follows
       with one request per page instead of one source per account.
 - [ ] Standalone builds: an in-program update for macOS, the AppImage and the portable copies
