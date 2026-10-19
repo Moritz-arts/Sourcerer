@@ -665,6 +665,16 @@ def gallery_state():
         return jsonify(error="This gallery was closed; open it again."), 410
 
 
+@app.post("/api/gallery/saved")
+def gallery_saved():
+    """The items whose 'in the library' changed since the page last heard (a sync saved them, or the user deleted the file)."""
+    gallery_id = _body().get("gallery")
+    try:
+        return jsonify(items=gallery.saved_changes(gallery_id if isinstance(gallery_id, str) else ""))
+    except KeyError:
+        return jsonify(error="This gallery was closed; open it again."), 410
+
+
 @app.post("/api/gallery/progress")
 def gallery_progress():
     gallery_id = _body().get("gallery")

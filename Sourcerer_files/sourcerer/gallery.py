@@ -281,6 +281,7 @@ class _Gallery:
         self.spoken = 0
         self.keys = set()
         self.progress = {}                     # item number -> (bytes so far, bytes in all or 0) of a download on its way
+        self.told = {}                         # item number -> whether the page was told it is in the library
         self.saved = {}                        # (artist id, remote_key) -> the library's row, where there is one
         self.asked = set()                     # ... of these, the ones the library was asked about
         self.sharp = db.get_setting("grid_quality") != "fast"      # the grid shows the largest rendition, not the small one
@@ -400,6 +401,8 @@ class _Gallery:
              "key": m.remote_key,
              "artist": s.artist["name"], "artist_id": s.artist["id"]}
         mine = self.saved.get((s.artist["id"], m.remote_key))
+        if mine and not self._there(mine):
+            mine = None                              # deleted from the library since: not saved any more
         proxy = "/api/gallery/%s/%d/" % (self.id, number)
         sharp = self.sharp
         gif = _gif(m)
@@ -419,6 +422,7 @@ class _Gallery:
             d["mid"] = proxy + "mid" if m.preview_headers is not None else m.large
             if sharp:                                # the grid shows it at once: no blocky stage, nothing laid over it
                 d["thumb"] = d.pop("mid")
+        self.told[number] = bool(mine)
         if mine:
             d["saved"] = True
             if mine["path"]:                         # the library's copy: no request at all
@@ -428,6 +432,32 @@ class _Gallery:
                 elif mine["width"]:
                     d["thumb"] = "/api/thumb/%d?v=%s%s" % (mine["id"], (mine["sha256"] or "")[:12], "&s=960" if sharp else "")
         return d
+
+    def _there(self, row):
+        """Whether the library still has what a files row stands for: its file, or -- a byte-identical duplicate that was
+        not kept (no path) -- the file it duplicates. A file the user deleted is no longer 'downloaded'."""
+        if row["path"]:
+            return os.path.isfile(row["path"])
+        if not row["sha256"]:
+            return False
+        with db.connect() as con:
+            return any(r[0] and os.path.isfile(r[0]) for r in con.execute(
+                "SELECT path FROM files WHERE sha256 = ? AND path IS NOT NULL", (row["sha256"],)))
+
+    def refresh_saved(self):
+        """The library is asked again about every post the page has: {item number: its item} for those whose 'in the
+        library' changed since the page last heard (downloaded by a sync meanwhile, or deleted by the user)."""
+        pairs = [(s.artist["id"], m.remote_key) for s, m in list(self.items.values())]
+        self.saved.clear()
+        self.asked.clear()
+        self._library(pairs)
+        changed = {}
+        for number in list(self.items):
+            before = self.told.get(number)
+            item = self.item(number)
+            if before is not None and item["saved"] != before:
+                changed[number] = item
+        return changed
 
     def close(self):
         for s in self.sources:
@@ -476,6 +506,11 @@ def _fname(m):
         return m.filename
     tail = urllib.parse.unquote(urllib.parse.urlparse(m.url or "").path.rsplit("/", 1)[-1])
     return tail if re.fullmatch(r".{1,200}\.[A-Za-z0-9]{2,5}", tail) else (m.name or "")
+
+
+def saved_changes(gallery_id):
+    """See _Gallery.refresh_saved. Asks no site."""
+    return _get(gallery_id).refresh_saved()
 
 
 def progress(gallery_id):
