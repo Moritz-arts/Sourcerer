@@ -534,7 +534,9 @@ def start_sync():
     # download, "refresh" to only look; none: the card's auto-download decides.
     only = [int(i) for i in body.get("sources") or []] if ids else None
     mode = body.get("mode") if body.get("mode") in ("download", "refresh") else None
-    return jsonify(added=sync.enqueue(ids, only=only, mode=mode))
+    order = [i for i in body.get("order") or [] if isinstance(i, int)] if ids is None else None
+    # No artist: Refresh all -- every card, in the order the list shows them (sync.enqueue).
+    return jsonify(added=sync.enqueue(ids, only=only, mode=mode, everyone=ids is None, order=order))
 
 
 @app.post("/api/artists/<int:artist_id>/auto-download")

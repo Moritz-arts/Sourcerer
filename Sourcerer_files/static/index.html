@@ -73,7 +73,7 @@
     <img class="logo" src="/static/logo.svg" alt="">
     <span class="brand">Sourcerer</span><span id="version" class="muted small"></span>
     <span class="grow"></span>
-    <button id="btn-sync-all" title="Refresh every artist with auto-download: look for new posts and download them, one artist after the other (F5). Other artists are looked at when you open them or refresh them yourself."><svg class="ic"><use href="#i-refresh"/></svg> Refresh all</button>
+    <button id="btn-sync-all" title="Refresh every artist, one after the other down the list: look for new posts online; artists with auto-download also download what they find (F5)"><svg class="ic"><use href="#i-refresh"/></svg> Refresh all</button>
     <button id="btn-accounts" title="Log in to your sites and keep the logins working"><svg class="ic"><use href="#i-key"/></svg> Manage Accounts<span id="acc-count" class="count hidden"></span></button>
     <button id="btn-quit" class="icon hidden" aria-label="Quit" title="Quit Sourcerer"><svg class="ic"><use href="#i-power"/></svg></button>
     <button id="btn-settings" class="icon" aria-label="Settings" title="Settings (Ctrl+,)"><svg class="ic"><use href="#i-settings"/></svg><span id="update-dot" class="dot hidden"></span></button>
@@ -421,7 +421,7 @@
         <div class="row">
           <div><div class="row-title">Gap between artists on a cookie login</div>
             <p class="hint">pixiv, X, Patreon and forums are read with your logged-in session, which is what gets locked
-               when it looks like a robot. This is the pause between two artists on the same such site: careful 20-90 s, normal 10-40 s, fast 3-12 s.
+               when it looks like a robot. This is the pause between two artists on the same such site: careful 15-60 s, normal 10-30 s, fast 3-15 s.
                The one you opened in Browse always goes first, with a short pause. Bluesky, Mastodon, Misskey and boorus are not affected.</p></div>
           <select id="set-logingap" class="narrow">
             <option value="careful">careful</option><option value="normal">normal</option><option value="fast">fast</option>
@@ -444,12 +444,13 @@
         <div class="field">
           <span class="label">Picture quality in the grid</span>
           <div class="segmented two">
-            <button type="button" data-set="grid_quality" data-value="best">Sharp</button>
             <button type="button" data-set="grid_quality" data-value="fast">Quick</button>
+            <button type="button" data-set="grid_quality" data-value="best">Sharp</button>
           </div>
-          <p class="hint">Sharp shows every picture in the largest size the site offers below the original (pixiv's 1200 px,
-             X's large, Bluesky's full size) from the start. Quick shows the small ones first: lighter on a slow line,
-             but visibly softer. Reopen the artist to apply.</p>
+          <p class="hint">Quick (the standard) shows the small picture each site gives for a thumbnail, and a larger one where a
+             tile is stretched wide: light on a slow line, and sharp where it shows. Sharp always loads the largest size the site
+             offers below the original (pixiv's 1200 px, X's large, Bluesky's full size): the same look on most screens,
+             at several times the data. Reopen the artist to apply.</p>
         </div>
         <div class="row">
           <div><div class="row-title">Site mark on the pictures</div>
@@ -494,7 +495,7 @@
         <table class="keys">
           <tr><td><span class="kbd">Ctrl</span> <span class="kbd">N</span> &nbsp;or&nbsp; <span class="kbd">N</span></td><td>New card</td></tr>
           <tr><td><span class="kbd">Ctrl</span> <span class="kbd">F</span> &nbsp;or&nbsp; <span class="kbd">/</span></td><td>Search the artists</td></tr>
-          <tr><td><span class="kbd">F5</span> &nbsp;or&nbsp; <span class="kbd">Ctrl</span> <span class="kbd">R</span></td><td>Refresh every artist with auto-download</td></tr>
+          <tr><td><span class="kbd">F5</span> &nbsp;or&nbsp; <span class="kbd">Ctrl</span> <span class="kbd">R</span></td><td>Refresh all: look at every artist for new posts</td></tr>
           <tr><td><span class="kbd">Ctrl</span> <span class="kbd">,</span></td><td>Settings</td></tr>
           <tr><td><span class="kbd">Ctrl</span> <span class="kbd">L</span></td><td>Show or hide the activity log</td></tr>
           <tr><td><span class="kbd">&uarr;</span> <span class="kbd">&darr;</span> <span class="kbd">Home</span> <span class="kbd">End</span></td><td>Pick the previous or next artist</td></tr>

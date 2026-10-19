@@ -123,15 +123,15 @@ input[type=range] { accent-color: var(--fill-accent); cursor: pointer; }
 .seg button { border: none; border-radius: 0; background: transparent; padding: 4px 12px; font-size: 13px; }
 .seg button.selected { background: var(--bg-accent); color: var(--text-accent); }
 .browse { flex: 1; min-height: 0; display: flex; }
-.br-side { width: 250px; flex: none; display: flex; flex-direction: column; gap: 8px; padding: 10px; border-right: .5px solid var(--border); min-height: 0; }
+.br-side { width: 292px; flex: none; display: flex; flex-direction: column; gap: 8px; padding: 10px; border-right: .5px solid var(--border); min-height: 0; }
 .br-side .searchbox { width: auto; }
 .br-list { flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 2px; }
-.br-item { display: flex; align-items: center; gap: 9px; width: 100%; text-align: left; padding: 6px 8px; border: none; background: transparent;
-  border-radius: var(--radius); font-weight: 400; }
+.br-item { display: flex; align-items: center; gap: 11px; width: 100%; text-align: left; padding: 6px 9px; border: none; background: transparent;
+  border-radius: var(--radius); font-weight: 400; font-size: 14px; }
 .br-item:hover { background: var(--surface-2); }
 .br-item.selected { background: var(--bg-accent); color: var(--text-accent); }
-.br-item .avatar { width: 26px; height: 26px; font-size: 10px; flex: none; }
-.br-item.all .ic { width: 22px; height: 22px; flex: none; }
+.br-item .avatar { width: 38px; height: 38px; font-size: 13px; flex: none; }
+.br-item.all .ic { width: 28px; height: 28px; flex: none; }
 .br-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Browse ordered by source (and the merge list's sections): the site's mark, its name, the count, then a line to the edge. */
 .br-group { display: flex; align-items: center; gap: 7px; flex: none; padding: 10px 8px 4px; font-size: 12px; font-weight: 500; color: var(--text-secondary); }
@@ -139,14 +139,14 @@ input[type=range] { accent-color: var(--fill-accent); cursor: pointer; }
 .br-group::after { content: ""; flex: 1; height: 1px; background: var(--border-strong); }
 .br-group .ic.logo { width: 14px; height: 14px; }
 .br-group .num { font-weight: 400; color: var(--text-muted); }
-.br-n { min-width: 22px; text-align: right; font-size: 11px; color: var(--text-muted); }
+.br-n { min-width: 24px; text-align: right; font-size: 12px; color: var(--text-muted); }
 .br-item.selected .br-n { color: inherit; opacity: .8; }
 .br-fav { display: inline-flex; flex: none; color: var(--star); }
-.br-fav .ic { width: 14px; height: 14px; fill: currentColor; }
+.br-fav .ic { width: 15px; height: 15px; fill: currentColor; }
 .br-group .ic.star { width: 14px; height: 14px; fill: var(--star); stroke: var(--star); }
 .br-auto { display: inline-flex; flex: none; color: var(--dot-ok); }
-.br-auto .ic { width: 15px; height: 15px; }
-.br-item .spin { width: 13px; height: 13px; }
+.br-auto .ic { width: 17px; height: 17px; }
+.br-item .spin { width: 15px; height: 15px; }
 .br-order { display: flex; gap: 6px; }
 .br-order select { min-width: 0; width: auto; padding: 3px 4px; font-size: 12px; }
 #br-sort { flex: 0 0 106px; }

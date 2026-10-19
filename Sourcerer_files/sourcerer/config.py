@@ -62,7 +62,7 @@ DEFAULTS = {
     "filenames": "original",    # 'original' or 'dated' (<date>_<original>)
     "card_size": "230",         # px, the smallest width a card may have
     "theme": "system",          # 'system', 'light', 'dark'
-    "grid_quality": "best",     # 'fast': the sites' small pictures in the grid; 'best': the largest rendition below the original
+    "grid_quality": "fast",     # 'fast': the sites' small pictures in the grid (a wide tile is sharpened); 'best': the largest rendition below the original, always
     "tile_logo": "1",           # '0': no site mark on the pictures of the gallery
     "login_gap": "normal",     # the pause between two artists on a site where a login can get banned: 'careful', 'normal', 'fast'
     "scan_on_start": "1",       # '1': every start looks for new posts of every card, as Refresh does

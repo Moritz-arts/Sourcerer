@@ -369,6 +369,9 @@ add the one that replaced it.
 - [x] Pixiv's ugoira plays in the viewer (an animated WebP made in memory from pixiv's ZIP)
 - [x] The window maximizes inside the work area (the taskbar stays), a download shows a green ring on its tile, the file's
       name shows on hover and in the viewer, the order list has four entries, the dot of a site's mark no longer cuts it
+- [x] Refresh all looks at every artist down the list, scanning the ones that do not download (their newest page, "N new
+      posts online"); the list is bigger; Quick is the standard grid quality; the gap between artists on a cookie login is
+      careful 15-60 s, normal 10-30 s, fast 3-15 s
 - [x] A picture in the library wears the download button, green, in its corner -- however it got there -- and loses it
       when the file is deleted
 - [x] An entry of the activity log that names a failed file jumps to its picture in the artist's gallery (or its post)
