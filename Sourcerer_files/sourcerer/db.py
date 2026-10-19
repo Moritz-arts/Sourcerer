@@ -127,6 +127,7 @@ COLUMNS = {
         # 'ok', 'warn' (works with a catch: login, bot check, slow down) or 'error'
         "last_level": "TEXT",
         "walked": "TEXT",                 # when a sync last went through all of it
+        "links": "TEXT",                  # JSON: the accounts its own profile names (sources.profile_links): who is the same artist
         "pending": "INTEGER NOT NULL DEFAULT 0",   # its newest posts a look found that are not in the library
         "pending_keys": "TEXT",            # JSON: the remote_keys of those (at most sync.PENDING_KEYS), so a download from Browse can tell
         "latest": "TEXT",                  # when its newest post was made (UTC, "YYYY-MM-DD HH:MM:SS"), from the last look at it
@@ -162,6 +163,10 @@ def init():
             con.execute("UPDATE artists SET auto_download = 1")
             con.execute("INSERT INTO settings (key, value) VALUES ('auto_download_migrated', '1')")
         _forget_what_was_kept(con)
+        # What profiles name (sources.links) comes with the lists of followed accounts: read to their end once more.
+        if not con.execute("SELECT 1 FROM settings WHERE key = 'follow_links_v1'").fetchone():
+            con.execute("DELETE FROM settings WHERE key LIKE 'follows_read:%'")
+            con.execute("INSERT INTO settings (key, value) VALUES ('follow_links_v1', '1')")
         # The speed settings were set to values worked out for the sites' limits (v0.33): whatever was chosen
         # before -- most of it just the old defaults saved by a change of another row -- is dropped, once.
         if not con.execute("SELECT 1 FROM settings WHERE key = 'speed_defaults_v2'").fetchone():

@@ -186,9 +186,17 @@ def following(key):
             found, url = net.get_json_next(url, params, headers=_auth(server))
             params = None                  # the Link header's address carries them
             yield [{"url": a["url"], "name": re.sub(r":[\w+-]+:", "", a.get("display_name") or "").strip() or a.get("username", ""),
-                    "avatar": "" if (a.get("avatar_static") or "").endswith("/missing.png") else a.get("avatar_static") or ""}
+                    "avatar": "" if (a.get("avatar_static") or "").endswith("/missing.png") else a.get("avatar_static") or "",
+                    "links": _links(a)}
                    for a in found if a.get("url")]
     yield "", pages()
+
+
+def _links(account):
+    """The accounts the profile declares in its fields (the ones it verified with rel=me too). Not its bio: that names
+    friends and collaborators as often as itself."""
+    from . import profile_links
+    return profile_links([f.get("value") for f in account.get("fields") or []])
 
 
 def profile(url):
@@ -202,7 +210,8 @@ def profile(url):
     return {"name": name or account.get("username") or "",
             "handle": "@%s@%s" % (account.get("username", ""), server),
             # An account without a picture gets the server's placeholder.
-            "avatar": "" if avatar.endswith("/missing.png") else avatar}
+            "avatar": "" if avatar.endswith("/missing.png") else avatar,
+            "links": _links(account)}
 
 
 def pages(url):

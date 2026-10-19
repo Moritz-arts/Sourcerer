@@ -184,7 +184,7 @@ def following(key):
                 if who.get("username"):
                     out.append({"url": "https://%s/@%s" % (who.get("host") or host, who["username"]),
                                 "name": re.sub(r":[\w+-]+:", "", who.get("name") or "").strip() or who["username"],
-                                "avatar": who.get("avatarUrl") or ""})
+                                "avatar": who.get("avatarUrl") or "", "links": _links(who)})
             yield out
             until = rows[-1]["id"]
     yield "", pages()
@@ -224,13 +224,20 @@ def _account(url):
     return host, _api(host, "users/show", {"username": user, "host": None})
 
 
+def _links(account):
+    """The accounts the profile declares in its fields (not its description: that names friends as often as itself)."""
+    from . import profile_links
+    return profile_links([f.get("value") for f in account.get("fields") or [] if isinstance(f, dict)])
+
+
 def profile(url):
     host, account = _account(url)
     # A display name carries custom emoji as :shortcode:, which no folder should.
     name = re.sub(r":[\w+-]+:", "", account.get("name") or "").strip()
     return {"name": name or account.get("username") or "",
             "handle": "@%s@%s" % (account.get("username", ""), host),
-            "avatar": account.get("avatarUrl") or ""}
+            "avatar": account.get("avatarUrl") or "",
+            "links": _links(account)}
 
 
 def pages(url):

@@ -126,10 +126,14 @@ def following(key):
 
 def profile(url):
     uid = _uid(url)
-    user = _ajax("user/%s" % uid)
+    user = _ajax("user/%s" % uid, {"full": 1})
+    from . import profile_links
+    # `social` is what the artist declared (a twitter address, mostly): the surest sign of who else they are. Not the
+    # comment, which names friends as often as the artist.
     return {"name": user.get("name") or uid, "handle": "pixiv.net/users/%s" % uid,
             "avatar": user.get("imageBig") or user.get("image") or "",
-            "avatar_headers": REFERER}
+            "avatar_headers": REFERER,
+            "links": profile_links(user.get("social"), user.get("webpage"))}
 
 
 def pages(url, known=frozenset()):

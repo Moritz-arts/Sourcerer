@@ -415,29 +415,28 @@ def scheduler():
 
 
 def backfill_avatars():
-    """Cards made by hand that do not know where their profile picture is (v0.32 kept the file, not the address):
-    one card at a time, a few seconds apart, through a source on a site that is no login risk -- the rest learn it at
-    their next sync. Cards of a follow list got the address from the list."""
-    def sources_of(artist_id):
-        with db.connect() as con:
-            return [r["url"] for r in con.execute("SELECT url FROM sources WHERE artist_id = ? ORDER BY id", (artist_id,))]
-
+    """Cards made by hand that do not know where their profile picture is (v0.32 kept the file, not the address) or what
+    their profiles name: one card at a time, a few seconds apart, through a source on a site that is no login risk -- the
+    rest learn it at their next sync. Cards of a follow list got both from the list."""
     with db.connect() as con:
         ids = [r[0] for r in con.execute("SELECT id FROM artists WHERE listed = 0 AND avatar_url IS NULL "
                                          "AND avatar_checked IS NULL ORDER BY id")]
     for artist_id in ids:
-        urls = [u for u in sources_of(artist_id) if sources.site_for(u) and not accounts.careful(sources.account_key(u))
-                and not net.paused(u)]
-        if urls:
-            for url in urls:
-                try:
-                    info = sources.profile(url) or {}
-                except Exception as e:
-                    log.info("no profile picture from %s: %s", url, net.reason(e))
-                    continue
-                if info.get("avatar"):
-                    _set_avatar(artist_id, info["avatar"], info.get("avatar_headers"))
-                    break
+        with db.connect() as con:
+            rows = con.execute("SELECT id, url FROM sources WHERE artist_id = ? ORDER BY id", (artist_id,)).fetchall()
+        rows = [r for r in rows if sources.site_for(r["url"]) and not accounts.careful(sources.account_key(r["url"]))
+                and not net.paused(r["url"])]
+        for row in rows:
+            try:
+                info = sources.profile(row["url"]) or {}
+            except Exception as e:
+                log.info("no profile from %s: %s", row["url"], net.reason(e))
+                continue
+            _note_links(row["id"], info)
+            if info.get("avatar"):
+                _set_avatar(artist_id, info["avatar"], info.get("avatar_headers"))
+                break
+        if rows:
             with db.connect() as con:
                 con.execute("UPDATE artists SET avatar_checked = COALESCE(avatar_checked, ?) WHERE id = ?", (_now(), artist_id))
         time.sleep(random.uniform(4, 9))
@@ -591,6 +590,13 @@ def _ordered_sources(con, artist):
                        (artist["id"], artist["master_source_id"] or 0)).fetchall()
 
 
+def _note_links(source_id, info):
+    """What the profile of a source names (sources.profile_links) -- combining cards uses it."""
+    if isinstance(info, dict) and "links" in info:
+        with db.connect() as con:
+            con.execute("UPDATE sources SET links = ? WHERE id = ?", (json.dumps(info["links"]) if info["links"] else None, source_id))
+
+
 def _set_avatar(artist_id, url, headers=None):
     """Where the site has the profile picture. Nothing is fetched or kept: the page shows it through /api/avatar,
     which fetches it into memory when somebody looks."""
@@ -675,6 +681,7 @@ def check_card(artist_id):
         try:
             info = sources.profile(row["url"]) or {}
             found = found or (info if info.get("avatar") else None)
+            _note_links(row["id"], info)
         except Exception as e:
             error, level = net.reason(e), net.level(e)
         with db.connect() as con:
@@ -702,6 +709,7 @@ def refresh_avatar(artist_id, force=False):
     for row in rows:
         try:
             info = sources.profile(row["url"])
+            _note_links(row["id"], info)
             if info and info.get("avatar"):
                 _set_avatar(artist_id, info["avatar"], info.get("avatar_headers"))
                 return
@@ -893,7 +901,8 @@ def _sync_artist(artist_id, auto=False, only=None, mode=None):
             failed_sources.add(src["id"])
         elif _gave_up(artist_id, media.remote_key, not done):
             settled = True                         # nobody waits for it any more
-            event("warn", "Gave up on %s after %d failed syncs" % (media.post_url or media.url, GIVE_UP), artist)
+            event("warn", "Gave up on %s after %d failed syncs" % (media.post_url or media.url, GIVE_UP), artist,
+                  post=media.post_url or "", key=media.remote_key)
         elif not done:
             failed_sources.add(src["id"])
         with _lock:
@@ -1084,7 +1093,9 @@ def _fetch(artist, src, site, media, cur):
         if login and reason.startswith(net.LOGIN_PREFIX) and accounts.logged_in(login):
             _login_ran_out(login, site.LABEL)     # pixiv's /pages answers a dead login with 401
         else:
-            event("warn", "Download failed: %s (%s)" % (media.post_url or media.url, reason), artist)
+            # post and key: the activity log jumps to the picture in the artist's gallery, or to its post
+            event("warn", "Download failed: %s (%s)" % (media.post_url or media.url, reason), artist,
+                  post=media.post_url or "", key=media.remote_key)
         with _lock:
             cur["failed"] += 1
         return False

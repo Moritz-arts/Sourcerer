@@ -233,16 +233,55 @@ function renderLog() {
   var list = (S.sync.log || []).slice().reverse();
   if (S.logFilter === "problems") list = list.filter(function (e) { return e.kind === "warn" || e.kind === "error"; });
   if (list.length) S.logSeen = (S.sync.log || []).slice(-1)[0].time;
+  S.logList = list;
   $("log").innerHTML = list.length ? list.map(function (e) {
     var chips = (e.new ? '<span class="badge accent">+' + e.new + " new</span>" : "") +
       (e.duplicates ? '<span class="badge plain">' + plural(e.duplicates, "duplicate") + "</span>" : "") +
       (e.existing ? '<span class="badge plain">' + e.existing + " already there</span>" : "") +
       (e.failed ? '<span class="badge warning">' + e.failed + " failed</span>" : "");
-    return '<li class="k-' + e.kind + '"><span class="time">' + clock(e.time) + "</span>" +
+    // A file that failed says which: a click jumps to its picture in the artist's gallery, the arrow to its post.
+    var jump = e.key && e.artist_id && artistById(e.artist_id);
+    return '<li class="k-' + e.kind + (jump ? " jump" : "") + '" data-n="' + S.logList.indexOf(e) + '"><span class="time">' + clock(e.time) + "</span>" +
       icon(KIND_ICON[e.kind] || "info") +
       (e.artist ? '<span class="who">' + esc(e.artist) + "</span>" : "") +
-      '<span class="text" title="' + esc(e.text) + '">' + esc(e.text) + "</span>" + chips + "</li>";
+      '<span class="text" title="' + esc(jump ? "Show this picture in " + e.artist + "'s gallery\n" + e.text : e.text) + '"' + (jump ? ' data-log="show"' : "") + ">" + esc(e.text) + "</span>" + chips +
+      (e.post ? '<button type="button" class="mini flat logpost" data-log="post" title="Open the post on the site">' + icon("external") + "</button>" : "") + "</li>";
   }).join("") : '<li class="logempty">' + (S.logFilter === "problems" ? "No problems." : "Nothing happened yet.") + "</li>";
+}
+
+$("log").addEventListener("click", function (e) {
+  var b = e.target.closest("[data-log]"), li = b && b.closest("li[data-n]");
+  var entry = li && (S.logList || [])[+li.dataset.n];
+  if (!entry) return;
+  if (b.dataset.log === "post") return api("POST", "/api/open-url", { url: entry.post }).catch(fail);
+  // The picture in the gallery of its artist: the gallery is opened (or shown again), asked for more pages until the
+  // picture is among them -- the newest come first -- and scrolled to; it flashes. Not found: its post is the way.
+  var a = artistById(entry.artist_id);
+  if (!a) return;
+  toggleLog();
+  browseOpen(a.id);
+  var g = G, tries = 0;
+  (function seek() {
+    if (g !== G) return;
+    var i = g.items.findIndex(function (it) { return it.key === entry.key; });
+    if (i >= 0) return galReveal(i);
+    if (g.done || ++tries > 120) {
+      toast("That picture is not in the gallery" + (entry.post ? " – its post is opened." : "."));
+      if (entry.post) api("POST", "/api/open-url", { url: entry.post }).catch(fail);
+      return;
+    }
+    moreGallery();
+    setTimeout(seek, 300);
+  })();
+});
+
+function galReveal(i) {
+  var tile = document.querySelector('#gal-grid .gal-tile[data-i="' + i + '"]');
+  if (!tile) return;
+  if (tile.classList.contains("hidden")) { toast("That picture's site is switched off in the gallery."); return; }
+  tile.scrollIntoView({ block: "center", behavior: "smooth" });
+  tile.classList.add("flash");
+  setTimeout(function () { tile.classList.remove("flash"); }, 3000);
 }
 
 function toggleLog() {
@@ -333,41 +372,61 @@ function removeArtist(a) {
 // Accounts the sites did not show to be one artist (the follows come in as one card each): the open card and the ones
 // ticked here become one. The card marked "Stays" gets every source and file, the others are gone. There is no further
 // question -- the button at the bottom is the confirmation, so several cards go in one go.
-var M = { from: 0, picked: [], keep: 0, key: "", base: "", handles: [], suggested: [] };
+var M = { from: 0, picked: [], keep: 0, key: "", base: "", handles: [], links: [], urls: [], suggested: [], why: {} };
 
 // Two names are one when only what is no letter or digit differs: emoji, spaces, marks, width, case
 // ("👹 青林檎テル" is "青林檎テル"). The base leaves out a "(handle)" at the end, which a card gets when another had its name.
 function nameKey(name) { return String(name || "").normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ""); }
 function baseKey(name) { return nameKey(String(name || "").replace(/\s*[(\[（【][^)\]）】]*[)\]）】]\s*$/, "")); }
-// The account names in a card's links: "foo" in bsky.app/profile/foo.bsky.social, x.com/foo and mastodon.social/@foo.
-// Numbers (pixiv's ids) and short ones say nothing.
+// The account names in a card's links: "foo" in bsky.app/profile/foo.bsky.social, x.com/foo, mastodon.social/@foo and
+// foo.fanbox.cc -- what a display name is not (an artist known as "Mew" is @Mewnet). Numbers (pixiv's ids) and short ones
+// say nothing. (`follows.handle_key` does the same for the automatic combining, with a longer minimum.)
+var HANDLE_KINDS = ["bluesky", "mastodon", "misskey", "x", "patreon", "fanbox", "xenforo"];
 function handlesOf(a) {
   var out = [];
   a.sources.forEach(function (s) {
+    if (HANDLE_KINDS.indexOf(s.kind) < 0) return;
     var last = "";
-    try { last = decodeURIComponent(new URL(s.url).pathname.replace(/\/+$/, "").split("/").pop()); } catch (e) { return; }
+    try {
+      var u = new URL(s.url);
+      last = /\.fanbox\.cc$/i.test(u.hostname) ? u.hostname.split(".")[0] : decodeURIComponent(u.pathname.replace(/\/+$/, "").split("/").pop());
+    } catch (e) { return; }
     var h = nameKey(last.replace(/^@/, "").split("@")[0].split(".")[0]);
     if (h.length >= 3 && !/^\d+$/.test(h) && out.indexOf(h) < 0) out.push(h);
   });
   return out;
 }
-// How likely b is the open card's artist: 4 the same name, 3 the same but for a "(handle)" or a shared account name,
-// 2 a name that is the other's account name, 1 one name inside the other. 0: nothing.
+// The accounts a card's profiles name themselves (pixiv's declared twitter, a Mastodon field, Fanbox's links), lower-cased.
+function linksOf(a) {
+  var out = [];
+  a.sources.forEach(function (s) {
+    try { (JSON.parse(s.links || "[]") || []).forEach(function (u) { out.push(String(u).toLowerCase()); }); } catch (e) {}
+  });
+  return out;
+}
+function urlsOf(a) { return a.sources.map(function (s) { return String(s.url).toLowerCase(); }); }
+// How likely b is the open card's artist: 5 a profile names the other's account, 4 the same name, 3 the same but for a
+// "(handle)" or a shared account name, 2 a name that is the other's account name, 1 one name inside the other. 0: nothing.
 function sameness(b) {
   var kb = nameKey(b.name), hb = handlesOf(b);
+  var theirs = urlsOf(b), mine = M.urls || [];
+  if (M.links.some(function (u) { return theirs.indexOf(u) >= 0; }) || linksOf(b).some(function (u) { return mine.indexOf(u) >= 0; })) return 5;
   if (M.key && M.key === kb) return 4;
   if ((M.base && M.base === baseKey(b.name)) || M.handles.some(function (h) { return hb.indexOf(h) >= 0; })) return 3;
   if (hb.indexOf(M.key) >= 0 || M.handles.indexOf(kb) >= 0) return 2;
   var lo = M.key.length < kb.length ? M.key : kb, hi = lo === M.key ? kb : M.key;
   return lo.length >= 3 && lo.length * 2 >= hi.length && hi.indexOf(lo) >= 0 ? 1 : 0;
 }
+var WHY = { 5: "its profile names the other account", 4: "the same name", 3: "the same account name", 2: "a name that is the other's account name", 1: "a similar name" };
 function openMerge(a) {
   closeMenu();
-  M = { from: a.id, picked: [], keep: 0, key: nameKey(a.name), base: baseKey(a.name), handles: handlesOf(a), suggested: [] };
-  M.suggested = S.artists.filter(function (b) { return b.id !== a.id; })
+  M = { from: a.id, picked: [], keep: 0, key: nameKey(a.name), base: baseKey(a.name), handles: handlesOf(a), links: linksOf(a), urls: urlsOf(a),
+        suggested: [], why: {} };
+  var scored = S.artists.filter(function (b) { return b.id !== a.id; })
     .map(function (b) { return [sameness(b), b]; }).filter(function (x) { return x[0]; })
-    .sort(function (x, y) { return y[0] - x[0] || x[1].name.localeCompare(y[1].name); })
-    .slice(0, 10).map(function (x) { return x[1].id; });
+    .sort(function (x, y) { return y[0] - x[0] || x[1].name.localeCompare(y[1].name); }).slice(0, 10);
+  M.suggested = scored.map(function (x) { return x[1].id; });
+  scored.forEach(function (x) { M.why[x[1].id] = WHY[x[0]]; });
   $("merge-title").textContent = "Merge " + a.name + " with…";
   $("merge-hint").textContent = "Tick the cards that are the same artist. They become one card: the one marked Stays keeps " +
     "every source and downloaded file, the others go away.";
@@ -385,7 +444,7 @@ function renderMerge() {
     var on = fixed || M.picked.indexOf(a.id) >= 0;
     return '<div class="merge-row' + (on ? " on" : "") + '"><button type="button" class="br-item" data-id="' + a.id + '" aria-pressed="' + on + '">' +
       '<span class="tick">' + (on ? icon("tick") : "") + "</span>" + avatarHtml(a) +
-      '<span class="br-name" title="' + esc(a.name) + '">' + esc(a.name) + "</span>" +
+      '<span class="br-name" title="' + esc(a.name) + '">' + esc(a.name) + (M.why && M.why[a.id] && !fixed ? ' <small class="why">' + esc(M.why[a.id]) + "</small>" : "") + "</span>" +
       '<span class="br-n">' + (a.sources.filter(function (s) { return s.supported; }).length || "") + "</span></button>" +
       (on && group ? (keeper === a.id ? '<span class="keeps">Stays</span>' : '<button type="button" class="keep" data-keep="' + a.id + '">Keep this one</button>') : "") + "</div>";
   }

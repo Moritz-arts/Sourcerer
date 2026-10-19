@@ -96,18 +96,50 @@ def _base_key(name):
     return name_key(re.sub(r"\s*[(\[（【][^)\]）】]*[)\]）】]\s*$", "", name or ""))
 
 
+HANDLE_MIN = 4                           # an account name shorter than this says too little to join two cards by it
+HANDLE_KINDS = ("bluesky", "mastodon", "misskey", "x", "patreon", "fanbox", "xenforo")     # sites whose address names the account
+
+
+def handle_key(url):
+    """The account's own name in its address, as a name key: "mewnet" for mastodon.social/@Mewnet, x.com/Mewnet,
+    bsky.app/profile/mewnet.bsky.social and mewnet.fanbox.cc -- what a display name ("Mew") is not, and the surest thing two
+    accounts of one artist share when the display names differ (an artist known by several names). Numbers (pixiv's ids)
+    and short names say nothing: "". (`handlesOf` in app.js is its twin for the merge dialog's suggestions.)"""
+    if sources.kind_of(url) not in HANDLE_KINDS:
+        return ""
+    parts = urllib.parse.urlsplit(url)
+    host = (parts.hostname or "").lower()
+    last = host.split(".")[0] if host.endswith(".fanbox.cc") else \
+        urllib.parse.unquote(parts.path.rstrip("/").rsplit("/", 1)[-1])
+    key = name_key(last.lstrip("@").split("@")[0].split(".")[0])
+    return key if len(key) >= HANDLE_MIN and not key.isdigit() else ""
+
+
+def _loads(text):
+    try:
+        out = json.loads(text) if text else []
+    except ValueError:
+        return []
+    return [u for u in out if isinstance(u, str)] if isinstance(out, list) else []
+
+
 class _Twins:
-    """The cards by name, and the kinds of site each has a source on: who may take another account of
-    the same name. Read once for a look and kept up to date as it adds, not asked for every page."""
+    """The cards by name and by account name, the kinds of site each has a source on, and what the profiles name: who may
+    take another account of the same artist. Read once for a look and kept up to date as it adds, not asked for every page.
+
+    Evidence, strongest first: a profile that names the other account (`sources.links`: pixiv's declared twitter, a
+    Mastodon field, Fanbox's links -- the artist's own word); the same account name (@mewnet on two sites); the same
+    display name. Never two accounts of one site, whatever the evidence."""
     MIN = 3                                   # a shorter name says too little (and CJK names are short)
 
     def __init__(self):
         self.names, self.kinds, self.listed, self.attached = {}, {}, {}, 0
+        self.owner, self.urls, self.declared, self.named_by = {}, {}, {}, {}
         with db.connect() as c:
             for r in c.execute("SELECT id, name, listed FROM artists ORDER BY id"):
                 self.register(r["id"], r["name"], bool(r["listed"]))
-            for r in c.execute("SELECT artist_id, url FROM sources"):
-                self.kinds.setdefault(r["artist_id"], set()).add(sources.kind_of(r["url"]))
+            for r in c.execute("SELECT artist_id, url, links FROM sources"):
+                self.attach(r["artist_id"], sources.kind_of(r["url"]), r["url"], _loads(r["links"]))
 
     def register(self, artist_id, name, listed):
         self.listed[artist_id] = listed
@@ -116,17 +148,56 @@ class _Twins:
             if len(key) >= self.MIN:
                 self.names.setdefault(key, []).append(artist_id)
 
-    def find(self, name, kinds):
-        """The one card that takes an account called name with sources of these kinds, or None: a card
-        of the same name with no source of those kinds (an unsupported site never conflicts); a card the
-        user made beats a listed one, and two of those make it unclear -- then none."""
-        ids = {i for key in {name_key(name), _base_key(name)} for i in self.names.get(key, ())}
-        ids = [i for i in sorted(ids) if not (self.kinds[i] & kinds - {"unsupported"})]
+    def attach(self, artist_id, kind, url=None, links=()):
+        self.kinds.setdefault(artist_id, set()).add(kind)
+        if not url:
+            return
+        url = url.lower()
+        self.owner[url] = artist_id
+        self.urls.setdefault(artist_id, set()).add(url)
+        handle = handle_key(url)
+        if handle:
+            self.names.setdefault(handle, []).append(artist_id)        # found as a name is
+        for link in links:
+            self.declared.setdefault(artist_id, set()).add(link)
+            self.named_by.setdefault(link, set()).add(artist_id)
+
+    def said(self, links, url, kinds, skip=()):
+        """The cards that a profile says are the same artist -- the one named by `links` (an account's own), or naming
+        `url` -- without a source of `kinds`."""
+        ids = {self.owner[link] for link in links if link in self.owner} | self.named_by.get((url or "").lower(), set())
+        return [i for i in sorted(ids) if i not in skip and not (self.kinds[i] & kinds)]
+
+    def pick(self, ids):
+        """The one card out of ids: a card the user made beats a listed one, and two of those make it unclear: None."""
         mine = [i for i in ids if not self.listed[i]]
         return (mine[0] if len(mine) == 1 else None) if mine else (ids[0] if ids else None)
 
-    def attach(self, artist_id, kind):
-        self.kinds[artist_id].add(kind)
+    def find(self, name, kinds, url=None, links=()):
+        """The one card that takes an account called name (at url, naming links) with sources of these kinds, or None.
+        An unsupported site never conflicts."""
+        kinds = kinds - {"unsupported"}
+        said = self.said(links, url, kinds)
+        if said:
+            return self.pick(said)
+        keys = {name_key(name), _base_key(name), handle_key(url or "")} - {""}
+        ids = {i for key in keys for i in self.names.get(key, ())}
+        return self.pick([i for i in sorted(ids) if not (self.kinds[i] & kinds)])
+
+    def absorb(self, target, card):
+        """The card went into target: its accounts, kinds and declared links are target's now."""
+        self.kinds[target] |= self.kinds[card]
+        self.listed[target] = self.listed[target] and self.listed[card]
+        for url in self.urls.pop(card, ()):
+            self.owner[url] = target
+            self.urls.setdefault(target, set()).add(url)
+            if handle_key(url):
+                self.names.setdefault(handle_key(url), []).append(target)
+        self.declared.setdefault(target, set()).update(self.declared.pop(card, ()))
+        for named in self.named_by.values():
+            if card in named:
+                named.discard(card)
+                named.add(target)
 
 
 def _add(page, kind, public, twins=None):
@@ -154,30 +225,35 @@ def _add(page, kind, public, twins=None):
         for url, f in mine:
             key = url.lower()
             headers = f.get("avatar_headers")
+            links = [u for u in (f.get("links") or []) if isinstance(u, str)]
             if not con.execute("INSERT OR IGNORE INTO followed (url, avatar, headers) VALUES (?, ?, ?)",
                                (key, f.get("avatar") or "", json.dumps(headers) if headers else "")).rowcount:
                 known += 1
+                if links:                                   # a card made before profiles' links were kept: it learns them here
+                    con.execute("UPDATE sources SET links = ? WHERE lower(url) = ? AND links IS NULL", (json.dumps(links), key))
                 continue
             if key in have:
                 continue                                    # a card of the user's has it already
             have.add(key)
             name, site_kind = _name(f, url), sources.kind_of(url)
-            twin = twins.find(name, {site_kind}) if twins else None
+            twin = twins.find(name, {site_kind}, url, links) if twins else None
             picture = f.get("avatar") if isinstance(f.get("avatar"), str) and f["avatar"].startswith("https://") else None
             if twin:                                        # the same artist on another site: one card
-                con.execute("INSERT INTO sources (artist_id, url, kind) VALUES (?, ?, ?)", (twin, url, site_kind))
+                con.execute("INSERT INTO sources (artist_id, url, kind, links) VALUES (?, ?, ?, ?)",
+                            (twin, url, site_kind, json.dumps(links) if links else None))
                 if picture:
                     con.execute("UPDATE artists SET avatar_url = ?, avatar_headers = ? WHERE id = ? AND avatar_url IS NULL",
                                 (picture, json.dumps(headers) if headers else None, twin))
-                twins.attach(twin, site_kind)
+                twins.attach(twin, site_kind, url, links)
                 twins.attached += 1
                 continue
             artist_id = con.execute("INSERT INTO artists (name, listed, avatar_url, avatar_headers) VALUES (?, 1, ?, ?)",
                                     (_unique(name, url, taken), picture, json.dumps(headers) if headers and picture else None)).lastrowid
-            con.execute("INSERT INTO sources (artist_id, url, kind) VALUES (?, ?, ?)", (artist_id, url, site_kind))
+            con.execute("INSERT INTO sources (artist_id, url, kind, links) VALUES (?, ?, ?, ?)",
+                        (artist_id, url, site_kind, json.dumps(links) if links else None))
             if twins:
                 twins.register(artist_id, name, True)
-                twins.attach(artist_id, site_kind)
+                twins.attach(artist_id, site_kind, url, links)
             made.append(artist_id)
     if made or (twins and twins.attached):
         _touch()
@@ -210,16 +286,16 @@ def _look(key):
         _touch(True)
         sync.event("info", "%s: %d followed account%s added to the list%s" % (
             label, total + twins.attached, "" if total + twins.attached == 1 else "s",
-            " (%d joined an artist of the same name)" % twins.attached if twins.attached else ""))
+            " (%d joined an artist they are the same as)" % twins.attached if twins.attached else ""))
     return total
 
 
 def combine():
-    """Put the cards that are one artist together: every *listed* card (nobody has touched it) joins a card
-    of the same name whose sources are on other sites. The older listed card keeps the name when both are
-    listed, a card the user made always does; two of the user's cards of one name are left to them (the
-    merge dialog suggests it). A card that is syncing is skipped until the next time. Returns how many
-    cards went."""
+    """Put the cards that are one artist together: every *listed* card (nobody has touched it) joins a card that is the
+    same artist and has no source on the same site -- by what the profiles name (`_Twins`), else by the account name in
+    the address, else by the display name. The older listed card keeps the name when both are listed, a card the user
+    made always does; two of the user's cards that fit are left to them (the merge dialog suggests it). A card that is
+    syncing is skipped until the next time. Returns how many cards went."""
     twins, gone, done = _Twins(), set(), 0
     with db.connect() as con:
         listed = [r[0] for r in con.execute("SELECT id FROM artists WHERE listed = 1 ORDER BY id")]
@@ -227,13 +303,20 @@ def combine():
     for card in listed:
         if card in gone:
             continue
-        keys = {name_key(names[card]), _base_key(names[card])}
-        near = {i for key in keys if len(key) >= twins.MIN for i in twins.names.get(key, ())} - {card} - gone
-        # An older listed card takes this one; a younger one is left to its own turn, when this one is its twin.
         kinds = twins.kinds[card] - {"unsupported"}
-        ids = [i for i in sorted(near) if not (twins.kinds[i] & kinds) and (not twins.listed[i] or i < card)]
-        mine = [i for i in ids if not twins.listed[i]]
-        target = (mine[0] if len(mine) == 1 else None) if mine else (ids[0] if ids else None)
+        # An older listed card takes this one; a younger one is left to its own turn, when this one is its twin.
+        fits = lambda i: not (twins.kinds[i] & kinds) and (not twins.listed[i] or i < card)
+        # What the profiles say: an account of this card names another card's, or the other way round.
+        said = {twins.owner[link] for link in twins.declared.get(card, ()) if link in twins.owner}
+        for url in twins.urls.get(card, ()):
+            said |= twins.named_by.get(url, set())
+        said = [i for i in sorted(said - {card} - gone) if fits(i)]
+        if said:
+            target = twins.pick(said)
+        else:
+            keys = {name_key(names[card]), _base_key(names[card])} | {handle_key(u) for u in twins.urls.get(card, ())}
+            near = {i for key in keys if len(key) >= twins.MIN for i in twins.names.get(key, ())} - {card} - gone
+            target = twins.pick([i for i in sorted(near) if fits(i)])
         if target is None:
             continue
         try:
@@ -243,8 +326,7 @@ def combine():
             continue
         gone.add(card)
         done += 1
-        twins.kinds[target] |= twins.kinds[card]
-        twins.listed[target] = twins.listed[target] and twins.listed[card]
+        twins.absorb(target, card)
     if done:
         _touch(True)
         sync.event("info", "%d duplicate card%s combined: the same artist's accounts on different sites" % (done, "" if done == 1 else "s"))

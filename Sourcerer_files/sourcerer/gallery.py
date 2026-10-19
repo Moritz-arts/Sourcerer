@@ -397,6 +397,7 @@ class _Gallery:
         s, m = self.items[number]
         d = {"id": number, "source": s.label, "src": s.row["id"], "posted": m.posted, "w": m.width,
              "h": m.height, "video": bool(m.video), "post": m.post_url, "saved": False, "fname": _fname(m),
+             "key": m.remote_key,
              "artist": s.artist["name"], "artist_id": s.artist["id"]}
         mine = self.saved.get((s.artist["id"], m.remote_key))
         proxy = "/api/gallery/%s/%d/" % (self.id, number)

@@ -82,8 +82,10 @@ def following(key):
                 user = item.get("user") or {}
                 if creator and creator.lower() not in seen and _creator("https://%s.fanbox.cc" % creator):
                     seen.add(creator.lower())
+                    from . import profile_links
                     out.append({"url": "https://%s.fanbox.cc" % creator, "name": user.get("name") or creator,
-                                "avatar": user.get("iconUrl") or "", "avatar_headers": HEADERS})
+                                "avatar": user.get("iconUrl") or "", "avatar_headers": HEADERS,
+                                "links": profile_links(item.get("profileLinks"))})
             yield out
     yield "", pages()
 
@@ -98,7 +100,9 @@ def profile(url):
             raise LoginRequired("Fanbox: log in") from e
         raise
     user = body.get("user") or {}
-    return {"name": user.get("name") or name, "handle": "%s.fanbox.cc" % name, "avatar": user.get("iconUrl") or ""}
+    from . import profile_links
+    return {"name": user.get("name") or name, "handle": "%s.fanbox.cc" % name, "avatar": user.get("iconUrl") or "",
+            "links": profile_links(body.get("profileLinks"))}
 
 
 def _run(fn, *args):

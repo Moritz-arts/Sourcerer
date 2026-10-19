@@ -414,15 +414,26 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   page, and every walk has a page cap. Needs the setting `import_follows`; started after a login
   (`accounts.CHANGED`), 90-150 s after start (once the account check marked expired logins) and every
   10-14 h.
-- **The same artist on several sites is one card, automatically** (`follows._Twins`, `follows.combine`): an
-  account that comes in with a followed list joins the card of the same name when that card has no
-  source on the same site; after every look (a login, the start, every 10-14 h) the *listed* cards that
-  are twins of another card are merged into it (`sync.merge(..., auto=True)`: one summary line in the
-  log, the result stays listed when both were). A name is the same by `follows.name_key` (letters and
-  digits only, NFKC, case-folded -- `nameKey` in `app.js` is its twin for the merge dialog's
-  suggestions: keep them alike), at least 3 characters, and **never on the same site twice** (two pixiv
-  accounts of one name are more likely two people) -- a name shared by a listed card and two cards the
-  user made is left alone. The user's own cards are never merged away; they only gain a source.
+- **The same artist on several sites is one card, automatically** (`follows._Twins`, `follows.combine`): an account that
+  comes in with a followed list joins the card of the same artist when that card has no source on the same site; after every
+  look (a login, the start, every 10-14 h) the *listed* cards that are twins of another card are merged into it
+  (`sync.merge(..., auto=True)`: one summary line in the log, the result stays listed when both were). **A display name is
+  the weakest evidence** (an artist is "Mew" on one site and @Mewnet on all of them, or known by names in two scripts), so,
+  strongest first: (1) **what a profile names itself** (`sources.links`, filled by `sources.profile_links` from what the artist
+  *declared*: pixiv's `social` and webpage (profile requests ask `full=1`), a Mastodon or Misskey field, Fanbox's `profileLinks` --
+  never a bio or description, which names friends and collaborators as often as the artist; no request is made to read the
+  links, only profile addresses of sites Sourcerer knows count, a pixiv work's link does not; Mastodon's, Misskey's and Fanbox's
+  lists of follows carry them, `check_card` / `refresh_avatar` / `backfill_avatars` store them from the profile, and the lists were
+  read to their end once more -- `follow_links_v1` -- so cards imported before learn theirs): an account that names a card's account, or is named by
+  one, is that card's; (2) **the account name in the address** (`follows.handle_key`: @Mewnet on Mastodon, x.com/mewnet, Bluesky's
+  handle without the domain, mewnet.fanbox.cc; at least 4 letters, never a number, only on sites whose address names the account --
+  not a booru's `/posts`; `handlesOf` in app.js is its twin with a minimum of 3, for suggestions only); (3) the display name
+  by `follows.name_key` (letters and digits only, NFKC, case-folded -- `nameKey` in `app.js` is its twin for the merge dialog's
+  suggestions: keep them alike), at least 3 characters. Names and account names live in one index, so an account name matches a
+  display name too. And **never on the same site twice**, whatever the evidence (two pixiv accounts are more likely two people, also
+  when one names the other) -- a name shared by a listed card and two cards the user made is left alone. The user's own cards are
+  never merged away; they only gain a source. The merge dialog's *Possibly the same artist* says why (`WHY`): 5 a profile names the
+  other account, 4 the same name, 3 the same account name, 2 a name that is the other's account name, 1 a similar name.
 - **A follow list is the site's word, not ours.** A link is taken only when it is a profile of the
   list's own site (`follows._add`: another site's address -- a pixiv work's -- would cost a request on
   a login inside a write transaction) and on a public https host (`net.public_https`; checked before
@@ -617,6 +628,10 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
 - **Every start looks for new posts** (setting `scan_on_start`, default on; `sync.scheduler`, after the login check): the
   same as Refresh -- cards with auto-download download what they find, listed cards are left out. Sourcerer's own updates
   are checked at every start too (the dot on the settings button).
+- **A failed file in the activity log is a link**: `sync._fetch` and the give-up line pass `post` and `key` (the remote key)
+  with the event; the page (`#log` click) opens the artist's gallery, asks for more pages until an item with that `key`
+  is among them (`item.key`, the newest come first; at most 120 tries) and scrolls to it, where it flashes (`galReveal`); the arrow
+  at the row's end opens the post on the site (`/api/open-url`); a picture the site no longer lists opens its post instead.
 - **The window's title bar is the page's own bar on Windows** (`desktop._custom_frame`, `server.CUSTOM_FRAME`,
   `/api/window`, `applyFrame`): `WS_CAPTION` is taken off the form (`WS_THICKFRAME` stays, so the edges still resize) and
   the style is read back -- only then does `/api/state` say `frame: "custom"`, the page draws minimize / maximize / close
