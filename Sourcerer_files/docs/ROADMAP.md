@@ -363,6 +363,8 @@ add the one that replaced it.
       Misskey accounts are cards too; unknown Misskey servers are learned
 - [x] Accounts of one name on different sites are combined on one card by themselves (as a login's
       follows come in, and for the cards already apart), never two accounts of one site
+- [x] Viewer: bar on top, click on the dark closes it, double-click / wheel zoom, drag to move; Settings >
+      Appearance: switch for the site mark on the pictures
 - [x] Merge dialog: likely twins (same name but for emoji / marks / case, shared account name) listed at
       the top, several cards ticked and merged with one button, no extra confirmation; Browse can be
       ordered by source (logo and line per site)
