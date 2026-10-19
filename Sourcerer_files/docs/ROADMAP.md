@@ -363,6 +363,9 @@ add the one that replaced it.
       Misskey accounts are cards too; unknown Misskey servers are learned
 - [x] Accounts of one name on different sites are combined on one card by themselves (as a login's
       follows come in, and for the cards already apart), never two accounts of one site
+- [x] Settings: parallel downloads up to 64 and connections per site up to 32 (sites with their own lower
+      limit keep it); Security pane with a master password (asked at every start, enforced by the server)
+      and a reset to a fresh install; TrackImage's card in the settings rail
 - [x] Viewer: bar on top, click on the dark closes it, double-click / wheel zoom, drag to move; Settings >
       Appearance: switch for the site mark on the pictures
 - [x] Merge dialog: likely twins (same name but for emoji / marks / case, shared account name) listed at

@@ -175,7 +175,7 @@ def main(argv=None):
     shutil.rmtree(config.USERDATA / "Thumbs", ignore_errors=True)
     sync.name_avatars()
     _after_update()
-    net.configure(per_host=db.setting_int("per_host", 1, 8), pace_ms=db.setting_int("pace_ms", 0, 5000))
+    net.configure(per_host=db.setting_int("per_host", 1, 32), pace_ms=db.setting_int("pace_ms", 0, 5000))
     sync.scheduler()
     previews.start()
     follows.start()

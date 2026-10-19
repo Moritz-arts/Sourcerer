@@ -26,6 +26,7 @@ function api(method, path, body) {
     body: body ? JSON.stringify(body) : undefined
   }).then(function (r) {
     return r.json().catch(function () { return {}; }).then(function (data) {
+      if (!r.ok && r.status === 401 && data.locked) lockedNow();          // the master password is asked for again
       if (!r.ok) { var e = new Error(data.error || ("HTTP " + r.status)); e.data = data; throw e; }
       return data;
     });
@@ -1553,6 +1554,7 @@ function fillSettings() {
   var st = S.settings;
   $("set-library").value = S.library;
   $("btn-browse").classList.toggle("hidden", !S.window);
+  fillSecurity();
   $("set-follows").checked = st.import_follows === "1";
   $("set-tilelogo").checked = st.tile_logo !== "0";
   $("set-auto").checked = st.auto_sync === "1";
@@ -2101,7 +2103,91 @@ $("btn-quit").addEventListener("click", function () {
 });
 $("btn-sync-all").addEventListener("click", function () { sync(null); });
 
-load().then(function () {
-  poll();
-  checkUpdate(false);        // once per start: a dot on the settings button when there is one
+// ---- the master password, and the reset ------------------------------------------------
+// The server answers 401 "locked" to everything until the password was given (security.py): the page asks
+// for it before it loads anything, and again whenever an answer says it is locked.
+
+function showLock(then) {
+  S.afterUnlock = then || null;
+  $$("dialog[open]").forEach(function (d) { d.close(); });
+  $("lock-msg").textContent = ""; $("lock-pass").value = "";
+  $("lock").classList.remove("hidden");
+  setTimeout(function () { $("lock-pass").focus(); }, 50);
+}
+function lockedNow() {
+  if (!$("lock").classList.contains("hidden")) return;           // (the poll keeps asking: do not clear what is typed)
+  S.lock = { enabled: true, locked: true };
+  showLock(null);
+}
+$("lock-form").addEventListener("submit", function (e) {
+  e.preventDefault();
+  api("POST", "/api/unlock", { password: $("lock-pass").value }).then(function () {
+    $("lock").classList.add("hidden"); $("lock-pass").value = "";
+    var then = S.afterUnlock;
+    S.afterUnlock = null;
+    if (then) then(); else location.reload();                     // locked while it ran: what it shows is stale
+  }).catch(function (err) { $("lock-msg").textContent = err.message; $("lock-pass").select(); });
 });
+$("lock-forgot").addEventListener("click", function () { $("lock-reset").classList.toggle("hidden"); $("lock-reset-confirm").focus(); });
+
+function fillSecurity() {
+  var on = !!(S.lock && S.lock.enabled);
+  $("sec-state").textContent = on ? "A master password is set: Sourcerer asks for it every time it is opened."
+    : "No master password: Sourcerer opens straight away.";
+  $("sec-current").classList.toggle("hidden", !on);
+  $("sec-save").textContent = on ? "Change password" : "Set password";
+  $("sec-remove").classList.toggle("hidden", !on);
+  $("sec-lock").classList.toggle("hidden", !on);
+}
+function securityDone(d, text) {
+  S.lock = { enabled: d.enabled, locked: false };
+  ["sec-current", "sec-new", "sec-repeat"].forEach(function (id) { $(id).value = ""; });
+  fillSecurity();
+  toast(text);
+}
+$("sec-save").addEventListener("click", function () {
+  var on = !!(S.lock && S.lock.enabled), pw = $("sec-new").value;
+  if (!pw) return toast("Type the new password.", true);
+  if (pw !== $("sec-repeat").value) return toast("The two new passwords differ.", true);
+  api("POST", "/api/security/password", { current: $("sec-current").value, new: pw })
+    .then(function (d) { securityDone(d, on ? "Password changed" : "Master password set"); }).catch(fail);
+});
+$("sec-remove").addEventListener("click", function () {
+  api("POST", "/api/security/password", { current: $("sec-current").value, new: "" })
+    .then(function (d) { securityDone(d, "Master password removed"); }).catch(fail);
+});
+$("sec-lock").addEventListener("click", function () {
+  api("POST", "/api/security/lock").then(function () { location.reload(); }).catch(fail);
+});
+$("reset-confirm").addEventListener("input", function () { $("reset-go").disabled = this.value !== "RESET"; });
+
+// Starts over: the server wipes and restarts itself; what the page kept for itself goes too.
+function resetEverything(word, button) {
+  button.disabled = true;
+  api("POST", "/api/reset", { confirm: word }).then(function (d) {
+    try { Object.keys(localStorage).filter(function (k) { return k.indexOf("sourcerer.") === 0; }).forEach(function (k) { localStorage.removeItem(k); }); } catch (e) {}
+    $("lock").classList.add("hidden");
+    restarting("Sourcerer was reset", d.message || "It starts again as if it had just been installed.");
+  }).catch(function (e) { fail(e); button.disabled = false; });
+}
+$("reset-go").addEventListener("click", function () { resetEverything($("reset-confirm").value, this); });
+$("lock-reset-form").addEventListener("submit", function (e) {
+  e.preventDefault();
+  resetEverything($("lock-reset-confirm").value, e.target.querySelector("button"));
+});
+
+// TrackImage's card in the settings.
+$("promo-go").addEventListener("click", function () {
+  api("POST", "/api/open-url", { url: "https://github.com/Moritz-arts/TrackImage" }).catch(fail);
+});
+
+function start() {
+  load().then(function () {
+    poll();
+    checkUpdate(false);        // once per start: a dot on the settings button when there is one
+  });
+}
+api("GET", "/api/lock").then(function (d) {
+  S.lock = d;
+  if (d.locked) showLock(start); else start();
+}).catch(function () { start(); });
