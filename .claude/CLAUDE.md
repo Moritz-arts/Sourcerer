@@ -608,11 +608,16 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   for the others, and never a choice of the number); the switch *Auto-download* beside the head's
   Download button (`#br-auto`) and the artist's right-click menu (edit, auto-download, refresh,
   download, open folder, merge, delete -- the same keys `Enter A U D O M Del`) turn it on and off.
-  **There is no "Download all"**: the toolbar's Refresh (F5, Ctrl+R), Automatic sync and the scan at every start
-  look at the cards **with auto-download only** (`sync.enqueue(None)`: `WHERE listed = 0 AND auto_download = 1` -- comparing
-  a card's newest posts with its library is what costs the time, and a card that does not download has nothing to
-  compare for; opening it, or its own Refresh, looks at it) and download what they find -- nothing downloads every artist on
-  one click. **Favorites** (`artists.favorite`, `/api/artists/<id>/favorite`, menu entry and key `F`, a gold star in the list):
+  **There is no "Download all"**, and **"Refresh all" (F5, Ctrl+R) looks at every artist, one after the other down the list as it
+  is shown** (the page sends the ids in that order: `S.brOrderIds`; `enqueue(None, everyone=True, order=...)`, listed cards
+  included -- somebody asked for it, and a look does not un-list them): a card with auto-download is looked at *and* downloaded as
+  before, **every other card is only scanned** (mode `scan`, `_peek`/`_peeked`: the newest page of each source, one request,
+  kept as its snapshot -- so "Latest activity" and Browse's first screen are fresh -- and the log says "N new posts online since
+  the last look" only when there are some, comparing with the *previous snapshot*, never with the library; no snapshot yet, nothing
+  is claimed; no "Checking" line and no profile request per card, a sweep over hundreds must not bury the log). Comparing a card's
+  posts with its library is what costs the time (a card never downloaded reads `REFRESH_PAGES` pages every time, its first page
+  never being in the library): so **Automatic sync and the scan at every start still look at the cards with auto-download only**
+  (`sync.enqueue(None)` without `everyone`: `WHERE listed = 0 AND auto_download = 1`) -- nothing downloads every artist on one click. **Favorites** (`artists.favorite`, `/api/artists/<id>/favorite`, menu entry and key `F`, a gold star in the list):
   only a mark, it changes nothing about syncing; the order *Favorites* puts them first under a group head, and a merge keeps
   the star. A card that syncs shows a ring in place of its number. The list is
   replaced only when its markup changed (it is redrawn on every poll while a sync runs, and
@@ -695,7 +700,7 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   other); a look stops at the first page whose oldest post is in the library (`_glance`: an up-to-date card is one request per
   source -- 2 s for three sources, it was a minute). **Only a cookie login is spaced out between artists**
   (`accounts.careful`: pixiv, X, Patreon, Fanbox, Fantia, forums; `LOGIN_GAPS`, Settings > Sites & network
-  *Gap between artists on a cookie login*, default `normal` 10-40 s -- the other speed settings were worked out the same way
+  *Gap between artists on a cookie login*: careful 15-60 s, default `normal` 10-30 s, fast 3-15 s (the user's numbers) -- the other speed settings were worked out the same way
   in v0.33: 8 downloads at once, 4 per site, 0.25 s between requests (times 1.0-1.6), `net.HOSTS` keeping the touchy hosts
   lower; `db.init` dropped what was saved before, once, `speed_defaults_v2`): a token or key (Bluesky, Mastodon, Misskey, boorus) is an API
   client with published limits and only gets `net.TOKEN_PACE` between requests, no reading breaks, no gap between cards
@@ -857,11 +862,11 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   viewer's (a booru's sample) is asked once, and the viewer opens at once. The viewer fetches the
   next two pictures once the open one has arrived (`galPrefetch`).
 - **The grid shows the largest rendition below the original** (Settings > Appearance > *Picture quality in the grid*,
-  `grid_quality`, default `best`; read when a gallery opens, `_Gallery.sharp`): in `item()` the `mid` rendition (pixiv's
+  `grid_quality`, *Sharp*, not the default; read when a gallery opens, `_Gallery.sharp`): in `item()` the `mid` rendition (pixiv's
   1200 px master, X `name=large`, Bluesky's fullsize, Patreon's `default_large`, a booru's sample) becomes the tile's
   picture, so there is no blocky small stage and nothing laid over it; a downloaded picture's thumbnail is made at 960 px
   (`/api/thumb/<id>?s=`). A site that only has the original (Mastodon, Misskey, forums) keeps its small preview -- the
-  original is never fetched for a grid. `fast` is the old behaviour: small pictures, `galSharpen` for wide tiles.
+  original is never fetched for a grid. `fast` -- **the standard since v0.34, the user saw no difference** -- is the old behaviour: small pictures, `galSharpen` for wide tiles.
 - **Grid pictures must be sharp enough for their tile** (in `fast`). Sources hand out their own small sizes
   and the tile decides how far it is stretched: pixiv 540 px (360 was blocky), danbooru 720,
   Gelbooru/Moebooru/e621 the sample instead of the 150 px preview. Full mode spreads a wide

@@ -55,7 +55,7 @@ CHECKED_HOURS = 12           # a login checked this recently is not asked again 
 MIN_HOURS = {"x": 12, "pixiv": 6, "patreon": 6, "xenforo": 12, "fanbox": 6, "fantia": 6}
 # Seconds before the next card asks a site where a cookie login can get banned (pixiv, X, Patreon, a forum) the last one
 # used -- Settings > Sync decides how careful. Token logins (Mastodon, Bluesky) are not spaced: the lane paces them.
-LOGIN_GAPS = {"careful": (20, 90), "normal": (10, 40), "fast": (3, 12)}
+LOGIN_GAPS = {"careful": (15, 60), "normal": (10, 30), "fast": (3, 15)}
 FOCUS_GAP = (4, 10)          # ... for the card somebody has opened in Browse: they are waiting
 PICK_FROM = 40               # the next card is the first of this many waiting ones whose sites are not cooling down
 GIVE_UP = 3                  # syncs a file may fail before its source completes without it
@@ -172,9 +172,12 @@ def next_card():
     return LOGIN_GAPS.get(db.get_setting("login_gap"), LOGIN_GAPS["normal"])
 
 
-def enqueue(artist_ids=None, auto=False, only=None, mode=None):
-    """Queue artists (all when None: the ones with auto-download, a sweep leaves the others alone -- a look
-    at every card costs minutes, and only those cards compare what they find with what is in the library). Returns
+def enqueue(artist_ids=None, auto=False, only=None, mode=None, everyone=False, order=None):
+    """Queue artists. None: a sweep -- the cards with auto-download (Automatic sync, the scan at start: comparing what a
+    card finds with its library is what costs the time, so only those do), or with everyone every card, listed ones
+    too (Refresh all, which somebody asked for): the cards with auto-download as they are, every other one only has
+    its newest page looked at for posts it did not have at the last look (mode "scan": no comparison with the
+    library). order: ids in the order the list shows them, which a sweep follows. Returns
     how many were added. only: the ids of the
     sources to ask -- the rest of the card is left alone this time (Browse: download what
     the filter shows). mode: "download" to download, "refresh" to only look; none lets the
@@ -185,18 +188,23 @@ def enqueue(artist_ids=None, auto=False, only=None, mode=None):
     with db.connect() as con:
         # Cards only listed (made from a login's follows) are in nobody's sweep: Sync all and the
         # automatic sync leave them alone. Asking for one -- by name -- takes it into the routine.
-        ids = [r[0] for r in con.execute(
-            "SELECT id FROM artists" + ("" if artist_ids is not None else " WHERE listed = 0 AND auto_download = 1") +
-            " ORDER BY COALESCE(last_sync, ''), RANDOM()")]
+        rows = con.execute(
+            "SELECT id, auto_download FROM artists" +
+            ("" if artist_ids is not None or everyone else " WHERE listed = 0 AND auto_download = 1") +
+            " ORDER BY COALESCE(last_sync, ''), RANDOM()").fetchall()
+        ids, downloads = [r[0] for r in rows], {r[0] for r in rows if r[1]}
         if artist_ids is not None and not auto:
             con.executemany("UPDATE artists SET listed = 0 WHERE id = ?", [(i,) for i in artist_ids])
     if artist_ids is not None:
         wanted = set(artist_ids)
         ids = [i for i in ids if i in wanted]
+    elif order:
+        place = {i: n for n, i in enumerate(order) if isinstance(i, int)}
+        ids.sort(key=lambda i: place.get(i, len(place)))        # (stable: the rest keeps its order)
     followed = 0
     with _lock:
         # A download asked for while the same card is only being looked at follows it.
-        follows = {i for i, c in _running.items() if mode == "download" and c.get("mode") == "refresh"}
+        follows = {i for i, c in _running.items() if mode == "download" and c.get("mode") in ("refresh", "scan")}
         added = [i for i in ids if i not in _queue and ((i not in _running and i not in _starting) or i in follows)]
         _queue.extend(added)
         for i in added:
@@ -206,6 +214,8 @@ def enqueue(artist_ids=None, auto=False, only=None, mode=None):
                 _only.pop(i, None)
             if mode:
                 _modes[i] = mode
+            elif everyone and artist_ids is None and i not in downloads:
+                _modes[i] = "scan"                 # a card that does not download is only looked at
             else:
                 _modes.pop(i, None)
         # Asked for again while it waits. A download for the whole card covers whatever waits; a
@@ -769,6 +779,7 @@ def _sync_artist(artist_id, auto=False, only=None, mode=None):
             return
         # No mode asked for: a card with auto-download downloads what it finds, any other only looks.
         download = (mode or ("download" if artist["auto_download"] else "refresh")) == "download"
+        scanning = mode == "scan"
         rows = con.execute("SELECT * FROM sources WHERE artist_id = ? ORDER BY id",
                            (artist_id,)).fetchall()
         known = {r[0] for r in con.execute(
@@ -789,13 +800,14 @@ def _sync_artist(artist_id, auto=False, only=None, mode=None):
     cur = {"artist_id": artist_id, "name": artist["name"], "phase": "scan", "done": 0, "total": 0,
            "first": any(not s["complete"] for s in srcs), "new": 0, "duplicates": 0,
            "failed": 0, "existing": 0, "file": "", "size": 0, "found": 0,
-           "mode": "download" if download else "refresh"}
+           "mode": "download" if download else "scan" if scanning else "refresh"}
     with _lock:
         _running[artist_id] = cur
         if len(_running) == 1:
             _speed.clear()
-    event("start", "Checking %d %s" % (len(srcs), "source" if len(srcs) == 1 else "sources"), artist)
-    refresh_avatar(artist_id)
+    if not scanning:             # (a scan of hundreds of cards would fill the log with "Checking" and ask every profile again)
+        event("start", "Checking %d %s" % (len(srcs), "source" if len(srcs) == 1 else "sources"), artist)
+        refresh_avatar(artist_id)
 
     todo, walked, logins, looked = [], {}, set(), set()
     gave_up = {r[0] for r in held if r[1] >= GIVE_UP}      # a look does not count what was given up on
@@ -828,6 +840,8 @@ def _sync_artist(artist_id, auto=False, only=None, mode=None):
             try:
                 if download:
                     fresh, out["walked"], capped = _scan(src, site, known, cur, skip, bool(pending))
+                elif scanning:
+                    fresh, capped = _peek(src, site, cur), False
                 else:
                     fresh, capped = _glance(src, site, known | gave_up, cur), False
                 out.update(looked=True, fresh=fresh)
@@ -880,6 +894,8 @@ def _sync_artist(artist_id, auto=False, only=None, mode=None):
             looked.add(src["id"])
             todo += [(src, out["site"], m) for m in out["fresh"]]
 
+    if scanning:
+        return _peeked(artist, todo, cur, logins, looked)
     if not download:
         return _looked(artist, todo, cur, logins, looked)
     with _lock:
@@ -937,6 +953,44 @@ def _sync_artist(artist_id, auto=False, only=None, mode=None):
     event("cancelled" if cancelled else ("done" if not cur["failed"] else "warn"),
            "Cancelled" if cancelled else "Finished", artist,
            new=cur["new"], duplicates=cur["duplicates"], failed=cur["failed"], existing=cur["existing"])
+
+
+def _peek(src, site, cur):
+    """A scan: the newest page of a source, kept as its snapshot (Browse opens from it and "Latest activity" reads the
+    newest post's date from it), and which of its posts the last look did not have -- not which the library lacks. One
+    request. With no earlier snapshot there is nothing to compare: nothing is claimed new."""
+    before = snapshots.load(src["id"])
+    old = {m.remote_key for m in before.items} if before else None
+    listing = site.pages(src["url"])
+    try:
+        items = next(listing, [])
+    finally:
+        close = getattr(listing, "close", None)
+        if close:
+            close()
+    snapshots.save(src["id"], items)
+    fresh = [m for m in items if old is not None and m.remote_key not in old]
+    with _lock:
+        cur["found"] += len(fresh)
+    return fresh
+
+
+def _peeked(artist, todo, cur, logins, looked):
+    """The end of a scan: said only when something is new (a sweep over hundreds of cards must not bury the log), and
+    when nothing could be asked. Nothing is counted against the library."""
+    artist_id = artist["id"]
+    for where in logins:
+        _used[where] = (artist_id, time.monotonic())
+    cancelled = _cancelled(cur)
+    with db.connect() as con:
+        con.execute("UPDATE artists SET last_sync = ? WHERE id = ?", (_now(), artist_id))
+    if cancelled:
+        event("cancelled", "Cancelled", artist)
+    elif not looked:
+        event("info", "Nothing could be checked", artist)
+    elif todo:
+        event("info", "%d new post%s online since the last look" % (len(todo), "" if len(todo) == 1 else "s"), artist,
+              new=len(todo))
 
 
 def _glance(src, site, known, cur):

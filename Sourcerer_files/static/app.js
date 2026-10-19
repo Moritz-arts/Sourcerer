@@ -189,7 +189,7 @@ function renderActivity() {
     var a = artistById(cur.artist_id) || { name: cur.name };
     var scan = cur.phase === "scan", pct = cur.total ? 100 * cur.done / cur.total : 0;
     html = '<div class="state">' + avatarHtml(a, "xs") + "<b>" + esc(cur.name) + "</b>" +
-      '<span class="num">' + (cur.mode === "refresh" ? "Looking for new posts · " + cur.found + " found"
+      '<span class="num">' + (cur.mode === "refresh" || cur.mode === "scan" ? "Looking for new posts · " + cur.found + " found"
                               : scan ? "Checking sources · " + cur.found + " new"
                               : "Downloading " + cur.done + " / " + cur.total) + "</span>" +
       '<div class="bar' + (scan ? " indeterminate" : "") + '"><div style="width:' + pct + '%"></div></div>' +
@@ -349,7 +349,8 @@ function poll() {
 // Sync looks for new posts (a card with auto-download downloads them too); download
 // fetches what is not in the library yet. One card, or every card without an id.
 function sync(artistId, download) {
-  var body = artistId ? { artist_id: artistId } : {};
+  // Refresh all (no artist): every artist, down the list as it is shown now.
+  var body = artistId ? { artist_id: artistId } : { order: S.brOrderIds || [] };
   if (download) body.mode = "download";
   api("POST", "/api/sync", body).then(function () {
     lastKey = ""; return api("GET", "/api/sync");
@@ -745,6 +746,7 @@ function renderBrowseList() {
       if (bySite) { var sx = siteOf(x), sy = siteOf(y); if (sx !== sy) return !sx ? 1 : !sy ? -1 : sx.localeCompare(sy); }
       return x.name.localeCompare(y.name);
     });
+  S.brOrderIds = list.map(function (a) { return a.id; });                  // what Refresh all follows
   if (bySite) list.forEach(function (a) { var k = siteOf(a); sites[k] = (sites[k] || 0) + 1; });
   if (byStar) list.forEach(function (a) { if (a.favorite) stars++; });
   var active = (S.sync.active || []).map(function (c) { return c.artist_id; }), queue = S.sync.queue || [];
@@ -776,7 +778,7 @@ function renderBrowseHead() {
   var a = G && G.artist, sup = !!a && a.sources.some(function (s) { return s.supported; });
   var cur = a && (S.sync.active || []).filter(function (c) { return c.artist_id === a.id; })[0] || null;
   var queued = a && (S.sync.queue || []).indexOf(a.id) >= 0;
-  $("br-progress").textContent = cur ? (cur.mode === "refresh" ? "Looking for new posts…" : cur.phase === "scan" ? "Checking sources…"
+  $("br-progress").textContent = cur ? (cur.mode === "refresh" || cur.mode === "scan" ? "Looking for new posts…" : cur.phase === "scan" ? "Checking sources…"
     : "Downloading " + cur.done + " / " + cur.total) : queued ? "Queued" : a && a.pending ? a.pending + (a.pending >= 120 ? "+" : "") + " to download" : "";
   // The artist's picture beside the name (not for "All artists"); replaced only when it changed, or it would blink on every poll.
   var av = a ? avatarHtml(a) : "";
