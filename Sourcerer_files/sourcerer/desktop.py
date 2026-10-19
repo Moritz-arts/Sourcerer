@@ -109,6 +109,36 @@ def _running(focus=False):
         return False
 
 
+def _custom_frame(window):
+    """Windows: take the title bar off, so the page's own bar is the top of the window and draws the
+    buttons (minimize, maximize, close). The resize border stays: only WS_CAPTION goes, and the style is
+    read back -- the page draws its buttons only when the bar really is gone (server.CUSTOM_FRAME), so
+    anything that goes wrong leaves the native bar and nothing is doubled."""
+    if server.CUSTOM_FRAME:
+        return
+    try:
+        import ctypes
+        from ctypes import wintypes
+        user32 = ctypes.windll.user32
+        user32.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
+        user32.GetWindowLongW.restype = ctypes.c_long
+        user32.SetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_long]
+        user32.SetWindowLongW.restype = ctypes.c_long
+        user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                                        ctypes.c_int, wintypes.UINT]
+        hwnd = wintypes.HWND(int(window.native.Handle.ToInt64()))
+        GWL_STYLE, WS_CAPTION, WS_THICKFRAME, WS_MINIMIZEBOX, WS_MAXIMIZEBOX = -16, 0x00C00000, 0x00040000, 0x00020000, 0x00010000
+        style = user32.GetWindowLongW(hwnd, GWL_STYLE)
+        user32.SetWindowLongW(hwnd, GWL_STYLE, (style & ~WS_CAPTION) | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX)
+        # SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED
+        user32.SetWindowPos(hwnd, None, 0, 0, 0, 0, 0x0002 | 0x0001 | 0x0004 | 0x0010 | 0x0020)
+        server.CUSTOM_FRAME = not (user32.GetWindowLongW(hwnd, GWL_STYLE) & WS_CAPTION)
+        log.info("window frame: %s", "the page's own bar" if server.CUSTOM_FRAME else "native (could not be removed)")
+    except Exception as e:
+        server.CUSTOM_FRAME = False
+        log.info("window frame stays native: %s", e)
+
+
 def window_check():
     """The child of `_window_ok`: exit 0 only if Qt can open a window here."""
     from qtpy.QtWidgets import QApplication
@@ -191,8 +221,13 @@ def main(argv=None):
                 if not _window_ok():
                     raise RuntimeError("no Qt or GTK window possible")
                 import webview
+                if os.name == "nt":
+                    webview.settings["DRAG_REGION_DIRECT_TARGET_ONLY"] = True     # a drag starts on the bar itself, not on its buttons
                 server.WINDOW = webview.create_window(
                     "Sourcerer v%s" % config.VERSION, url, width=1280, height=860, min_size=(760, 520))
+                if os.name == "nt":
+                    server.WINDOW.events.shown += lambda: _custom_frame(server.WINDOW)
+                    server.WINDOW.events.loaded += lambda: _custom_frame(server.WINDOW)       # once more if `shown` came too early
                 webview.start()
                 return 0                                      # the window was closed
             except Exception as e:

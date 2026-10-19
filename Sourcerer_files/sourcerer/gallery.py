@@ -114,6 +114,14 @@ def _when(posted):
     return (dt if dt.tzinfo else dt.replace(tzinfo=datetime.timezone.utc)).timestamp()
 
 
+def _gif(m):
+    """Whether the post's file is a GIF picture (not Mastodon's "gifv", which is a looping video)."""
+    if m.video:
+        return False
+    return (m.mime or "").lower() == "image/gif" or \
+        (m.filename or m.url or "").lower().split("?", 1)[0].endswith(".gif")
+
+
 class _Source:
     def __init__(self, row, artist):
         self.row, self.site, self.artist = row, sources.site_for(row["url"]), artist
@@ -388,19 +396,26 @@ class _Gallery:
              "artist": s.artist["name"], "artist_id": s.artist["id"]}
         mine = self.saved.get((s.artist["id"], m.remote_key))
         proxy = "/api/gallery/%s/%d/" % (self.id, number)
+        gif = _gif(m)
         if m.preview_headers is not None:
             d.update(thumb=proxy + "thumb", large=proxy + "large")
         else:
             d.update(thumb=m.thumb, large=m.large or m.thumb)
+        if gif:
+            # A GIF plays: the grid shows the file itself, not the site's still of it.
+            animated = d["large"] if m.preview_headers is not None else (m.url or m.large or m.thumb)
+            d.update(gif=True, thumb=animated, large=animated)
         # A screen-sized rendition that is not the original file nor the grid's picture: what a tile that
         # the grid's small one cannot fill sharply (Full mode's wide pictures) is sharpened with.
-        if not mine and m.large and m.large not in (m.url, m.thumb) and not m.video:
+        if not mine and m.large and m.large not in (m.url, m.thumb) and not m.video and not gif:
             d["mid"] = proxy + "mid" if m.preview_headers is not None else m.large
         if mine:
             d["saved"] = True
             if mine["path"]:                         # the library's copy: no request at all
                 d["large"] = "/api/gallery/file/%d" % mine["id"]
-                if mine["width"]:
+                if gif:
+                    d["thumb"] = d["large"]
+                elif mine["width"]:
                     d["thumb"] = "/api/thumb/%d?v=%s" % (mine["id"], (mine["sha256"] or "")[:12])
         return d
 
@@ -523,6 +538,8 @@ def picture(gallery_id, number, size):
     s, m = g.items[number]
     thumb = size == "thumb"
     url = (m.thumb if thumb else "") or m.large or m.thumb or m.url
+    if _gif(m) and m.url:
+        url = m.url                                  # the GIF itself, for the grid and the viewer alike
 
     def get(address):
         # No retries for an answer (a refusal, a pause), but a dropped connection or a timeout is
@@ -544,7 +561,7 @@ def picture(gallery_id, number, size):
         if not thumb or not m.thumb or not fallback or fallback == url:
             raise
         data = fetch(fallback)
-    if thumb and not m.thumb and data[0].startswith("image/"):
+    if thumb and not m.thumb and data[0].startswith("image/") and not _gif(m):
         # A forum gives no small picture: one is made here, in memory, from the original the viewer will want too.
         return _once(gallery_id, (gallery_id, number, url, "small"),
                      lambda: ("image/jpeg", imaging.preview(io.BytesIO(data[1]), 400)))

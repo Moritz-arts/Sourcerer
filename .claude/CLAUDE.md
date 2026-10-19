@@ -562,9 +562,18 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   are Simple Icons (CC0, symbols `l-<site>` in the sprite; `SITE_LOGOS` in `app.js` maps a
   source's `LABEL` to one, a site without one shows its name). The forum and the booru draw a
   Tabler icon in their own colour. A new site adds its symbol there.
-- **Browse's list** (`renderBrowseList`): the order (*Alphabetic | Latest activity*, by
-  `activityOf`, | *Source*: groups under the site's logo, name, count and a line; an artist stands once,
-  under its master source, else its first readable one, no source last) and the number beside a name (*Sources | Images*) are kept in localStorage. The
+- **Browse's list** (`renderBrowseList`): the order (*Alphabetic | Latest activity | Source | Source
+  (logo) | Image count | Downloads | Downloads (%)*) and the number beside a name (*Sources | Images |
+  Downloads | Downloads (%)*) are kept in localStorage; ordering by a number switches the number to it.
+  **Latest activity** is `activityKey`: the newest post a look saw (`sources.latest`, set by
+  `snapshots.save` from the posts' dates), else the last download or look; a card with nothing known goes
+  last -- its `created` is the day it was imported, and as a sort key it put every imported follow first.
+  *Source* groups under the site's name, a line and a count, *Source (logo)* adds the mark; an artist stands once,
+  under its master source, else its first readable one, no source last. **Images is the total, not what
+  is downloaded**: `file_count + pending` (what the last look counted as still to download; a look reads
+  the newest `REFRESH_ITEMS` posts of a source, so a long history shows a "+"), Downloads is `file_count`, the
+  percentage their share. "All artists" carries the same number for the whole list (Sources: the number of
+  artists). The
   **green auto-download cloud marks a card that downloads by itself, and only that** (no grey one
   for the others, and never a choice of the number); the switch *Auto-download* beside the head's
   Download button (`#br-auto`) and the artist's right-click menu (edit, auto-download, refresh,
@@ -574,6 +583,22 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   replaced only when its markup changed (it is redrawn on every poll while a sync runs, and
   replacing it swallowed a click that began before). The *Add artist* button at the bottom
   opens the new-card dialog.
+- **Downloading from the gallery has three ways, all through `galFetch`** (`/api/gallery/download`, one item): the
+  arrow on a tile (hover) for one picture, the *Select* mode (Ctrl-click or the tick on a tile work anywhere,
+  Shift-click a range, Ctrl+A all loaded, Esc leaves; `G.sel`, the bar at the foot, `galDownloadMany`: three at a time,
+  one toast at the end) for several, and *Download whole artist* (the card's sync, only the sources that are switched on).
+  A picture already in the library is never fetched again, whichever way. **A GIF plays** (`gallery._gif`, item `gif`): its
+  grid picture and viewer picture are the file itself, not the site's still, and no `mid` / small JPEG is made of it;
+  Mastodon's "gifv" is a looping video and plays in the viewer.
+- **Every start looks for new posts** (setting `scan_on_start`, default on; `sync.scheduler`, after the login check): the
+  same as Refresh -- cards with auto-download download what they find, listed cards are left out. Sourcerer's own updates
+  are checked at every start too (the dot on the settings button).
+- **The window's title bar is the page's own bar on Windows** (`desktop._custom_frame`, `server.CUSTOM_FRAME`,
+  `/api/window`, `applyFrame`): `WS_CAPTION` is taken off the form (`WS_THICKFRAME` stays, so the edges still resize) and
+  the style is read back -- only then does `/api/state` say `frame: "custom"`, the page draws minimize / maximize / close
+  at its right edge and marks its bar as pywebview's drag region (`DRAG_REGION_DIRECT_TARGET_ONLY`: a drag starts on the
+  bar, not on its buttons; a double-click maximizes). If anything fails the native bar stays and nothing is doubled. Not seen
+  on a real Windows desktop yet. macOS and Linux keep their native bars.
 - **Keys act on the open artist** (`S.brArtist`, `artistAct`): there is no card selection any
   more -- the cards' keys once did nothing in Browse, which was the "shortcuts don't work".
   Up/Down/Home/End pick the previous or next artist (the gallery opens 250 ms after the last key),

@@ -49,6 +49,22 @@ class Snap(typing.NamedTuple):
     tail: float                  # when the oldest ones were: a merge carries posts over without seeing them again
 
 
+def _newest(items):
+    """The time of the newest dated post as "YYYY-MM-DD HH:MM:SS" (UTC), or None. Sites write their dates in
+    every form; one that cannot be read is skipped, and a date in the future (a scheduled post) is not
+    taken for the artist's last activity."""
+    best, now = None, time.time() + 86400
+    for m in items:
+        try:
+            dt = datetime.datetime.fromisoformat((m.posted or "").replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        t = (dt if dt.tzinfo else dt.replace(tzinfo=datetime.timezone.utc)).timestamp()
+        if t <= now and (best is None or t > best):
+            best = t
+    return datetime.datetime.fromtimestamp(best, datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S") if best else None
+
+
 def save(source_id, items, merge=True):
     """Keep these (newest first) as the source's snapshot; nothing found keeps what was there.
     merge: a look at one short page does not throw away what an earlier, longer one kept -- the
@@ -59,6 +75,7 @@ def save(source_id, items, merge=True):
     items = list(items)
     if not items:
         return
+    newest = _newest(items)
     try:
         now = time.time()
         tail = now
@@ -78,6 +95,9 @@ def save(source_id, items, merge=True):
             con.execute("INSERT INTO snapshots (source_id, fetched, tail, data) VALUES (?, ?, ?, ?) "
                         "ON CONFLICT (source_id) DO UPDATE SET fetched = excluded.fetched, tail = excluded.tail, "
                         "data = excluded.data", (source_id, stamp(now), stamp(tail), blob))
+            if newest:       # "latest activity" in Browse's list: when each artist last posted
+                con.execute("UPDATE sources SET latest = ? WHERE id = ? AND (latest IS NULL OR latest < ?)",
+                            (newest, source_id, newest))
     except sqlite3.IntegrityError:               # the source was removed meanwhile
         pass
     except Exception as e:                       # a Media with something that cannot be kept, a busy database:

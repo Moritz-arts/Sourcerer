@@ -139,7 +139,7 @@ input[type=range] { accent-color: var(--fill-accent); cursor: pointer; }
 .br-group::after { content: ""; flex: 1; height: 1px; background: var(--border-strong); }
 .br-group .ic.logo { width: 14px; height: 14px; }
 .br-group .num { font-weight: 400; color: var(--text-muted); }
-.br-n { font-size: 11px; color: var(--text-muted); }
+.br-n { min-width: 22px; text-align: right; font-size: 11px; color: var(--text-muted); }
 .br-item.selected .br-n { color: inherit; opacity: .8; }
 .br-auto { display: inline-flex; flex: none; color: var(--dot-ok); }
 .br-auto .ic { width: 15px; height: 15px; }
@@ -215,6 +215,27 @@ input[type=range] { accent-color: var(--fill-accent); cursor: pointer; }
 .no-tile-logo .gal-name { margin-left: 0; }
 .gal-name { margin-left: 6px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gal-tag:has(.gal-name) { right: 7px; }
+/* A picture's own controls: an arrow to download just this one (hover), a tick to select it (hover, always while selecting),
+   a GIF mark. Selected: a blue frame and a filled tick. */
+.gal-dl, .gal-pick { position: absolute; display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%;
+  color: #fff; background: rgba(0, 0, 0, .55); opacity: 0; transition: opacity .12s; box-shadow: 0 1px 4px rgba(0, 0, 0, .4); }
+.gal-dl { right: 6px; bottom: 6px; }
+.gal-pick { left: 6px; top: 6px; border: 1.5px solid rgba(255, 255, 255, .85); }
+.gal-dl .ic { width: 15px; height: 15px; }
+.gal-pick .ic { width: 14px; height: 14px; stroke-width: 3; opacity: 0; }
+.gal-tile:hover .gal-dl, .gal-tile:hover .gal-pick, .gal-grid.selecting .gal-pick { opacity: 1; }
+.gal-dl:hover { background: var(--fill-accent); }
+.gal-tile.sel { outline: 3px solid var(--fill-accent); outline-offset: -3px; }
+.gal-tile.sel .gal-pick { opacity: 1; background: var(--fill-accent); border-color: var(--fill-accent); }
+.gal-tile.sel .gal-pick .ic { opacity: 1; }
+.gal-tile.busy { opacity: .55; }
+.gal-badge { position: absolute; left: 7px; top: 36px; padding: 0 5px; border-radius: 4px; font-size: 10px; font-weight: 600; letter-spacing: .5px;
+  color: #fff; background: rgba(0, 0, 0, .55); }
+.gal-grid:not(.selecting) .gal-tile:not(:hover) .gal-badge { top: 7px; }
+#br-select.on { background: var(--bg-accent); color: var(--text-accent); border-color: var(--border-accent); }
+.sel-bar { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 4; display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px 8px 16px; border-radius: 12px; background: var(--surface-3); border: .5px solid var(--border-strong); box-shadow: var(--shadow); white-space: nowrap; }
+.sel-bar #sel-text { font-weight: 500; margin-right: 6px; }
 .gal-saved { position: absolute; right: 6px; top: 6px; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center;
   justify-content: center; background: var(--fill-ok); color: #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, .45); }
 .gal-saved .ic { width: 15px; height: 15px; stroke-width: 3; }
@@ -256,6 +277,14 @@ input[type=range] { accent-color: var(--fill-accent); cursor: pointer; }
 
 /* ---- window frame ---- */
 .app { height: 100%; display: flex; flex-direction: column; }
+/* The window's own buttons (Windows, no native title bar): flush with the top right corner, Windows' size, close in red. */
+html.frameless .toolbar { padding-right: 0; }
+.winctl { display: flex; align-self: stretch; margin: -9px 0 -9px 8px; }
+.wc { width: 46px; border: none; border-radius: 0; background: transparent; color: var(--text-secondary); padding: 0; justify-content: center; }
+.wc:hover:not(:disabled) { background: var(--surface-3); color: var(--text-primary); transform: none; }
+.wc:active:not(:disabled) { transform: none; }
+.wc.close:hover:not(:disabled) { background: #e81123; color: #fff; }
+.wc .ic { width: 15px; height: 15px; }
 .toolbar {
   display: flex; align-items: center; gap: 8px; padding: 9px 14px;
   background: var(--surface-1); border-bottom: .5px solid var(--border);
