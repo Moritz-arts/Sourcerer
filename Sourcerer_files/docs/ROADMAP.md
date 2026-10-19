@@ -361,6 +361,8 @@ add the one that replaced it.
       Merge into... for accounts the sites did not show to be one artist
 - [x] Misskey (misskey.io and forks) as a source: notes with files, no login; a Mastodon list's
       Misskey accounts are cards too; unknown Misskey servers are learned
+- [x] Accounts of one name on different sites are combined on one card by themselves (as a login's
+      follows come in, and for the cards already apart), never two accounts of one site
 - [x] Merge dialog: likely twins (same name but for emoji / marks / case, shared account name) listed at
       the top, several cards ticked and merged with one button, no extra confirmation; Browse can be
       ordered by source (logo and line per site)

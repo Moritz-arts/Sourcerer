@@ -517,11 +517,13 @@ class Busy(Exception):
     """The card is being synced right now."""
 
 
-def merge(into_id, other_id):
+def merge(into_id, other_id, auto=False):
     """The card other_id becomes part of into_id: its sources, files and history move over and it
     is gone -- the way to put one artist's accounts together where the sites were not recognised as
     one. The downloaded files stay where they are (paths are kept). The result is a card the user
-    acted on, so it is no longer only listed. Returns how many sources moved."""
+    acted on, so it is no longer only listed -- unless Sourcerer did it (auto: follows.combine) and
+    both were listed, when nobody has touched the result and it stays out of every sweep, and one
+    summary, not a line per merge, goes to the activity log. Returns how many sources moved."""
     if into_id == other_id:
         raise ValueError("Pick another card.")
     with _lock:       # looked at and taken off the waiting list in one step: the worker cannot pop it between
@@ -561,7 +563,7 @@ def merge(into_id, other_id):
             master = b["master_source_id"]
         con.execute("UPDATE artists SET listed = ?, master_source_id = ?, avatar = ?, last_activity = ?, "
                     "pending = (SELECT COALESCE(SUM(pending), 0) FROM sources WHERE artist_id = ?) WHERE id = ?",
-                    (0, master, a["avatar"] or b["avatar"],
+                    (1 if auto and a["listed"] and b["listed"] else 0, master, a["avatar"] or b["avatar"],
                      max(filter(None, [a["last_activity"], b["last_activity"]]), default=None), into_id, into_id))
         con.execute("DELETE FROM artists WHERE id = ?", (other_id,))
     if b["avatar"] and not a["avatar"]:
@@ -571,7 +573,8 @@ def merge(into_id, other_id):
             (config.AVATARS / b["avatar"]).unlink(missing_ok=True)
         except OSError as e:                         # the merge is done: a picture left over is not worth failing for
             log.info("picture of the merged card not removed: %s", e)
-    event("info", "%s is part of %s now" % (b["name"], a["name"]))
+    if not auto:
+        event("info", "%s is part of %s now" % (b["name"], a["name"]))
     return moved
 
 
