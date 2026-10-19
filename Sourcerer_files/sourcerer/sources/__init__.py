@@ -3,7 +3,8 @@
     KIND, LABEL          the stored kind and its name on screen
     match(url) -> bool   whether a profile URL belongs to this site
     normalize(url)       the profile URL behind any page of it (a post, /media, ...)
-    profile(url)         {"name", "handle", "avatar"}: who the account is
+    profile(url)         {"name", "handle", "avatar", "links"}: who the account is; links (optional): the other
+                         accounts its own profile names -- see profile_links
     pages(url)           yields lists of Media, newest first, one API page each
     MAX_NEW (optional)   at most this many new files per sync; the next carries on
     account_key(url)     the login (accounts.py) a source uses, if the site has logins
@@ -14,6 +15,7 @@
 A site that is not here yet is still accepted as a source and shown as "not
 supported yet", so an artist card can list every place the artist posts.
 """
+import html
 import logging
 import re
 import time
@@ -159,6 +161,38 @@ def describe(url):
     if not name and ("/media/users/" in url or "/members/" in url):
         name = "XenForo"                       # its media gallery and member pages
     return {"kind": "unsupported", "label": name or _host(url) or url, "supported": False}
+
+
+_TEXT_URL = re.compile(r"https?://[^\s\"'<>)\]]+", re.I)
+_PIXIV_USER = re.compile(r"^(?:/[a-z]{2})?/users/\d+/?$")
+MAX_LINKS = 20
+
+
+def profile_links(*things):
+    """The accounts on sites Sourcerer knows that a profile names itself -- its bio, its fields, the links it declares
+    (pixiv's `social`, Fanbox's `profileLinks`, a Mastodon field): the strongest sign that two accounts are one artist,
+    which no display name is. Each as the profile address a card would keep, lower-cased; no request is made (a pixiv work's
+    link would need one: only pixiv's own profile addresses count). things: strings (text or HTML), lists and dicts of them."""
+    out, todo = [], list(things)
+    while todo:
+        t = todo.pop(0)
+        if isinstance(t, dict):
+            todo += list(t.values())
+        elif isinstance(t, (list, tuple)):
+            todo += list(t)
+        elif isinstance(t, str):
+            for raw in _TEXT_URL.findall(html.unescape(t)):
+                raw = raw.rstrip(".,;:!?)」。、")
+                site = site_for(raw)
+                if not site or (site.KIND == "pixiv" and not _PIXIV_USER.match(urllib.parse.urlsplit(raw).path)):
+                    continue
+                try:
+                    url = site.normalize(raw).lower()
+                except Exception:
+                    continue
+                if url not in out:
+                    out.append(url)
+    return out[:MAX_LINKS]
 
 
 _profiles = {}            # url -> (when, answer): the card dialog, Save and the avatar ask alike
