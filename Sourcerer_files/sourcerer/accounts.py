@@ -4,11 +4,13 @@ Four ways in, whichever the site offers:
 
   window    the site's own login page in a window of Sourcerer's (pywebview);
             once the site has set the cookie that proves a login, its cookies
-            are kept and the window closes by itself. X, Patreon, Pixiv and
-            XenForo forums ("xenforo:<host>"). Without a window (browser
+            are kept and the window closes by itself. X, Patreon, Pixiv, Fanbox,
+            Fantia and XenForo forums ("xenforo:<host>"). Without a window (browser
             mode) a cookies.txt, exported from the browser, does the same.
   oauth     Mastodon ("mastodon:<server>"): the server's own "Authorize
             Sourcerer" page in that window; it hands out a read-only token.
+            Misskey ("misskey:<server>") the same with its MiAuth page, whose
+            answer Sourcerer asks for itself while the window is open.
   password  Bluesky: the handle and an app password, which Bluesky makes for
             exactly this -- a password that can only be used by apps and can
             be revoked on its own. Kept is the session it opens, not the password.
@@ -53,15 +55,20 @@ SITES = {
     # Guests get a PHPSESSID too; a member's starts with the user id.
     "pixiv": ("Pixiv", "https://accounts.pixiv.net/login", ("pixiv.net",),
               lambda c: bool(re.match(r"\d+_", c.get("PHPSESSID", "")))),
+    # Fanbox: pixiv's account, its own session cookie.
+    "fanbox": ("Fanbox", "https://www.fanbox.cc/login", ("fanbox.cc",), lambda c: bool(c.get("FANBOXSESSID"))),
+    # Fantia hands a visitor a session cookie too: only the page says who is in (_PAGE_SAYS).
+    "fantia": ("Fantia", "https://fantia.jp/sessions/signin", ("fantia.jp",), lambda c: False),
 }
 # What "Add account" offers, in the order the rows are shown: (type, label, how it logs in).
 # Bluesky, Pixiv, X and Patreon are one login each; a Mastodon server, a forum or a booru is
 # as many as the user has. A site is listed here when Sourcerer can download from it.
-TYPES = [("bluesky", "Bluesky", "password"), ("mastodon", "Mastodon", "oauth"),
-         ("pixiv", "Pixiv", "window"), ("x", "X (Twitter)", "window"), ("patreon", "Patreon", "window"),
+TYPES = [("bluesky", "Bluesky", "password"), ("mastodon", "Mastodon", "oauth"), ("misskey", "Misskey", "oauth"),
+         ("pixiv", "Pixiv", "window"), ("fanbox", "Fanbox", "window"), ("fantia", "Fantia", "window"),
+         ("x", "X (Twitter)", "window"), ("patreon", "Patreon", "window"),
          ("xenforo", "XenForo forum", "window"), ("booru", "Booru", "api_key")]
 ORDER = [t[0] for t in TYPES]
-GROUPS = {"mastodon": "Mastodon", "xenforo": "XenForo", "booru": "Booru"}
+GROUPS = {"mastodon": "Mastodon", "misskey": "Misskey", "xenforo": "XenForo", "booru": "Booru"}
 # XenForo forums are one account each, keyed "xenforo:<host>". The cookie
 # prefix is the forum's choice (xf_ by default); <prefix>user is set by a
 # login with "Stay logged in", <prefix>session by every visit, guest or not.
@@ -86,13 +93,23 @@ def kind(key):
     """How an account logs in: window, oauth, password or api_key."""
     if key in SITES or key.startswith("xenforo:"):
         return "window"
-    if key.startswith("mastodon:"):
+    if key.startswith(("mastodon:", "misskey:")):
         return "oauth"
     if key == "bluesky":
         return "password"
     if key.startswith("booru:"):
         return "api_key"
     raise KeyError(key)
+
+
+def careful(key):
+    """Whether reading with this login must be done like a person would: a cookie login (pixiv, X, Patreon, a
+    forum) is what an account gets banned for. A token or a key (Mastodon, Bluesky, a booru) is an API client with
+    published limits: it is paced (net's token lane) but needs no spacing between artists, no reading breaks."""
+    try:
+        return bool(key) and logged_in(key) and kind(key) == "window"
+    except KeyError:
+        return False
 
 
 def label(key):
@@ -359,13 +376,15 @@ def _known(key):
 
 # ---- logging in in a window --------------------------------------------------------
 
-def login_in_window(key, base=None, url=None, finish=None):
+def login_in_window(key, base=None, url=None, finish=None, ask=None):
     """Open a login page in a window of its own and wait, in the background,
     for the login to show. Returns at once.
 
     Cookie logins wait for the cookie that proves one. An oauth login passes
     url (the server's authorize page) and finish(code): the window waits for
     the page that shows the code, and finish turns it into the saved login.
+    ask(window) says where the answer is instead (Misskey's MiAuth has none on
+    the page: Sourcerer asks the server): it returns what finish takes, or None.
     """
     import webview
     if base and key.startswith("xenforo:"):
@@ -382,15 +401,24 @@ def login_in_window(key, base=None, url=None, finish=None):
     closed = threading.Event()
     window.events.closed += closed.set
     extra = {"base": url[:-len("/login/")]} if key.startswith("xenforo:") else {}
-    threading.Thread(target=_watch, args=(key, window, ok, closed, extra, finish),
+    threading.Thread(target=_watch, args=(key, window, ok, closed, extra, finish, ask),
                      daemon=True, name="login-" + key).start()
 
 
-def _forum_says_logged_in(window):
-    # XenForo 2 marks every page: <html data-logged-in="true">. Without "Stay
-    # logged in" no <prefix>user cookie is set, so the page is the better witness.
+# Logins a cookie does not prove (a visitor has a session cookie too): what the open page says.
+# XenForo 2 marks every page <html data-logged-in="true"> -- and without "Stay logged in" no
+# <prefix>user cookie is set. Fantia marks the body with who looks: data-user-type="visitor".
+_PAGE_SAYS = {
+    "xenforo:": "document.documentElement.getAttribute('data-logged-in') === 'true'",
+    "fantia": "!!document.body && !!document.body.getAttribute('data-user-type') && "
+              "document.body.getAttribute('data-user-type') !== 'visitor'",
+}
+
+
+def _page_says_logged_in(key, window):
+    script = next((js for prefix, js in _PAGE_SAYS.items() if key.startswith(prefix)), None)
     try:
-        return window.evaluate_js("document.documentElement.getAttribute('data-logged-in')") == "true"
+        return bool(script) and window.evaluate_js(script) is True
     except Exception:
         return False
 
@@ -426,7 +454,7 @@ def _oauth_code(window, host):
     return m.group(1) if m else None
 
 
-def _watch(key, window, ok, closed, extra, finish):
+def _watch(key, window, ok, closed, extra, finish, ask=None):
     deadline = time.monotonic() + LOGIN_MINUTES * 60
     found = code = at = None
     rerouted = not (key.startswith("xenforo:") and extra.get("base"))      # a forum's login page is tried by its other route once
@@ -449,7 +477,7 @@ def _watch(key, window, ok, closed, extra, finish):
                 log.info("%s: login page not reloaded: %s", key, e)
             continue
         if finish:
-            code = _oauth_code(window, key.split(":", 1)[1])
+            code = ask(window) if ask else _oauth_code(window, key.split(":", 1)[1])
             if code:
                 break
             continue
@@ -461,7 +489,7 @@ def _watch(key, window, ok, closed, extra, finish):
         if ok({c["name"]: c["value"] for c in cookies}):
             found = cookies
             break
-        if key.startswith("xenforo:") and _forum_says_logged_in(window):
+        if _page_says_logged_in(key, window):
             found, extra["page_login"] = cookies, True
             break
     if code:

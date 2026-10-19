@@ -62,7 +62,7 @@ SEED_PAGES = 3               # pages a seeded source reads looking for a post it
 SEED_AGE = 7 * 86400         # a snapshot older than this is not shown (its links may have expired: Patreon's thumbnails)
 AHEAD = 24                   # a source with fewer pictures waiting than this is asked for its next page already
 POOL = 6                     # listings running at once, all galleries together
-SERIAL = ("x", "xenforo")    # sites gallery-dl reads: one source at a time (_gdl._busy would turn the rest away)
+SERIAL = ("x", "xenforo", "fanbox", "fantia")    # sites gallery-dl reads: one source at a time (_gdl._busy would turn the rest away)
 
 _lock = threading.Lock()
 _galleries = {}
@@ -130,7 +130,7 @@ class _Source:
         # One source at a time per site where a request goes alone anyway -- gallery-dl's (X, forums:
         # it turns the rest away as busy) and every login's lane: they would only sit in a pool thread.
         key = sources.account_key(row["url"]) if self.site else None
-        self.login = bool(key and accounts.logged_in(key))
+        self.login = accounts.careful(key)
         self.serial = bool(self.site) and (self.site.KIND in SERIAL or self.login)
         self.asked_at = 0.0                   # when it was last asked: the one asked longest ago goes next
         self.spaced = False                   # All artists: a login site's next card waits (CARD_GAP)
@@ -280,6 +280,7 @@ class _Gallery:
         self.keys = set()
         self.saved = {}                        # (artist id, remote_key) -> the library's row, where there is one
         self.asked = set()                     # ... of these, the ones the library was asked about
+        self.sharp = db.get_setting("grid_quality") != "fast"      # the grid shows the largest rendition, not the small one
         with db.connect() as con:
             artists = {r["id"]: dict(r) for r in con.execute(
                 "SELECT * FROM artists" + (" WHERE listed = 0" if self.all else " WHERE id = ?"), () if self.all else (artist_id,))}
@@ -396,6 +397,7 @@ class _Gallery:
              "artist": s.artist["name"], "artist_id": s.artist["id"]}
         mine = self.saved.get((s.artist["id"], m.remote_key))
         proxy = "/api/gallery/%s/%d/" % (self.id, number)
+        sharp = self.sharp
         gif = _gif(m)
         if m.preview_headers is not None:
             d.update(thumb=proxy + "thumb", large=proxy + "large")
@@ -409,6 +411,8 @@ class _Gallery:
         # the grid's small one cannot fill sharply (Full mode's wide pictures) is sharpened with.
         if not mine and m.large and m.large not in (m.url, m.thumb) and not m.video and not gif:
             d["mid"] = proxy + "mid" if m.preview_headers is not None else m.large
+            if sharp:                                # the grid shows it at once: no blocky stage, nothing laid over it
+                d["thumb"] = d.pop("mid")
         if mine:
             d["saved"] = True
             if mine["path"]:                         # the library's copy: no request at all
@@ -416,7 +420,7 @@ class _Gallery:
                 if gif:
                     d["thumb"] = d["large"]
                 elif mine["width"]:
-                    d["thumb"] = "/api/thumb/%d?v=%s" % (mine["id"], (mine["sha256"] or "")[:12])
+                    d["thumb"] = "/api/thumb/%d?v=%s%s" % (mine["id"], (mine["sha256"] or "")[:12], "&s=960" if sharp else "")
         return d
 
     def close(self):

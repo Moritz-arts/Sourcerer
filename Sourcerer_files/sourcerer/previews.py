@@ -105,7 +105,7 @@ def _ready(where):
     """May another card ask this login site now? (As sync spaces its cards -- NEXT_CARD -- but
     without waiting: the worker goes on to a card of another site and comes back.)"""
     last = max(_read.get(where, -1e9), (sync._used.get(where) or (None, -1e9))[1])
-    return time.monotonic() - last >= random.uniform(*sync.NEXT_CARD)
+    return time.monotonic() - last >= random.uniform(*sync.next_card())
 
 
 def _candidates(artist, rows, forced):
@@ -136,7 +136,7 @@ def _candidates(artist, rows, forced):
         if need == "required" and not (key and accounts.logged_in(key)):
             continue
         where = net.site_of(row["url"])
-        login = bool(key and accounts.logged_in(key))
+        login = accounts.careful(key)
         if login:
             # A source nobody has looked at yet (a card never looked at, or never synced and with no
             # snapshot) gets its first look; after that only the reasons above.

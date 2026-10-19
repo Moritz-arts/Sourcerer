@@ -146,6 +146,15 @@ function renderAll() {
   renderBrowseList(); renderBrowseHead(); renderActivity();
 }
 
+// The star: the artist stands among the favorites (first in the list when it is ordered so).
+function setFavorite(a, on) {
+  a.favorite = on ? 1 : 0;
+  renderBrowseList();
+  api("POST", "/api/artists/" + a.id + "/favorite", { on: on }).then(function () {
+    toast(on ? a.name + " is a favorite now" : a.name + " is no favorite any more");
+  }).catch(function (err) { fail(err); a.favorite = on ? 0 : 1; renderBrowseList(); });
+}
+
 // The card's switch: a sync of it also downloads what it finds.
 function setAuto(a, on) {
   a.auto_download = on ? 1 : 0;
@@ -422,6 +431,7 @@ function openMenu(a, x, y) {
   var m = $("menu");
   S.menuFor = a.id;
   $("menu-auto").textContent = a.auto_download ? "Turn auto-download off" : "Turn auto-download on";
+  $("menu-favorite").textContent = a.favorite ? "Remove from favorites" : "Add to favorites";
   m.classList.remove("hidden");
   m.style.top = Math.max(4, Math.min(y, innerHeight - m.offsetHeight - 8)) + "px";
   m.style.left = Math.max(4, Math.min(x, innerWidth - m.offsetWidth - 8)) + "px";
@@ -432,6 +442,7 @@ function artistAct(act, a) {
   if (!a) return;
   if (act === "edit") openCard(a);
   else if (act === "auto") setAuto(a, !a.auto_download);
+  else if (act === "favorite") setFavorite(a, !a.favorite);
   else if (act === "sync") sync(a.id);
   else if (act === "download") downloadSelected(a);
   else if (act === "folder") openFolder(a);
@@ -519,7 +530,7 @@ document.addEventListener("keydown", function (e) {
   if (!a) return;
   // Enter on a button presses it; in the artist list it edits the card instead.
   if (k === "Enter" && t.tagName === "BUTTON" && !t.closest("#br-list")) return;
-  var act = k === "Enter" ? "edit" : k === "Delete" ? "delete" : { a: "auto", u: "sync", d: "download", o: "folder", m: "merge" }[low];
+  var act = k === "Enter" ? "edit" : k === "Delete" ? "delete" : { a: "auto", f: "favorite", u: "sync", d: "download", o: "folder", m: "merge" }[low];
   if (act) { e.preventDefault(); artistAct(act, a); }
 });
 
@@ -581,7 +592,7 @@ function galWatch() {
 var BR_HIDDEN = "sourcerer.browse.hidden";
 var BR_FIT = "sourcerer.browse.fit", BR_SIZE = "sourcerer.browse.size";
 var BR_SORT = "sourcerer.browse.sort", BR_COUNT = "sourcerer.browse.count", BR_LAST = "sourcerer.browse.last";
-function brOrder(v) { return /^(activity|source|logo|images|downloads|percent)$/.test(v) ? v : "name"; }
+function brOrder(v) { return /^(activity|favorites|source|logo|images|downloads|percent)$/.test(v) ? v : "name"; }
 function brNumber(v) { return v === "files" ? "images" : /^(images|downloads|percent)$/.test(v) ? v : "sources"; }
 S.brArtist = 0; S.brFit = "square"; S.brSort = "name"; S.brCount = "sources";
 try {
@@ -658,8 +669,10 @@ function allText() {
 var NUMBER_SORT = { images: totalOf, downloads: downloadsOf, percent: shareOf };
 function renderBrowseList() {
   var q = $("br-search").value.trim().toLowerCase(), bySite = S.brSort === "source" || S.brSort === "logo", sites = {};
+  var byStar = S.brSort === "favorites", stars = 0;
   var list = S.artists.filter(function (a) { return !q || a.name.toLowerCase().indexOf(q) >= 0; })
     .sort(function (x, y) {
+      if (byStar && !x.favorite !== !y.favorite) return x.favorite ? -1 : 1;
       if (S.brSort === "activity") { var tx = activityKey(x), ty = activityKey(y); if (tx !== ty) return !tx ? 1 : !ty ? -1 : tx < ty ? 1 : -1; }
       var by = NUMBER_SORT[S.brSort];
       if (by && by(x) !== by(y)) return by(y) - by(x);
@@ -667,6 +680,7 @@ function renderBrowseList() {
       return x.name.localeCompare(y.name);
     });
   if (bySite) list.forEach(function (a) { var k = siteOf(a); sites[k] = (sites[k] || 0) + 1; });
+  if (byStar) list.forEach(function (a) { if (a.favorite) stars++; });
   var cur = S.sync.current && S.sync.current.artist_id, queue = S.sync.queue || [];
   function count(a) {
     if (cur === a.id || queue.indexOf(a.id) >= 0) return '<i class="spin" title="' + (cur === a.id ? "Working…" : "Queued") + '"></i>';
@@ -677,10 +691,15 @@ function renderBrowseList() {
     list.map(function (a, i) {
       var site = bySite ? siteOf(a) : "", head = bySite && (!i || siteOf(list[i - 1]) !== site) ?
         '<div class="br-group">' + (S.brSort === "logo" ? siteLogo(site) || "" : "") + "<span>" + esc(site || "No source") + '</span><span class="num">' + sites[site] + "</span></div>" : "";
+      if (byStar && stars && stars < list.length && (i === 0 || i === stars)) {         // Favorites, then everybody else
+        head = '<div class="br-group">' + (i === 0 ? '<svg class="ic star"><use href="#i-star"/></svg><span>Favorites</span><span class="num">' + stars + "</span>"
+          : '<span>Others</span><span class="num">' + (list.length - stars) + "</span>") + "</div>";
+      }
       return head + '<button type="button" class="br-item' + (S.brArtist === a.id ? " selected" : "") + '" data-id="' + a.id + '">' +
         avatarHtml(a) + '<span class="br-name" title="' + esc(a.name) + '">' + esc(a.name) + "</span>" +
         '<span class="br-n">' + count(a) + "</span>" +
-        (a.auto_download ? '<span class="br-auto" title="Auto-download on">' + icon("cloud-down") + "</span>" : "") + "</button>";
+        (a.auto_download ? '<span class="br-auto" title="Auto-download on">' + icon("cloud-down") + "</span>" : "") +
+        (a.favorite ? '<span class="br-fav" title="Favorite">' + icon("star") + "</span>" : "") + "</button>";
     }).join("");
   if (html !== brHtml) { brHtml = html; $("br-list").innerHTML = html; }
 }
@@ -766,6 +785,7 @@ function browseOpen(id, fresh) {
   renderBrowseList(); renderBrowseHead();
   if (!id && !S.artists.length) { G.loading = false; galHead(); $("gal-end").textContent = "No cards yet: create a card first."; return; }
   var g = G;
+  if (id && S.sync && (S.sync.running || (S.sync.queue || []).length)) api("POST", "/api/sync/focus", { artist_id: id }).catch(function () {});
   api("POST", "/api/gallery/open", { artist_id: id || 0 }).then(function (d) {
     if (g !== G && GS[g.key] !== g) return api("POST", "/api/gallery/close", { gallery: d.gallery });
     g.id = d.gallery; g.sources = d.sources;
@@ -849,7 +869,7 @@ function proxyOf(it, size) {
 }
 
 // A site's mark instead of its name; "" for a site without one (the caller writes the name then).
-var SITE_LOGOS = { Bluesky: "bluesky", Mastodon: "mastodon", Misskey: "misskey", Pixiv: "pixiv", Patreon: "patreon", X: "x", XenForo: "xenforo", Booru: "booru" };
+var SITE_LOGOS = { Bluesky: "bluesky", Mastodon: "mastodon", Misskey: "misskey", Pixiv: "pixiv", Patreon: "patreon", X: "x", Fanbox: "fanbox", Fantia: "fantia", XenForo: "xenforo", Booru: "booru" };
 function siteLogo(label) {
   return SITE_LOGOS[label] ? '<svg class="ic logo" role="img" aria-label="' + esc(label) + '"><use href="#l-' + SITE_LOGOS[label] + '"/></svg>' : "";
 }
@@ -1693,6 +1713,7 @@ function fillSettings() {
   $("set-parallel").value = st.parallel;
   $("set-perhost").value = st.per_host;
   $("set-pace").value = st.pace_ms;
+  $("set-logingap").value = st.login_gap;
   $$("[data-set]").forEach(function (b) { b.classList.toggle("selected", st[b.dataset.set] === b.dataset.value); });
   $("filename-example").textContent = "For example: " + (st.filenames === "dated" ? "2025-03-14_" : "") +
     "a6f1c09b2e7d4f31.png" + " — the name the file has on the site, wherever it has one.";
@@ -1737,6 +1758,7 @@ $("set-hours").addEventListener("change", function () { saveSetting({ auto_hours
 $("set-parallel").addEventListener("change", function () { saveSetting({ parallel: this.value }); });
 $("set-perhost").addEventListener("change", function () { saveSetting({ per_host: this.value }); });
 $("set-pace").addEventListener("change", function () { saveSetting({ pace_ms: this.value }); });
+$("set-logingap").addEventListener("change", function () { saveSetting({ login_gap: this.value }); });
 $("btn-settings").addEventListener("click", function () { openSettings(S.update && S.update.available ? "updates" : null); });
 $$("[data-open]").forEach(function (b) {
   b.addEventListener("click", function () { api("POST", "/api/open", { target: b.dataset.open }).catch(fail); });
@@ -1753,6 +1775,7 @@ var accTimer = null;
 // a booru is chosen from the list, Bluesky takes its fields. X, Pixiv and Patreon need nothing.
 var ADD = {
   mastodon: { field: "server", label: "Server", placeholder: "mastodon.social" },
+  misskey: { field: "misskey", label: "Server", placeholder: "misskey.io" },
   xenforo: { field: "forum", label: "Forum", placeholder: "forum.example.com" }
 };
 S.accFocus = ""; S.accScroll = false; S.accHtml = ""; S.accData = null; S.accWaiting = false; S.accWant = "";
@@ -1824,7 +1847,7 @@ var ACC_DOT = { ok: "Works", warn: "Works, but needs attention", error: "Ran out
 
 // A login's site mark with its status dot in the corner (the same as Browse's chips); the bare dot for a
 // type without a mark. The account types are the sites' own names.
-var ACC_LOGOS = { bluesky: "bluesky", mastodon: "mastodon", pixiv: "pixiv", patreon: "patreon", x: "x", xenforo: "xenforo", booru: "booru" };
+var ACC_LOGOS = { bluesky: "bluesky", mastodon: "mastodon", misskey: "misskey", pixiv: "pixiv", fanbox: "fanbox", fantia: "fantia", patreon: "patreon", x: "x", xenforo: "xenforo", booru: "booru" };
 function accMark(type, dot) {
   var d = '<i class="dot ' + dot + '" title="' + ACC_DOT[dot] + '"></i>';
   return ACC_LOGOS[type] ? '<span class="mark"><svg class="ic logo" aria-hidden="true"><use href="#l-' + ACC_LOGOS[type] + '"/></svg>' + d + "</span>" : d;
@@ -1907,7 +1930,7 @@ function accWanted(d) {
   if (d.accounts.some(function (a) { return a.key === key; })) { S.accFocus = key; S.accScroll = true; return; }
   var type = key.split(":")[0], host = key.split(":").slice(1).join(":");
   S.accAdding = true; S.accType = type; S.accFocus = "add"; S.accScroll = true;
-  S.accPre = type === "mastodon" || type === "xenforo" ? host : "";
+  S.accPre = type === "mastodon" || type === "misskey" || type === "xenforo" ? host : "";
   S.accBooru = type === "booru" ? host : "";
 }
 

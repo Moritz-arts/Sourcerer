@@ -70,7 +70,9 @@ HOSTS = {"www.pixiv.net": (1, 1.5), "i.pximg.net": (1, 0.5), "www.patreon.com": 
          "safebooru.org": (1, 1.0), "yande.re": (1, 1.0), "konachan.com": (1, 1.0),
          "konachan.net": (1, 1.0), "www.sakugabooru.com": (1, 1.0), "aibooru.online": (1, 1.0),
          "xbooru.com": (1, 1.0), "tbib.org": (1, 1.0), "hypnohub.net": (1, 1.0),
-         "misskey.io": (2, 0.5)}
+         "misskey.io": (2, 0.5),
+         # Fanbox and Fantia read with a login: one request at a time, the login lane spaces them further.
+         "downloads.fanbox.cc": (2, 0.6), "api.fanbox.cc": (1, 1.5), "fantia.jp": (1, 1.5), "c.fantia.jp": (2, 0.6)}
 # Not retried on a 429 or a bot check. pixiv's terms forbid "large numbers of
 # actions within a short period"; tools that kept retrying there had accounts restricted.
 STOP_HOSTS = {"www.pixiv.net"}
@@ -83,13 +85,14 @@ STOP_HOSTS = {"www.pixiv.net"}
 PREVIEW = (4, 0.08)
 
 LOGIN_PACE = 2.0            # seconds at least between two requests carrying a login
+TOKEN_PACE = 1.0            # ... carrying only a token (Mastodon allows 300 requests in 5 minutes): no jitter-long gaps, no breaks
 INTERACTIVE_PACE = 0.5      # ... when somebody waits for the answer (interactive()): a click, not a scan
 JITTER = (1.0, 1.6)         # every gap times this, drawn anew: longer, never shorter
 READ_EVERY = (20, 40)       # a logged-in site gets a break after this many requests ...
 READ_BREAK = (15, 60)       # ... of this many seconds
 # Requests a day carrying a login, per site. pixiv's terms name no number;
 # Pikura's users saw 24-72 h suspensions after long batch runs.
-BUDGETS = {"pixiv": 1500, "patreon": 1500, "x": 1500}
+BUDGETS = {"pixiv": 1500, "patreon": 1500, "x": 1500, "fanbox": 1500, "fantia": 1500}
 BUDGET = 3000
 
 # A site is every host one company runs: a stop from pixiv's API stops its
@@ -97,8 +100,9 @@ BUDGET = 3000
 _SITES = {"pixiv.net": "pixiv", "pximg.net": "pixiv", "patreon.com": "patreon",
           "patreonusercontent.com": "patreon", "x.com": "x", "twitter.com": "x", "twimg.com": "x",
           "bsky.app": "bluesky", "bsky.network": "bluesky", "bsky.social": "bluesky",
-          "misskey.io": "misskey", "misskeyusercontent.jp": "misskey"}
-NAMES = {"pixiv": "Pixiv", "patreon": "Patreon", "x": "X", "bluesky": "Bluesky", "misskey": "Misskey.io"}
+          "misskey.io": "misskey", "misskeyusercontent.jp": "misskey", "fanbox.cc": "fanbox", "fantia.jp": "fantia"}
+NAMES = {"pixiv": "Pixiv", "patreon": "Patreon", "x": "X", "bluesky": "Bluesky", "misskey": "Misskey.io",
+         "fanbox": "Fanbox", "fantia": "Fantia"}
 PAUSED = []                 # callbacks(site, until, why), for the activity log
 
 
@@ -236,8 +240,12 @@ def _refusal(url, ok):
 
 
 def _carries_login(url, headers=None, params=None):
-    return bool(accounts.headers_for(url)) or any(k.lower() == "authorization" for k in (headers or {})) \
-        or bool(params and any(k in params for k in ("api_key", "login")))
+    """True for a request that carries a cookie login or a booru's key (the careful lane: one at a time, LOGIN_PACE apart,
+    reading breaks, a daily budget -- what an account gets banned for); "token" for one that only carries a
+    token (Mastodon, Bluesky): TOKEN_PACE apart, nothing more; False for none."""
+    if accounts.headers_for(url) or (params and any(k in params for k in ("api_key", "login"))):
+        return True
+    return "token" if any(k.lower() == "authorization" for k in (headers or {})) else False
 
 # Extensions for the content types sites actually send, so a file whose URL
 # has none (Mastodon's ".../original", Bluesky's getBlob) still opens properly.
@@ -369,7 +377,8 @@ class _Polite:
     def __init__(self, url, login=False, first=False, preview=False):
         # first: somebody is waiting for this one -- a gallery's large view, or a download they
         # asked for (interactive()). It goes ahead of what can wait and takes no reading break.
-        self.url, self.login = url, login
+        self.token = login == "token"
+        self.url, self.login = url, login is True
         self.first = first or bool(getattr(_local, "interactive", 0))
         self.preview = preview and not login
         self.host = urllib.parse.urlparse(url).hostname or ""
@@ -383,9 +392,11 @@ class _Polite:
                 limit, pace = 1, max(pace, LOGIN_PACE)
                 if self.first:                   # somebody waits: the gap of a person browsing, not of a scan
                     pace = max(_limits["pace"], min(own[1], 1.0), INTERACTIVE_PACE)
+            elif self.token:
+                limit, pace = 1, max(pace, TOKEN_PACE if not self.first else 0.3)
             elif self.preview:
                 limit, pace = PREVIEW
-            lane = (self.host, self.login, self.preview)
+            lane = (self.host, self.login, self.preview, self.token)
             entry = _hosts.get(lane)
             if entry is None or entry["limit"] != limit:
                 entry = _hosts[lane] = {
@@ -497,7 +508,7 @@ def _get(url, params=None, stream=False, headers=None, method="GET", data=None, 
     A stop is never argued with: a bot check, a 409, a 429 on pixiv or on a
     login, a wait longer than CAP -- the site is paused and SlowDown raised.
     """
-    login = _carries_login(url, headers, params)
+    login = _carries_login(url, headers, params) is True
     headers = dict(accounts.headers_for(url), **(headers or {}))
     host = urllib.parse.urlparse(url).hostname or ""
     tries = tries or (RETRIES if method == "GET" else 1)

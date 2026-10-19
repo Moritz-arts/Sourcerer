@@ -10,7 +10,7 @@ what people download and unpack is these folders, unchanged.
 `launch.py` behind them; the program — a window that is Browse (the artists
 on the left, their posts on the right), a card dialog (sources with a live dot each, own folder, master source, folder
 layout, what to do with the same picture from two sources), a queued
-background sync that downloads from Bluesky, Mastodon, Misskey, Pixiv, Patreon, X,
+background sync that downloads from Bluesky, Mastodon, Misskey, Pixiv, Fanbox, Fantia, Patreon, X,
 XenForo forums and boorus, a gallery per card (all its sources, straight from
 the sites), a login for every site (Manage Accounts, checked at each start),
 settings like TrackImage's, and an
@@ -491,8 +491,21 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   unknown server. `match` must stay free of requests (it runs on every read of every source). A Mastodon
   list's Misskey accounts become cards too (`follows._add`). A file's `url` is what the server serves
   (the original, or an image's public copy); its uploader's name is shared by thousands, so the stored
-  name is used. No login yet: a server that shows notes to members only says so on the card. The mark is
+  name is used. A server that shows notes to members only asks for the login (`LoginRequired`, the card says so): Manage
+  Accounts > Misskey (`misskey:<server>`, kind `oauth`) opens the server's **MiAuth** page in the login window
+  (`misskey.start_login`); that page shows no code and has no address to read, so `accounts._watch` is given `ask(window)`
+  and **asks the server** (`/api/miauth/<session>/check`, every 3 s) until it answers with the token. The token goes in the
+  body as `i` (every version reads it there) *and* as a Bearer header, which is how `net` paces it (token lane). A token the
+  server refuses (`AUTHENTICATION_FAILED`, even on public reads) is dropped for the run (`_dead`), as Mastodon's. The mark is
   drawn (a Tabler "notes" icon in Misskey's green): Simple Icons' Misskey mark is CC BY-NC-SA, not CC0.
+- **Fanbox and Fantia are gallery-dl listings with a cookie login** (`sources/fanbox.py`, `fantia.py`; one login each in
+  `accounts.SITES`). Fanbox answers a visitor's `post.info` with a 403, so its login is `required`; its files
+  (`downloads.fanbox.cc`) want the Referer and the cookie, and a post's cover (`isCoverImage`) is left out -- it is a cut of
+  a picture of the post. Fantia gives a visitor a `_session_id` too, so **a cookie proves nothing there**: the login window
+  and `still_logged_in` read the page's `data-user-type` (`accounts._PAGE_SAYS`; "visitor" is nobody). Fantia's own post
+  thumbnail is kept (`fid` "thumb": artists upload it as a picture), its text and the `album_image` redirects' names are not
+  used. Both are paced like X (gallery-dl `sleep-request`, `ratelimit: abort`, a daily `BUDGETS` count) and read one source at
+  a time (`gallery.SERIAL`). Their marks are drawn (Tabler "package" / "heart" on a coloured square: no logo is copied).
 - **pywebview 6 turned `FOLDER_DIALOG` into a deprecated function.** Passing it
   as the dialog type opens nothing; use `FileDialog.FOLDER` (with a fallback
   for 5.x), as `server.pick_folder` does.
@@ -578,8 +591,13 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   for the others, and never a choice of the number); the switch *Auto-download* beside the head's
   Download button (`#br-auto`) and the artist's right-click menu (edit, auto-download, refresh,
   download, open folder, merge, delete -- the same keys `Enter A U D O M Del`) turn it on and off.
-  **There is no "Download all"**: the toolbar's Refresh (F5, Ctrl+R) looks at every card, and the
-  ones with auto-download on download what they find -- nothing downloads every artist on one click. A card that syncs shows a ring in place of its number. The list is
+  **There is no "Download all"**: the toolbar's Refresh (F5, Ctrl+R), Automatic sync and the scan at every start
+  look at the cards **with auto-download only** (`sync.enqueue(None)`: `WHERE listed = 0 AND auto_download = 1` -- comparing
+  a card's newest posts with its library is what costs the time, and a card that does not download has nothing to
+  compare for; opening it, or its own Refresh, looks at it) and download what they find -- nothing downloads every artist on
+  one click. **Favorites** (`artists.favorite`, `/api/artists/<id>/favorite`, menu entry and key `F`, a gold star in the list):
+  only a mark, it changes nothing about syncing; the order *Favorites* puts them first under a group head, and a merge keeps
+  the star. A card that syncs shows a ring in place of its number. The list is
   replaced only when its markup changed (it is redrawn on every poll while a sync runs, and
   replacing it swallowed a click that began before). The *Add artist* button at the bottom
   opens the new-card dialog.
@@ -631,8 +649,20 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   deliberate: gallery-dl keeps its own browser emulation for X (a logged-in
   web session), and a forum's Cloudflare pass is sent with the login
   window's own User-Agent, which it is bound to.
+- **Refresh is one artist at a time, in an order that does not wait** (`sync._pick`, `_focused`, `focus`): the queue is
+  taken in order, except that the card Browse just opened goes first (`/api/sync/focus` from `browseOpen`; its sites'
+  pauses are the short `FOCUS_GAP`) and a card whose *careful*-login site is still cooling from the last card yields to
+  the first of the next `PICK_FROM` whose sites are not (so 100 pixiv cards no longer hold the Bluesky ones up).
+  A card's sources on different sites are read side by side (`_sync_artist.look_site`; the ones on one site one after the
+  other); a look stops at the first page whose oldest post is in the library (`_glance`: an up-to-date card is one request per
+  source -- 2 s for three sources, it was a minute). **Only a cookie login is spaced out between artists**
+  (`accounts.careful`: pixiv, X, Patreon, Fanbox, Fantia, forums; `LOGIN_GAPS`, Settings > Sites & network
+  *Gap between artists on a cookie login*, default `normal` 10-40 s): a token or key (Bluesky, Mastodon, Misskey, boorus) is an API
+  client with published limits and only gets `net.TOKEN_PACE` between requests, no reading breaks, no gap between cards
+  (`net._carries_login` says `True` / `"token"` / `False`; the token lane has its own key in `_hosts`). Previews and
+  galleries use the same test.
 - **A logged-in account is what gets banned, so a login has its own lane**
-  (`net._Polite`, `login=True`): one request at a time, `LOGIN_PACE` after
+  (`net._Polite`, `login=True`, cookie logins only): one request at a time, `LOGIN_PACE` after
   the previous one *ended* (a slow download must not let the next request
   follow at once), every gap times a random `JITTER`, a `READ_BREAK` every
   `READ_EVERY` requests, a daily `BUDGETS` count per site. Regular timing
@@ -691,7 +721,7 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   site is asked one source at a time, the one asked longest ago first, or the
   first cards would starve the rest and sit in pool threads; "All artists" also
   spaces a login site's next *card* (`CARD_GAP`, much shorter than sync's
-  `NEXT_CARD`: somebody is looking), so its login sources trickle in; a fill that
+  `sync.next_card()`: somebody is looking), so its login sources trickle in; a fill that
   was queued when its gallery closed or its site went off does not run): the first page leaves once
   something can be shown and `SLOW` seconds have gone for the rest, later pages
   wait `SLOW_LATER` -- a slow source (X through gallery-dl, a forum) comes with
@@ -753,7 +783,7 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   gets locked: a card never looked at (or never synced and without a snapshot)
   gets one first look, after that the site is read only for a card somebody just
   made or changed, or while automatic sync is on -- otherwise the old snapshot
-  stands in. Cards of one login site are spaced like sync's (`sync.NEXT_CARD`):
+  stands in. Cards of one login site are spaced like sync's (`sync.next_card()`):
   `previews._ready` says no, `refresh` puts the card in `_later` with the reason it was
   asked for (forced or not), does not stamp `previews_at`, and `_next` brings it back
   after `LATER_SECONDS` while the worker goes on to a card of another site. A sync's
@@ -791,7 +821,13 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   keeps the bytes **by address**, not by size (`_once`): a site whose grid picture is also the
   viewer's (a booru's sample) is asked once, and the viewer opens at once. The viewer fetches the
   next two pictures once the open one has arrived (`galPrefetch`).
-- **Grid pictures must be sharp enough for their tile.** Sources hand out their own small sizes
+- **The grid shows the largest rendition below the original** (Settings > Appearance > *Picture quality in the grid*,
+  `grid_quality`, default `best`; read when a gallery opens, `_Gallery.sharp`): in `item()` the `mid` rendition (pixiv's
+  1200 px master, X `name=large`, Bluesky's fullsize, Patreon's `default_large`, a booru's sample) becomes the tile's
+  picture, so there is no blocky small stage and nothing laid over it; a downloaded picture's thumbnail is made at 960 px
+  (`/api/thumb/<id>?s=`). A site that only has the original (Mastodon, Misskey, forums) keeps its small preview -- the
+  original is never fetched for a grid. `fast` is the old behaviour: small pictures, `galSharpen` for wide tiles.
+- **Grid pictures must be sharp enough for their tile** (in `fast`). Sources hand out their own small sizes
   and the tile decides how far it is stretched: pixiv 540 px (360 was blocky), danbooru 720,
   Gelbooru/Moebooru/e621 the sample instead of the 150 px preview. Full mode spreads a wide
   picture over a whole row, so a tile that the thumb cannot fill (width x devicePixelRatio >
@@ -846,9 +882,9 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   another matter: only a browser passes it -- the login window's
   `cf_clearance` for a forum.
 - **Four ways to log in** (`accounts.kind`): `window` (cookies: X, Patreon,
-  Pixiv, `xenforo:<host>`), `oauth` (Mastodon, `mastodon:<server>`: the
+  Pixiv, Fanbox, Fantia, `xenforo:<host>`), `oauth` (Mastodon, `mastodon:<server>`: the
   server's own Authorize page in the login window, out-of-band redirect,
-  read-only token), `password` (Bluesky: an app password opens a session;
+  read-only token; Misskey, `misskey:<server>`: MiAuth, see its trap), `password` (Bluesky: an app password opens a session;
   the account's real password is refused -- its JWT says
   `com.atproto.access` instead of `appPass`), `api_key` (`booru:<host>`).
   Cookies go to a site's hosts through `net.py`; tokens and keys are added

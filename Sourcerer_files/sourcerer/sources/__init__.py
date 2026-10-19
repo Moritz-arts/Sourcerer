@@ -20,11 +20,11 @@ import time
 import urllib.parse
 from dataclasses import dataclass
 
-from . import bluesky, booru, mastodon, misskey, patreon, pixiv, x, xenforo
+from . import bluesky, booru, fanbox, fantia, mastodon, misskey, patreon, pixiv, x, xenforo
 
 # booru before mastodon: a booru's /users/ pages look like the fediverse's. misskey too: its profile
 # links are Mastodon's, told apart by the server (known or learned).
-SITES = [bluesky, pixiv, x, patreon, xenforo, booru, misskey, mastodon]
+SITES = [bluesky, pixiv, x, patreon, fanbox, fantia, xenforo, booru, misskey, mastodon]
 log = logging.getLogger(__name__)
 
 
@@ -90,9 +90,9 @@ def kind_of(url):
 
 # The card dialog's fixed fields, in this order, each with an example link.
 # Any other link -- a second account, another site -- goes into a row below.
-FIELDS = [("Bluesky", "bsky.app/profile/name"), ("Mastodon", "mastodon.social/@name"),
+FIELDS = [("Bluesky", "bsky.app/profile/name"), ("Mastodon", "mastodon.social/@name"), ("Misskey", "misskey.io/@name"),
           ("XenForo", "forum.example/media/users/name.123"), ("Patreon", "patreon.com/name"),
-          ("X", "x.com/name"), ("Pixiv", "pixiv.net/users/12345"),
+          ("X", "x.com/name"), ("Pixiv", "pixiv.net/users/12345"), ("Fanbox", "name.fanbox.cc"), ("Fantia", "fantia.jp/fanclubs/12345"),
           ("Booru", "danbooru.donmai.us/posts?tags=artist_name")]
 
 
@@ -101,7 +101,7 @@ FIELDS = [("Bluesky", "bsky.app/profile/name"), ("Mastodon", "mastodon.social/@n
 _KNOWN = {"patreon.com": "Patreon", "x.com": "X", "twitter.com": "X", "pixiv.net": "Pixiv",
           "deviantart.com": "DeviantArt", "instagram.com": "Instagram",
           "artstation.com": "ArtStation", "tumblr.com": "Tumblr", "newgrounds.com": "Newgrounds",
-          "furaffinity.net": "FurAffinity", "itaku.ee": "Itaku", "fanbox.cc": "Fanbox",
+          "furaffinity.net": "FurAffinity", "itaku.ee": "Itaku",
           "subscribestar.com": "SubscribeStar", "kemono.su": "Kemono", "inkbunny.net": "Inkbunny"}
 
 # Pages of a profile that are still that profile: x.com/a/media, pixiv's

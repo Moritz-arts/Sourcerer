@@ -53,8 +53,12 @@ ACCOUNT_HOURS = (5, 9)       # how often the saved logins are checked, drawn ane
 CHECKED_HOURS = 12           # a login checked this recently is not asked again at a start
 # Automatic syncs come no closer than this to a site where an account can be
 # locked (a sync started by hand does not wait).
-MIN_HOURS = {"x": 12, "pixiv": 6, "patreon": 6, "xenforo": 12}
-NEXT_CARD = (20, 90)         # seconds before the next card asks a login site the last one used
+MIN_HOURS = {"x": 12, "pixiv": 6, "patreon": 6, "xenforo": 12, "fanbox": 6, "fantia": 6}
+# Seconds before the next card asks a site where a cookie login can get banned (pixiv, X, Patreon, a forum) the last one
+# used -- Settings > Sync decides how careful. Token logins (Mastodon, Bluesky) are not spaced: the lane paces them.
+LOGIN_GAPS = {"careful": (20, 90), "normal": (10, 40), "fast": (3, 12)}
+FOCUS_GAP = (4, 10)          # ... for the card somebody has opened in Browse: they are waiting
+PICK_FROM = 40               # the next card is the first of this many waiting ones whose sites are not cooling down
 GIVE_UP = 3                  # syncs a file may fail before its source completes without it
 
 _lock = threading.Lock()
@@ -68,7 +72,8 @@ _followup = {}               # artist id -> sources (None: all) of a download as
 PENDING_KEYS = 400           # posts per source whose keys are kept as "waiting for a download"
 REFRESH_ITEMS = 120          # a sync (refresh) reads a source's newest pages until it has this many posts
 REFRESH_PAGES = 4            # ... or this many pages
-_used = {}                   # login site -> (artist id, when its last card was done with it)
+_used = {}                   # careful login site -> (artist id, when its last card was done with it)
+_focused = set()             # queued cards that Browse opened: they go first, and wait less
 _current = None              # what the running sync is doing, for the window
 _worker = None
 _cancel = threading.Event()
@@ -160,8 +165,14 @@ def _final_path(folder, media, ext, server_name, posted):
 
 # ---- queue ------------------------------------------------------------------
 
+def next_card():
+    return LOGIN_GAPS.get(db.get_setting("login_gap"), LOGIN_GAPS["normal"])
+
+
 def enqueue(artist_ids=None, auto=False, only=None, mode=None):
-    """Queue artists (all when None). Returns how many were added. only: the ids of the
+    """Queue artists (all when None: the ones with auto-download, a sweep leaves the others alone -- a look
+    at every card costs minutes, and only those cards compare what they find with what is in the library). Returns
+    how many were added. only: the ids of the
     sources to ask -- the rest of the card is left alone this time (Browse: download what
     the filter shows). mode: "download" to download, "refresh" to only look; none lets the
     card's auto-download decide (a sync that downloads what it finds, or not).
@@ -172,7 +183,7 @@ def enqueue(artist_ids=None, auto=False, only=None, mode=None):
         # Cards only listed (made from a login's follows) are in nobody's sweep: Sync all and the
         # automatic sync leave them alone. Asking for one -- by name -- takes it into the routine.
         ids = [r[0] for r in con.execute(
-            "SELECT id FROM artists" + ("" if artist_ids is not None else " WHERE listed = 0") +
+            "SELECT id FROM artists" + ("" if artist_ids is not None else " WHERE listed = 0 AND auto_download = 1") +
             " ORDER BY COALESCE(last_sync, ''), RANDOM()")]
         if artist_ids is not None and not auto:
             con.executemany("UPDATE artists SET listed = 0 WHERE id = ?", [(i,) for i in artist_ids])
@@ -239,10 +250,46 @@ def _unqueue(artist_id):
         return False
     _queue.remove(artist_id)
     _auto.discard(artist_id)
+    _focused.discard(artist_id)
     _only.pop(artist_id, None)
     _modes.pop(artist_id, None)
     _followup.pop(artist_id, None)
     return True
+
+
+def focus(artist_id):
+    """Browse opened this artist: if it waits for its turn it comes next (the card being worked on is finished first)
+    and its sites' pauses are the short ones. True when it moved up."""
+    with _lock:
+        if artist_id not in _queue:
+            return False
+        _focused.add(artist_id)
+        if _queue[0] != artist_id:
+            _queue.remove(artist_id)
+            _queue.insert(0, artist_id)
+        return True
+
+
+def _pick():
+    """The next card to work on, taken off the queue (the lock is held): the one Browse opened, else the first of the
+    first few whose careful-login sites are not cooling down from the last card -- so a card on pixiv does not hold
+    up the Bluesky ones behind it -- else whichever will be ready soonest."""
+    if _queue[0] in _focused:
+        return _queue.pop(0)
+    head = _queue[:PICK_FROM]
+    now = time.monotonic()
+    cooling = {i: 0.0 for i in head}
+    if _used:
+        with db.connect() as con:
+            rows = con.execute("SELECT artist_id, url FROM sources WHERE artist_id IN (%s)" % ",".join("?" * len(head)), head)
+            for aid, url in rows:
+                used = _used.get(net.site_of(url))
+                if used and used[0] != aid and accounts.careful(sources.account_key(url)):
+                    cooling[aid] = max(cooling[aid], next_card()[0] - (now - used[1]))
+    ready = [i for i in head if cooling[i] <= 0]
+    chosen = ready[0] if ready else min(head, key=lambda i: cooling[i])
+    _queue.remove(chosen)
+    return chosen
 
 
 def cancel(artist_id):
@@ -264,7 +311,7 @@ def _work():
                 _worker = None
                 _state["finished"] = _now()
                 return
-            artist_id = _queue.pop(0)
+            artist_id = _pick()
             _starting.add(artist_id)
             auto = artist_id in _auto
             only = _only.pop(artist_id, None)
@@ -408,7 +455,7 @@ def check_accounts(keys=None, spread=False, fresh_hours=0):
     for a in accounts.accounts():
         if not a["logged_in"] or (keys and a["key"] not in keys):
             continue
-        name = a["label"] if a["group"] != "Mastodon" else "Mastodon (%s)" % a["label"]
+        name = a["label"] if a["group"] not in ("Mastodon", "Misskey") else "%s (%s)" % (a["group"], a["label"])
         stamp = accounts.saved(a["key"])
         if net.paused(_site_url(a["key"])):
             found[name] = "resting"
@@ -567,10 +614,11 @@ def merge(into_id, other_id, auto=False):
         if not master and b["master_source_id"] and con.execute(
                 "SELECT 1 FROM sources WHERE id = ? AND artist_id = ?", (b["master_source_id"], into_id)).fetchone():
             master = b["master_source_id"]
-        con.execute("UPDATE artists SET listed = ?, master_source_id = ?, avatar = ?, last_activity = ?, "
+        con.execute("UPDATE artists SET listed = ?, master_source_id = ?, avatar = ?, last_activity = ?, favorite = ?, "
                     "pending = (SELECT COALESCE(SUM(pending), 0) FROM sources WHERE artist_id = ?) WHERE id = ?",
                     (1 if auto and a["listed"] and b["listed"] else 0, master, a["avatar"] or b["avatar"],
-                     max(filter(None, [a["last_activity"], b["last_activity"]]), default=None), into_id, into_id))
+                     max(filter(None, [a["last_activity"], b["last_activity"]]), default=None),
+                     1 if a["favorite"] or b["favorite"] else 0, into_id, into_id))      # a star stays on the merged card
         con.execute("DELETE FROM artists WHERE id = ?", (other_id,))
     if b["avatar"] and not a["avatar"]:
         name_avatar(into_id)                        # the picture came along: named after its new card
@@ -643,12 +691,12 @@ def _too_soon(src, site, auto):
     return _hours_since(src["last_checked"].replace(" ", "T") + "+00:00") < hours
 
 
-def _space_out(where, artist_id):
+def _space_out(where, artist_id, focused=False):
     """A card after a card on the same login site: a pause first, as a person
     moving on to the next artist would take -- not the next request at once."""
     used = _used.get(where)
     if used and used[0] != artist_id:
-        wait = random.uniform(*NEXT_CARD) - (time.monotonic() - used[1])
+        wait = random.uniform(*(FOCUS_GAP if focused else next_card())) - (time.monotonic() - used[1])
         if wait > 0:
             _cancel.wait(wait)
 
@@ -713,32 +761,38 @@ def _sync_artist(artist_id, auto=False, only=None, mode=None):
 
     todo, walked, logins, looked = [], {}, set(), set()
     gave_up = {r[0] for r in held if r[1] >= GIVE_UP}      # a look does not count what was given up on
-    for src in srcs:
+    with _lock:
+        focused = artist_id in _focused                    # Browse opened this card: its sites' pauses are the short ones
+        _focused.discard(artist_id)
+
+    def look(src):
+        """One source looked at: what it found, or why not. None: left alone (cancelled, or too soon after the last sync)."""
         if _cancel.is_set():
-            break
+            return None
         site = sources.site_for(src["url"])
         where = net.site_of(src["url"])
         login = sources.account_key(src["url"])
         login = login if login and accounts.logged_in(login) else None
+        careful = bool(login) and accounts.careful(login)      # only a cookie login is spaced out: see accounts.careful
         stamp = accounts.saved(login) if login else None
+        out = {"fresh": [], "walked": None, "looked": False, "careful": None, "site": site}
         error = level = None
         rest = net.paused(src["url"])
         if rest:                                  # not even one request: the site said stop
             error, level = "%s rests until %s: %s" % (site.LABEL, time.strftime(
                 "%H:%M", time.localtime(rest[0])), rest[1]), "warn"
         elif _too_soon(src, site, auto):
-            continue
+            return None
         else:
-            if login:
-                _space_out(where, artist_id)
-                logins.add(where)
+            if careful:
+                _space_out(where, artist_id, focused)
+                out["careful"] = where
             try:
                 if download:
-                    fresh, walked[src["id"]], capped = _scan(src, site, known, cur, skip, bool(pending))
+                    fresh, out["walked"], capped = _scan(src, site, known, cur, skip, bool(pending))
                 else:
                     fresh, capped = _glance(src, site, known | gave_up, cur), False
-                looked.add(src["id"])
-                todo += [(src, site, m) for m in fresh]
+                out.update(looked=True, fresh=fresh)
                 if capped and src["complete"]:
                     # The early stop would skip the rest of this backlog: walk on next time.
                     with db.connect() as con:
@@ -754,6 +808,39 @@ def _sync_artist(artist_id, auto=False, only=None, mode=None):
         with db.connect() as con:
             con.execute("UPDATE sources SET last_checked = datetime('now'), last_error = ?, "
                         "last_level = ? WHERE id = ?", (error, level, src["id"]))
+        return out
+
+    # The card's sources are looked at side by side where they are on different sites -- each site has its own
+    # lane and its own pauses, so one slow site (X through gallery-dl) no longer holds the others up. The ones on one
+    # site go one after the other. The results are put together in the order of the sources: the master's first.
+    results, by_site = {}, collections.OrderedDict()
+    for src in srcs:
+        by_site.setdefault(net.site_of(src["url"]), []).append(src)
+
+    def look_site(group):
+        for src in group:
+            try:
+                results[src["id"]] = look(src)
+            except Exception:
+                log.exception("looking at %s", src["url"])
+
+    if len(by_site) > 1:
+        with ThreadPoolExecutor(max_workers=len(by_site)) as pool:
+            list(pool.map(look_site, by_site.values()))
+    else:
+        for group in by_site.values():
+            look_site(group)
+    for src in srcs:
+        out = results.get(src["id"])
+        if not out:
+            continue
+        if out["careful"]:
+            logins.add(out["careful"])
+        if out["walked"] is not None:
+            walked[src["id"]] = out["walked"]
+        if out["looked"]:
+            looked.add(src["id"])
+            todo += [(src, out["site"], m) for m in out["fresh"]]
 
     if not download:
         return _looked(artist, todo, cur, logins, looked)
@@ -827,7 +914,11 @@ def _glance(src, site, known, cur):
             fresh += new
             with _lock:
                 cur["found"] += len(new)
-            if len(items) >= REFRESH_ITEMS or number >= REFRESH_PAGES or _cancel.is_set():
+            # Newest first: when the page's oldest post is in the library, everything older is there as well -- no need
+            # for the next pages (a refresh once read four pages of every artist to say "up to date"). The oldest, not
+            # any: somebody who saved one new picture by hand has the rest of the page still to download.
+            if (page and page[-1].remote_key in known) or len(items) >= REFRESH_ITEMS or number >= REFRESH_PAGES \
+                    or _cancel.is_set():
                 break
     finally:
         close = getattr(listing, "close", None)
