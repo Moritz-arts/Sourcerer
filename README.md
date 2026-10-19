@@ -1,4 +1,4 @@
-# Sourcerer v0.32
+# Sourcerer v0.33
 
 [what changed](Sourcerer_files/docs/CHANGELOG.md) · [roadmap](Sourcerer_files/docs/ROADMAP.md) · [releases](https://github.com/Moritz-arts/Sourcerer/releases)
 

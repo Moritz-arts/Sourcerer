@@ -5,6 +5,12 @@ automatically -- one line per change, newest first. A release is drafted by hand
 from the tag of whichever version is judged ready, and this is the text to paste
 into it.
 
+## v0.33 — 2026-10-19
+
+- Sourcerer keeps no pictures and syncs three artists at once on different sites; order and number lists cleaned up, download rings, file names, ugoira plays, taskbar stays, more follows
+- The activity log jumps to a failed file's picture or post; the same artist is found by declared profile links and account names, not display names alone
+- A picture in the library wears the download button in green, however it got there, and loses it when its file is deleted
+
 ## v0.32 — 2026-10-19
 
 - Browse: no Download all button, an Auto-download switch beside Download, only green clouds in the list, a bigger artist head, right-click to download or copy a picture, red close buttons
