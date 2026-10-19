@@ -392,6 +392,15 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   page, and every walk has a page cap. Needs the setting `import_follows`; started after a login
   (`accounts.CHANGED`), 90-150 s after start (once the account check marked expired logins) and every
   10-14 h.
+- **The same artist on several sites is one card, automatically** (`follows._Twins`, `follows.combine`): an
+  account that comes in with a followed list joins the card of the same name when that card has no
+  source on the same site; after every look (a login, the start, every 10-14 h) the *listed* cards that
+  are twins of another card are merged into it (`sync.merge(..., auto=True)`: one summary line in the
+  log, the result stays listed when both were). A name is the same by `follows.name_key` (letters and
+  digits only, NFKC, case-folded -- `nameKey` in `app.js` is its twin for the merge dialog's
+  suggestions: keep them alike), at least 3 characters, and **never on the same site twice** (two pixiv
+  accounts of one name are more likely two people) -- a name shared by a listed card and two cards the
+  user made is left alone. The user's own cards are never merged away; they only gain a source.
 - **A follow list is the site's word, not ours.** A link is taken only when it is a profile of the
   list's own site (`follows._add`: another site's address -- a pixiv work's -- would cost a request on
   a login inside a write transaction) and on a public https host (`net.public_https`; checked before
