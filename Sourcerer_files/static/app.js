@@ -734,9 +734,13 @@ function browseClose() {
 // is syncing shows a ring instead of its number. The list is only replaced when its markup changed: it is
 // redrawn on every poll while a sync runs, and replacing it would swallow a click that began before.
 var brHtml = "";
+function siteSrc(a) {
+  return a.sources.filter(function (x) { return x.master; })[0] || a.sources.filter(function (x) { return x.supported; })[0] || a.sources[0];
+}
+// The website the card's main account is on, by its own name: a Mastodon server, a forum and a booru are told apart (describe's `site`).
 function siteOf(a) {
-  var s = a.sources.filter(function (x) { return x.master; })[0] || a.sources.filter(function (x) { return x.supported; })[0] || a.sources[0];
-  return s ? s.label : "";
+  var s = siteSrc(a);
+  return s ? s.site || s.label : "";
 }
 // The numbers an artist has: the images it has in all (downloaded and still to download, as the last look counted
 // them: a look reads the newest posts only, so a long history shows a "+"), the ones downloaded, and their share.
@@ -790,8 +794,8 @@ function renderBrowseList() {
     list.map(function (a, i) {
       var g = groupOf(a, i), head = "";
       if (g && (!i || groupOf(list[i - 1], i - 1) !== g)) {
-        var site = siteOf(a);
-        head = groupHead(g, bySite ? (siteLogo(site) || "") + "<span>" + esc(site || "No source") + '</span><span class="num">' + sites[site] + "</span>"
+        var site = siteOf(a), src = siteSrc(a) || {};
+        head = groupHead(g, bySite ? (siteLogo(site, src.kind, src.host) || "") + "<span>" + esc(site || "No source") + '</span><span class="num">' + sites[site] + "</span>"
           : g === "f:fav" ? '<svg class="ic star"><use href="#i-star"/></svg><span>Favorites</span><span class="num">' + stars + "</span>"
           : '<span>Others</span><span class="num">' + (list.length - stars) + "</span>");
       }
@@ -908,7 +912,7 @@ function galResume(g, a) {
   $("gal-grid").innerHTML = g.items.map(function (it, i) { return tileHtml(it, i); }).join("");
   $("gal-sources").innerHTML = "";
   if (g.sources) galSources(g.sources);
-  $("gal-end").textContent = g.done ? (g.items.length ? plural(g.items.length, "picture") + " – that is all" : "Nothing found.") : "";
+  galEnd(g);
   galWatch(); galLayout();
   $("gal-body").scrollTop = g.scroll || 0;
   if (!g.id) return;                            // still waiting for its opening: the answer shows it
@@ -916,6 +920,25 @@ function galResume(g, a) {
   galPoll(g);
   if (!g.busy && !g.done && galEndNear()) moreGallery();
 }
+
+// The line at the end of the grid. All artists reaches back a time window (Settings) and stops there with a button for older posts.
+function galEnd(g) {
+  var el = $("gal-end");
+  if (g.older) {
+    var since = new Date(g.since * 1000).toLocaleDateString();
+    el.innerHTML = esc(g.items.length ? plural(g.items.length, "picture") + " since " + since : "Nothing posted since " + since) +
+      ' <button type="button" class="mini" id="gal-older">Load older posts</button>';
+  } else el.textContent = !g.done ? "" : g.items.length ? plural(g.items.length, "picture") + " – that is all" : "Nothing found.";
+}
+$("gal-end").addEventListener("click", function (e) {
+  var g = G;
+  if (!e.target.closest("#gal-older") || !g || !g.id) return;
+  e.target.closest("#gal-older").disabled = true;
+  api("POST", "/api/gallery/older", { gallery: g.id }).then(function (d) {
+    g.since = d.since; g.older = false; g.done = false;
+    if (g === G) { $("gal-end").textContent = "Asking the sites…"; moreGallery(); }
+  }).catch(fail);
+});
 
 // The end of the grid is in sight, so more is wanted. (The observer only fires on a change.)
 function galEndNear() {
@@ -941,7 +964,7 @@ function moreGallery() {
   // The first page is only what the window shows: it is there as soon as one source answered.
   api("POST", "/api/gallery/more", { gallery: g.id, n: g.items.length ? 60 : 24 }).then(function (d) {
     // What the server handed out is kept even when the gallery was left meanwhile: it will not hand it out again.
-    g.busy = false; g.done = d.done; g.sources = d.sources;
+    g.busy = false; g.done = d.done || d.older; g.older = d.older && !d.done; g.since = d.since; g.sources = d.sources;
     g.loading = d.loading; g.newPosts = d.new_posts;
     var start = g.items.length;
     g.items = g.items.concat(d.items);
@@ -950,7 +973,7 @@ function moreGallery() {
     galWatch(); galLayout();
     galSources(d.sources); galHead();
     if (g.loading) galPoll(g);
-    $("gal-end").textContent = !g.done ? "" : g.items.length ? plural(g.items.length, "picture") + " – that is all" : "Nothing found.";
+    galEnd(g);
     // The observer fires on a change only: while the end is still in sight, ask on.
     if (!g.done && d.items.length && galEndNear()) setTimeout(moreGallery, 50);
   }).catch(function (e) {
@@ -972,9 +995,27 @@ function proxyOf(it, size) {
 
 // A site's mark instead of its name; "" for a site without one (the caller writes the name then).
 var SITE_LOGOS = { Bluesky: "bluesky", Mastodon: "mastodon", Misskey: "misskey", Pixiv: "pixiv", Patreon: "patreon", X: "x", Fanbox: "fanbox", Fantia: "fantia", XenForo: "xenforo", Booru: "booru" };
-function siteLogo(label) {
-  return SITE_LOGOS[label] ? '<svg class="ic logo" role="img" aria-label="' + esc(label) + '"><use href="#l-' + SITE_LOGOS[label] + '"/></svg>' : "";
+var MARKS = { bluesky: 1, mastodon: 1, misskey: 1, pixiv: 1, patreon: 1, x: 1, fanbox: 1, fantia: 1, xenforo: 1, booru: 1 };
+var MANY_KINDS = { mastodon: 1, misskey: 1, xenforo: 1, booru: 1 };      // software many sites run: each wears its own icon (sources.MANY)
+var ICON_FAILED = {};                                                     // hosts whose site gave no icon: the software's mark stands in
+// label: the site's name (a server or forum is told by its own), kind and host say which software and where its icon is.
+function siteLogo(label, kind, host) {
+  var mark = SITE_LOGOS[label] || (MARKS[kind] ? kind : "");
+  var svg = mark ? '<svg class="ic logo" role="img" aria-label="' + esc(label) + '"><use href="#l-' + mark + '"/></svg>' : "";
+  if (!MANY_KINDS[kind] || !host || ICON_FAILED[host]) return svg;
+  return '<img class="ic logo fav" referrerpolicy="no-referrer" alt="' + esc(label) + '" data-host="' + esc(host) + '" data-mark="' + mark +
+    '" src="/api/site-icon/' + encodeURIComponent(host) + '">';
 }
+// A site without an icon (or one that does not load): the software's mark, or the name, in its place -- and not asked for again.
+document.addEventListener("error", function (e) {
+  var img = e.target;
+  if (!img || img.tagName !== "IMG" || !img.classList.contains("fav")) return;
+  ICON_FAILED[img.dataset.host] = true;
+  var t = document.createElement("template");
+  t.innerHTML = img.dataset.mark ? '<svg class="ic logo" role="img" aria-label="' + esc(img.alt) + '"><use href="#l-' + img.dataset.mark + '"/></svg>'
+    : '<span class="gal-site">' + esc(img.alt) + "</span>";
+  img.replaceWith(t.content.firstChild);
+}, true);
 
 function tileHtml(it, i) {
   var proxied = /^\/api\/gallery\//.test(it.thumb || "");
@@ -988,7 +1029,7 @@ function tileHtml(it, i) {
     (it.w && it.h ? '" data-ar="' + galRatio(it.w, it.h) : "") +
     '" data-src="' + esc(it.source) + '" title="' + esc(who + (it.posted ? " · " + it.posted.slice(0, 10) : "") + (it.fname ? " · " + it.fname : "")) + '">' +
     picture + (it.fname ? '<span class="gal-fname">' + esc(it.fname) + "</span>" : "") + (it.video && it.thumb ? '<span class="gal-play">' + icon("play") + "</span>" : "") +
-    '<span class="gal-tag">' + (siteLogo(it.source) || '<span class="gal-site">' + esc(it.source) + "</span>") + name + "</span>" +
+    '<span class="gal-tag">' + (siteLogo(it.source, it.kind, it.host) || '<span class="gal-site">' + esc(it.source) + "</span>") + name + "</span>" +
     // The download button's own place and shape: grey (blue under the pointer) while the picture is not in the library, green
     // for good once it is -- however it got there. It is gone again when the file is deleted (galSavedRefresh).
     (it.saved ? '<span class="gal-dl saved" title="Downloaded">' + icon("download") + "</span>"
@@ -1013,7 +1054,7 @@ function galSources(list) {
         (news ? " · " + plural(news, "new post") : "");
     // A spinner while the site is asked, green when it answered, orange when it did not.
     var state = busy ? '<i class="spin"></i>' : '<i class="dot ' + (bad.length ? "warn" : ready ? "ok" : "blank") + '"></i>';
-    var mark = siteLogo(label);
+    var mark = siteLogo(label, of[0].kind, of[0].host);
     return '<button type="button" class="chip' + (mark ? " logo" : "") + (off ? " off" : "") + '" data-galsrc="' + esc(label) +
       '" title="' + esc(tip) + '">' + (mark ? '<span class="mark">' + mark + state + "</span>" : state + esc(label)) + "</button>";
   }).join("");
@@ -1049,7 +1090,7 @@ function viewItem(i) {
     };
   }
   // Top left the site's mark; bottom left who it is -- picture and name -- and what is known of the file.
-  $("gal-source").innerHTML = siteLogo(it.source) || '<b>' + esc(it.source) + "</b>";
+  $("gal-source").innerHTML = siteLogo(it.source, it.kind, it.host) || '<b>' + esc(it.source) + "</b>";
   $("gal-source").title = it.source;
   $("gal-who").innerHTML = avatarHtml(artistById(it.artist_id) || { name: it.artist }) + "<span>" + esc(it.artist) + "</span>";
   $("gal-info").textContent = [it.posted ? new Date(it.posted).toLocaleString() : "",
@@ -1930,6 +1971,51 @@ $("set-perhost").addEventListener("change", function () { saveSetting({ per_host
 $("set-pace").addEventListener("change", function () { saveSetting({ pace_ms: this.value }); });
 $("set-logingap").addEventListener("change", function () { saveSetting({ login_gap: this.value }); });
 $("btn-settings").addEventListener("click", function () { openSettings(S.update && S.update.available ? "updates" : null); });
+// ---- log files ----------------------------------------------------------------
+var LG = { files: [], name: "", problems: false, timer: 0 };
+function openLogs() {
+  $("dlg-logs").showModal();
+  api("GET", "/api/logs").then(function (d) {
+    LG.files = d.files;
+    if (!d.files.some(function (f) { return f.name === LG.name; })) LG.name = d.files.length ? d.files[0].name : "";
+    drawLogTabs(); loadLog();
+  }).catch(fail);
+}
+function drawLogTabs() {
+  $("logs-tabs").innerHTML = LG.files.map(function (f) {
+    return '<button type="button" class="chip' + (f.name === LG.name ? " selected" : "") + '" data-logfile="' + esc(f.name) + '">' + esc(f.title) + "</button>";
+  }).join("");
+  var f = LG.files.filter(function (x) { return x.name === LG.name; })[0];
+  $("logs-about").textContent = f ? f.name + " -- " + f.about : "There is no log file yet.";
+  $("logs-problems").classList.toggle("selected", LG.problems);
+}
+function loadLog() {
+  if (!LG.name) { $("logs-text").textContent = ""; $("logs-sum").textContent = ""; return; }
+  api("GET", "/api/logs/" + encodeURIComponent(LG.name) + "?problems=" + (LG.problems ? 1 : 0) + "&q=" + encodeURIComponent($("logs-q").value)).then(function (d) {
+    var box = $("logs-text");
+    box.innerHTML = d.lines.map(function (l) {
+      var cls = /^[\d-]{10} [\d:,]{8,12} (ERROR|CRITICAL)/.test(l) ? "le" : /^[\d-]{10} [\d:,]{8,12} WARNING/.test(l) ? "lw" : "";
+      return cls ? '<span class="' + cls + '">' + esc(l) + "</span>" : esc(l);
+    }).join("\n");
+    box.scrollTop = box.scrollHeight;                    // the newest is at the end
+    $("logs-sum").textContent = d.total > d.lines.length ? "The last " + d.lines.length + " of " + d.total + " lines" : plural(d.total, "line");
+  }).catch(fail);
+}
+$("btn-logs").addEventListener("click", openLogs);
+$("logs-tabs").addEventListener("click", function (e) {
+  var b = e.target.closest("[data-logfile]");
+  if (!b) return;
+  LG.name = b.dataset.logfile; drawLogTabs(); loadLog();
+});
+$("logs-problems").addEventListener("click", function () { LG.problems = !LG.problems; drawLogTabs(); loadLog(); });
+$("logs-q").addEventListener("input", function () { clearTimeout(LG.timer); LG.timer = setTimeout(loadLog, 250); });
+$("logs-copy").addEventListener("click", function () {
+  var text = $("logs-text").textContent;
+  (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject()).then(function () { toast("Copied."); }, function () {
+    var r = document.createRange(); r.selectNodeContents($("logs-text")); var sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
+    toast("Selected: press Ctrl+C.");
+  });
+});
 $$("[data-open]").forEach(function (b) {
   b.addEventListener("click", function () { api("POST", "/api/open", { target: b.dataset.open }).catch(fail); });
 });

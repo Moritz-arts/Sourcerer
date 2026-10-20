@@ -410,8 +410,8 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   `FOLLOWS_HOURS`): v0.34's silent empty look for X stamped a day and v0.35's fallback never ran.
   **A listed card is in no automatic sweep**: `enqueue(None)` (the automatic sync, the scan at start) skips `listed = 1`, because a
   thousand pixiv follows read in the background are a thousand requests nobody asked for. **"All artists" (`gallery._Gallery`)
-  takes the user's own cards, and the listed ones of a site only when it has at most `gallery.LISTED_IN_ALL` (20) of them** -- five
-  Patreon creators are a minute of requests, 428 pixiv follows would be an hour on a login (v0.36: "All artists" showed no Patreon). Only **Refresh all** reaches them (`everyone`, only when the
+  takes every card, listed ones too** (the user: "All artists" means all, and Patreon's five creators were missing in v0.36). The load is
+  kept down by its time window and by the polite lanes (a login site's next card waits `CARD_GAP`), not by leaving cards out. Only **Refresh all** reaches them (`everyone`, only when the
   page asked for no mode) and it only *scans* them (the newest page per source; a scan is not free: pixiv 2 requests,
   X a page of 20 counted against `BUDGETS`), **and only while the site's day has used less than half of its budget**
   (`net.scan_room`, `SCAN_SHARE`): the other half is for the cards that download, Browse and single pictures. Past
@@ -640,6 +640,24 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
 - **A class named `logo` is the 24 px brand mark** (`.logo`): a chip given it (`.chip.logo`) was 24 px wide, its mark spilled over
   the next chip and the grey backgrounds overlapped -- `.chip.logo` sets `width: auto`. Look at the head with several sites after
   touching those rules (a test page and Playwright's `chromium-1194` are enough).
+- **"All artists" reaches back a time window first** (Settings > Appearance, `browse_window`: 1 week by default, 2 weeks, month, 3 months,
+  everything; `gallery.WINDOWS`, only All artists -- one artist is read as far as the page scrolls). Sources give their posts newest first,
+  so once the last post a source has waiting is older than the window (`_Source.enough`) it is not paged any deeper, and one whose next post
+  is older (`beyond`) hands out nothing; `more()` then says `older`, and the page ends the grid with *Load older posts* (`galEnd`,
+  `/api/gallery/older`: the window moves back by its own length). The first page of every source is still asked once, so the number of
+  accounts is the cost that remains; the window spares the deep paging. An undated post never ends a window.
+- **A site is told by its own name and icon** (`sources.site_name`, `sources.MANY`): Mastodon, Misskey, XenForo and the boorus are software many
+  sites run, so "Mastodon" said nothing -- the gallery's chips and tiles, Browse's Source groups and the viewer name the server, the forum's
+  host or the booru (`describe()` gives `site` and `host` beside `label`, which stays the software for logins and the card dialog; the
+  gallery's `label` and `source` are the site name, `kind` and `host` say which). `/api/site-icon/<host>` fetches the site's own icon
+  (favicon.ico, else the one the front page links), only for a host a source has, through `net.fetch_picture`, as a 64 px PNG **in memory** (the
+  no-pictures rule), a miss not asked again for an hour; the page (`siteLogo(label, kind, host)`) falls back to the software's mark when it does
+  not load (`ICON_FAILED`: not asked again). `G.hidden` is keyed by the site name now, so each server hides on its own.
+- **Logs** (`config.LOG_FILES`, `desktop._logging`, `/api/logs`): `sourcerer.log` is the program's story (a line: time, level, module, text;
+  every start opens with a `=== Sourcerer vX started ===` line), `console.log` is only what the process prints itself -- warnings and
+  crashes; INFO is no longer copied into it, it made the two files read alike -- `update.log` the update helper's steps, `setup.log` the
+  Windows installer's. `Logs/README.txt` says which is which, and Activity > Log files opens a viewer (the end of each file, a filter,
+  *Problems only* = WARNING and ERROR with their traceback lines, Copy). A new log file goes into `LOG_FILES`.
 - **Browse's list** (`renderBrowseList`): the order (*Alphabetic | Latest activity | Favorites | Source*; the logo
   is part of Source's group heads) and the number beside a name (*Sources | Images | Downloads | Downloads (%)*, the
   second choice) are kept in localStorage; the numbers are never an order (the user's wish: two clean lists). **A group head folds its artists** (Source's sites, Favorites / Others; chevron,

@@ -76,8 +76,7 @@ _spaced = {}                             # login site -> (card id, when another 
 _work = queue.Queue()
 _workers = []
 CARD_GAP = (5, 12)           # seconds before All artists asks a login site for another card than the last one's
-LISTED_IN_ALL = 20           # All artists reads a site's followed (listed) accounts too when it has this few: a handful of
-                             # creators is a minute of requests, hundreds of pixiv follows would be an hour on a login
+WINDOWS = ("0", "7", "14", "30", "90")   # Settings > All artists shows: the days (0: everything)
 
 
 class _Workers:
@@ -129,7 +128,9 @@ def _gif(m):
 class _Source:
     def __init__(self, row, artist):
         self.row, self.site, self.artist = row, sources.site_for(row["url"]), artist
-        self.label = self.site.LABEL if self.site else row["url"]
+        self.label = sources.site_name(row["url"]) if self.site else row["url"]      # the website: a server or forum by its own name
+        self.kind = self.site.KIND if self.site else ""
+        self.host = sources._host(row["url"])
         self.where = net.site_of(row["url"])
         # One source at a time per site where a request goes alone anyway -- gallery-dl's (X, forums:
         # it turns the rest away as busy) and every login's lane: they would only sit in a pool thread.
@@ -152,6 +153,16 @@ class _Source:
         self.lock = threading.Lock()          # starts one listing at a time
         self.future = None
         self.closed = False
+        self.since = None                     # All artists with a time window: nothing older is handed out (see _Gallery.since)
+
+    def beyond(self):
+        """The next post waiting is older than the window: this source has nothing more to show inside it."""
+        return self.since is not None and bool(self.buffer) and self.buffer[0][0] is not None and self.buffer[0][0] < self.since
+
+    def enough(self):
+        """The window's end is reached: pages come newest first, so once the last post waiting is older than it,
+        nothing newer is left on the site and the next page would only read deeper."""
+        return self.since is not None and bool(self.buffer) and self.buffer[-1][0] is not None and self.buffer[-1][0] < self.since
 
     def running(self):
         return self.future is not None and not self.future.done()
@@ -287,6 +298,11 @@ class _Gallery:
         self.saved = {}                        # (artist id, remote_key) -> the library's row, where there is one
         self.asked = set()                     # ... of these, the ones the library was asked about
         self.sharp = db.get_setting("grid_quality") != "fast"      # the grid shows the largest rendition, not the small one
+        # All artists reads every card, so it only reaches back so far (Settings): a source stops being paged once its posts are older
+        # than the window, and "Load older" moves the window back by its own length. One artist is read as far as the page scrolls.
+        days = db.get_setting("browse_window")
+        self.step = int(days if days in WINDOWS else "7") * 86400 if artist_id is None else 0
+        self.since = time.time() - self.step if self.step else None
         with db.connect() as con:
             artists = {r["id"]: dict(r) for r in con.execute(
                 "SELECT * FROM artists" + ("" if self.all else " WHERE id = ?"), () if self.all else (artist_id,))}
@@ -296,15 +312,25 @@ class _Gallery:
                 con.execute("SELECT * FROM sources WHERE artist_id = ? ORDER BY id", (artist_id,)).fetchall()
         self.artist = None if self.all else artists[artist_id]
         self.name = "All artists" if self.all else self.artist["name"]
-        # (All artists:) the user's own cards always; the accounts a login follows (listed) only of a site that has few of them.
-        mine = [(r, sources.site_for(r["url"])) for r in rows if r["artist_id"] in artists]
-        mine = [(r, site) for r, site in mine if site]
-        followed = collections.Counter(site.KIND for r, site in mine if artists[r["artist_id"]]["listed"])
-        self.sources = [_Source(r, artists[r["artist_id"]]) for r, site in mine
-                        if not (self.all and artists[r["artist_id"]]["listed"] and followed[site.KIND] > LISTED_IN_ALL)]
+        self.sources = [_Source(r, artists[r["artist_id"]]) for r in rows
+                        if r["artist_id"] in artists and sources.site_for(r["url"])]
         for s in self.sources:
             s.spaced = self.all
+            s.since = self.since
             s.seed()
+
+    def older(self):
+        """Moves the window back by its length; the sources it had parked go on."""
+        if self.since is None:
+            return
+        self.since -= self.step
+        for s in self.sources:
+            s.since = self.since
+
+    def window_over(self):
+        """Every source has given what the window holds (and some have more beyond it): the page offers 'Load older'."""
+        return self.since is not None and any(s.beyond() for s in self.sources) and \
+            all((s.done and not s.buffer) or s.beyond() for s in self.sources)
 
     def start_checks(self):
         """Ask the sources that have not been asked for their first page: the ones that showed a
@@ -329,7 +355,7 @@ class _Gallery:
             self.asked.update(chunk)
 
     def state(self):
-        return [{"id": s.row["id"], "label": s.label, "url": s.row["url"],
+        return [{"id": s.row["id"], "label": s.label, "kind": s.kind, "host": s.host, "url": s.row["url"],
                  "artist_id": s.artist["id"], "artist": s.artist["name"],
                  "loading": s.loading(), "checked": s.checked, "cached": s.seeded, "new": s.new,
                  # Items still waiting are more to show, whatever a later page did (a prefetch that failed).
@@ -354,9 +380,9 @@ class _Gallery:
             if out and deadline is None:
                 deadline = time.monotonic() + grace
             deadline = self._settle(deadline, grace)
-            live = [s for s in self.sources if s.buffer]
+            live = [s for s in self.sources if s.buffer and not s.beyond()]
             if not live:
-                if out or all(s.done for s in self.sources):
+                if out or all(s.done or s.beyond() for s in self.sources):
                     break
                 deadline = None                     # nothing to show yet: wait for the pages on their way
                 if not any(s.running() for s in self.sources):
@@ -382,7 +408,7 @@ class _Gallery:
         self._library([(self.items[n][0].artist["id"], self.items[n][1].remote_key) for n in out])
         self._kick()
         for s in sorted(self.sources, key=lambda s: s.asked_at):     # the next page before it is needed
-            if not s.done and len(s.buffer) < AHEAD:
+            if not s.done and len(s.buffer) < AHEAD and not s.enough():
                 s.start_fill()
         self.start_checks()                          # a seeded source whose turn had not come yet
         return [self.item(n) for n in out]
@@ -402,7 +428,7 @@ class _Gallery:
 
     def item(self, number):
         s, m = self.items[number]
-        d = {"id": number, "source": s.label, "src": s.row["id"], "posted": m.posted, "w": m.width,
+        d = {"id": number, "source": s.label, "kind": s.kind, "host": s.host, "src": s.row["id"], "posted": m.posted, "w": m.width,
              "h": m.height, "video": bool(m.video), "post": m.post_url, "saved": False, "fname": _fname(m),
              "key": m.remote_key,
              "artist": s.artist["name"], "artist_id": s.artist["id"]}
@@ -541,7 +567,16 @@ def more(gallery_id, n=PAGE):
     return {"items": items, "sources": state,
             "new_posts": sum(s.new for s in g.sources),
             "loading": any(s.loading() for s in g.sources),
-            "done": all(s.done and not s.buffer for s in g.sources)}
+            "done": all(s.done and not s.buffer for s in g.sources),
+            "older": g.window_over(), "since": g.since}
+
+
+def older(gallery_id):
+    """The window of All artists moved back (Load older): what the page asks for at the end of the grid."""
+    g = _get(gallery_id)
+    with g.lock:
+        g.older()
+    return {"since": g.since}
 
 
 def close(gallery_id):

@@ -173,7 +173,7 @@
         <button class="chip" data-log="problems">Problems</button>
       </div>
       <span class="grow"></span>
-      <button class="mini" data-open="logs"><svg class="ic"><use href="#i-folder"/></svg> Log files</button>
+      <button class="mini" id="btn-logs"><svg class="ic"><use href="#i-folder"/></svg> Log files</button>
     </div>
     <ul id="log" class="loglist"></ul>
   </section>
@@ -309,6 +309,26 @@
     <span id="merge-sum" class="hint grow"></span>
     <button type="button" id="merge-go" class="primary" disabled>Merge</button>
   </div>
+</dialog>
+
+<!-- The log files, read here: which file holds what is said above each one; Problems keeps the warnings and errors. -->
+<dialog id="dlg-logs" class="dlg wide">
+  <div class="dlg-head">
+    <span>Log files</span><span class="grow"></span>
+    <button type="button" class="icon flat" data-close aria-label="Close"><svg class="ic"><use href="#i-x"/></svg></button>
+  </div>
+  <div class="dlg-body log-view">
+    <div id="logs-tabs" class="chips"></div>
+    <p class="hint" id="logs-about"></p>
+    <div class="log-tools">
+      <input id="logs-q" type="text" placeholder="Filter lines" autocomplete="off">
+      <button type="button" class="chip" id="logs-problems">Problems only</button>
+      <button type="button" class="mini" id="logs-copy">Copy</button>
+      <button type="button" class="mini" data-open="logs"><svg class="ic"><use href="#i-folder"/></svg> Open folder</button>
+    </div>
+    <pre id="logs-text" class="log-text"></pre>
+  </div>
+  <div class="dlg-foot"><span id="logs-sum" class="hint grow"></span></div>
 </dialog>
 
 <dialog id="dlg-settings" class="dlg wide">
@@ -451,6 +471,19 @@
              tile is stretched wide: light on a slow line, and sharp where it shows. Sharp always loads the largest size the site
              offers below the original (pixiv's 1200 px, X's large, Bluesky's full size): the same look on most screens,
              at several times the data. Reopen the artist to apply.</p>
+        </div>
+        <div class="field">
+          <span class="label">&ldquo;All artists&rdquo; shows the last</span>
+          <div class="segmented five">
+            <button type="button" data-set="browse_window" data-value="7">Week</button>
+            <button type="button" data-set="browse_window" data-value="14">2 weeks</button>
+            <button type="button" data-set="browse_window" data-value="30">Month</button>
+            <button type="button" data-set="browse_window" data-value="90">3 months</button>
+            <button type="button" data-set="browse_window" data-value="0">Everything</button>
+          </div>
+          <p class="hint">All artists asks every card, so it reaches back only this far at first: a source whose posts are older
+             is not paged any deeper, which spares the sites. At the end of the grid, <em>Load older posts</em> moves the window
+             back by the same length. One artist is read as far as you scroll. Reopen All artists to apply.</p>
         </div>
         <div class="row">
           <div><div class="row-title">Site mark on the pictures</div>

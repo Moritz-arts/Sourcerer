@@ -53,6 +53,17 @@ def preview(src, size=480):
         return out.getvalue()
 
 
+def site_icon(src, size=64):
+    """A website's icon (favicon.ico, a PNG), as PNG bytes in memory with its transparency: scaled to fit size, kept square-framed."""
+    with Image.open(src) as img:
+        img.load()
+        img = img.convert("RGBA")
+        img.thumbnail((size, size), Image.LANCZOS)
+        out = io.BytesIO()
+        img.save(out, "PNG")
+        return out.getvalue()
+
+
 def avatar(src, size=128):
     """A square profile picture, as JPEG bytes in memory: the middle of the source, scaled to size."""
     with Image.open(src) as img:
