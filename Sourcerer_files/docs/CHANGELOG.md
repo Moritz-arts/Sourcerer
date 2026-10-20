@@ -5,6 +5,12 @@ automatically -- one line per change, newest first. A release is drafted by hand
 from the tag of whichever version is judged ready, and this is the text to paste
 into it.
 
+## v0.37 — 2026-10-20
+
+- All artists includes the followed accounts of a site that has few, and the XenForo login window opens at once
+- All artists is every card with a one-week window and Load older posts, sites are named and iconed by themselves, and the logs have a viewer and a README
+- XenForo: cards are named by their member instead of index.php, the profile picture comes from the member's page, and the viewer shows the forum's information on a picture
+
 ## v0.36 — 2026-10-20
 
 - Patreon: opening a followed creator works again, and a follow list that read nothing is looked at again at the next start
