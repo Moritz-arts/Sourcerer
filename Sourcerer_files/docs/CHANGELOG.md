@@ -5,6 +5,11 @@ automatically -- one line per change, newest first. A release is drafted by hand
 from the tag of whichever version is judged ready, and this is the text to paste
 into it.
 
+## v0.35 — 2026-10-20
+
+- Browse: the site chips no longer overlap, source groups fold, and no warning dialogs are asked any more
+- X and Patreon follows: X falls back to the Following timeline, Patreon reads its memberships and feed, and an empty or partial list is said in the log
+
 ## v0.34 — 2026-10-20
 
 - Refresh all scans every artist down the list, the artist list is bigger, Quick is the standard grid quality, the cookie-login gaps are 3-15 / 10-30 / 15-60 s
