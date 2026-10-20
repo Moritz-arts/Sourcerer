@@ -66,7 +66,7 @@ _queue = []                  # artist ids waiting
 _auto = set()                # of those, queued by the automatic sync
 _starting = set()            # popped by a worker, not in _running yet: busy all the same (merge asks, _pick avoids its sites)
 _only = {}                   # artist id -> ids of the only sources a queued sync asks (Browse: download these)
-_modes = {}                  # artist id -> "refresh" or "download" for a queued job (none: the card's auto-download decides)
+_modes = {}                  # artist id -> "refresh", "download" or "scan" for a queued job (none: the card's auto-download decides)
 _followup = {}               # artist id -> sources (None: all) of a download asked for while the card's own job could not take it
 PENDING_KEYS = 400           # posts per source whose keys are kept as "waiting for a download"
 REFRESH_ITEMS = 120          # a sync (refresh) reads a source's newest pages until it has this many posts
@@ -201,11 +201,13 @@ def enqueue(artist_ids=None, auto=False, only=None, mode=None, everyone=False, o
     elif order:
         place = {i: n for n, i in enumerate(order) if isinstance(i, int)}
         ids.sort(key=lambda i: place.get(i, len(place)))        # (stable: the rest keeps its order)
-    followed = 0
+    followed = upgraded = 0
     with _lock:
         # A download asked for while the same card is only being looked at follows it.
         follows = {i for i, c in _running.items() if mode == "download" and c.get("mode") in ("refresh", "scan")}
-        added = [i for i in ids if i not in _queue and ((i not in _running and i not in _starting) or i in follows)]
+        waiting, busy = set(_queue), set(_running) | _starting          # (sets: a sweep passes every card, and the lock is held)
+        added = [i for i in ids if i not in waiting and (i not in busy or i in follows)]
+        new = set(added)
         _queue.extend(added)
         for i in added:
             if only:
@@ -223,9 +225,12 @@ def enqueue(artist_ids=None, auto=False, only=None, mode=None, everyone=False, o
         # to widen a restricted download (Browse's filter said which sources), and a restricted
         # download must not make a card's sync a download of every source.
         for i in ids:
-            if i in added:
+            if i in new:
                 continue
-            if i in _queue:
+            if i in waiting:
+                if _modes.get(i) == "scan" and not mode and artist_ids is not None:
+                    _modes.pop(i, None)                # asked for by name while it waits for a mere scan: a look of its own
+                    upgraded += 1
                 if not only and mode == "download":
                     _only.pop(i, None)
                     _modes[i] = "download"
@@ -250,7 +255,7 @@ def enqueue(artist_ids=None, auto=False, only=None, mode=None, everyone=False, o
         # Under the same lock a worker leaves in when it runs dry, so an artist queued in that
         # moment never waits for a worker that is gone.
         _spawn()
-    return len(added) + followed
+    return len(added) + followed + upgraded
 
 
 def _unqueue(artist_id):
@@ -335,6 +340,17 @@ def cancel(artist_id):
             _cancels[artist_id].set()
             return True
     return False
+
+
+def cancel_all():
+    """The activity bar's Cancel: what runs stops after its file and what waits is dropped -- a sweep over every card
+    could otherwise only be ended by quitting."""
+    with _lock:
+        for i in list(_queue):
+            _unqueue(i)
+        _followup.clear()
+        for event_ in _cancels.values():
+            event_.set()
 
 
 def _cancelled(cur):
@@ -782,10 +798,11 @@ def _sync_artist(artist_id, auto=False, only=None, mode=None):
         scanning = mode == "scan"
         rows = con.execute("SELECT * FROM sources WHERE artist_id = ? ORDER BY id",
                            (artist_id,)).fetchall()
-        known = {r[0] for r in con.execute(
+        # (a scan compares with the last look, not the library: a big card's keys are not read for nothing)
+        known = set() if scanning else {r[0] for r in con.execute(
             "SELECT remote_key FROM files WHERE artist_id = ?", (artist_id,))}
-        held = con.execute("SELECT remote_key, count FROM failures WHERE artist_id = ?",
-                           (artist_id,)).fetchall()
+        held = [] if scanning else con.execute("SELECT remote_key, count FROM failures WHERE artist_id = ?",
+                                               (artist_id,)).fetchall()
     # A site that skips what is saved by a work's first page (pixiv) must still list a work
     # whose other pages are unfinished -- and not one given up on, which would be listed on
     # every sync for nothing.
@@ -832,6 +849,9 @@ def _sync_artist(artist_id, auto=False, only=None, mode=None):
             error, level = "%s rests until %s: %s" % (site.LABEL, time.strftime(
                 "%H:%M", time.localtime(rest[0])), rest[1]), "warn"
         elif _too_soon(src, site, auto):
+            return None
+        elif scanning and not net.scan_room(src["url"]):
+            _scan_told(where, site.LABEL)             # a sweep has had its share of the day's requests here: the rest is for downloads
             return None
         else:
             if careful:
@@ -955,6 +975,19 @@ def _sync_artist(artist_id, auto=False, only=None, mode=None):
            new=cur["new"], duplicates=cur["duplicates"], failed=cur["failed"], existing=cur["existing"])
 
 
+_scan_said = {}              # site -> the day it was said that scans wait for tomorrow
+
+
+def _scan_told(where, label):
+    day = time.strftime("%Y-%m-%d")
+    with _lock:
+        if _scan_said.get(where) == day:
+            return
+        _scan_said[where] = day
+    event("info", "%s: the looks at artists that do not download have used half of today's requests; the rest waits for "
+          "tomorrow, so downloads and Browse keep theirs" % label)
+
+
 def _peek(src, site, cur):
     """A scan: the newest page of a source, kept as its snapshot (Browse opens from it and "Latest activity" reads the
     newest post's date from it), and which of its posts the last look did not have -- not which the library lacks. One
@@ -976,18 +1009,17 @@ def _peek(src, site, cur):
 
 
 def _peeked(artist, todo, cur, logins, looked):
-    """The end of a scan: said only when something is new (a sweep over hundreds of cards must not bury the log), and
-    when nothing could be asked. Nothing is counted against the library."""
+    """The end of a scan: said only when something is new (a sweep over hundreds of cards must not bury the log; a site
+    that rests says so once, in net). Nothing is counted against the library."""
     artist_id = artist["id"]
     for where in logins:
         _used[where] = (artist_id, time.monotonic())
     cancelled = _cancelled(cur)
-    with db.connect() as con:
-        con.execute("UPDATE artists SET last_sync = ? WHERE id = ?", (_now(), artist_id))
+    if looked:                 # (a card nothing was asked of -- a site rests -- says nothing and is not "looked at")
+        with db.connect() as con:
+            con.execute("UPDATE artists SET last_sync = ? WHERE id = ?", (_now(), artist_id))
     if cancelled:
         event("cancelled", "Cancelled", artist)
-    elif not looked:
-        event("info", "Nothing could be checked", artist)
     elif todo:
         event("info", "%d new post%s online since the last look" % (len(todo), "" if len(todo) == 1 else "s"), artist,
               new=len(todo))

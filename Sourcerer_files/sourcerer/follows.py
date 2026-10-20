@@ -5,8 +5,8 @@ pixiv list that (`following(key)` in their modules, yielding (list name, pages o
 "avatar"})). Every followed account becomes a card -- once -- so the list fills itself and a source
 needs no pasted link. Such a card is only *listed* (`artists.listed`): nothing reads its sites in
 the background and nothing downloads until the user does something with it, because hundreds of
-cards looked at by every sweep (Sync all, All artists) would be hundreds of requests
-nobody asked for.
+cards looked at by every sweep (the automatic sync, All artists) would be hundreds of requests
+nobody asked for. (Refresh all only scans them -- the newest page -- and stops at half a day's requests.)
 
 What is added is remembered (`followed`, by lower-cased profile URL), so a card the user deleted
 does not come back and a card merged into another is not made again. A list read to its end once
@@ -23,6 +23,7 @@ own site (never another site's address, which could cost a request on a login), 
 from a public https address. A card keeps the address of the account's picture (`artists.avatar_url`) and
 nothing else: the page shows it through /api/avatar, in memory.
 """
+import collections
 import json
 import logging
 import random
@@ -37,6 +38,8 @@ from . import accounts, db, net, sources, sync
 log = logging.getLogger(__name__)
 HOURS = (10, 14)             # between two looks at the lists, while Sourcerer runs
 version = 0                  # counts the changes the page should reload for (cards made, combined)
+RETRY_HOURS = 4              # a costly list that failed is looked at again after this, not at the next ten to fourteen hours
+_retry = False               # a look of the last round failed
 _bumped = 0.0
 _lock = threading.Lock()     # one look at a time
 
@@ -101,19 +104,26 @@ STEM_MIN = 5                             # ... and one without its trailing digi
 HANDLE_KINDS = ("x", "bluesky", "mastodon", "misskey", "patreon", "fanbox", "xenforo")     # sites whose address names the account, the best known first
 
 
+_NOT_NAMES = {"index", "user", "users", "profile", "profiles", "members", "member", "u", "c", "media", "m", "creator"}
+
+
 def handle_text(url):
     """The account's own name in its address, as written: "Mewnet" for mastodon.social/@Mewnet, x.com/Mewnet,
     bsky.app/profile/mewnet.bsky.social and mewnet.fanbox.cc -- what a display name ("Mew") is not. "" where the address
-    names no account (pixiv's number, a booru's search). `card_name` names the card by it."""
-    if sources.kind_of(url) not in HANDLE_KINDS:
+    names no account (pixiv's number, a booru's search, a forum routed through `index.php?media/users/name.12`, Patreon's
+    `/user?u=1`, a Bluesky DID). `card_name` names the card by it."""
+    kind = sources.kind_of(url)
+    if kind not in HANDLE_KINDS:
         return ""
     parts = urllib.parse.urlsplit(url)
     host = (parts.hostname or "").lower()
+    # A forum that routes only through `index.php?` has the member in the query, not the path.
+    where = parts.query if kind == "xenforo" and "/" in parts.query else parts.path
     last = host.split(".")[0] if host.endswith(".fanbox.cc") else \
-        urllib.parse.unquote(parts.path.rstrip("/").rsplit("/", 1)[-1])
+        urllib.parse.unquote(where.rstrip("/").rsplit("/", 1)[-1])
     text = last.lstrip("@").split("@")[0].split(".")[0]
     key = name_key(text)
-    return text if key and not key.isdigit() else ""
+    return text if key and not key.isdigit() and ":" not in last and text.lower() not in _NOT_NAMES else ""
 
 
 def handle_key(url):
@@ -124,12 +134,13 @@ def handle_key(url):
     return key if len(key) >= HANDLE_MIN else ""
 
 
-def stem_key(url):
-    """The account name without the digits at its end: an artist is @Blackmoon on one site and @blackmoon_77 on
-    another, and the number is whatever was free. "" when nothing was cut (the account name itself says it) or too little is left."""
+def stem_of(url):
+    """(the account name without the digits at its end, whether it had none) -- @Blackmoon, @blackmoon_77 and
+    @BlackMoon1985 are one artist's accounts when the number is only whatever was free on each site. None when too
+    little is left (`STEM_MIN`)."""
     key = name_key(handle_text(url))
     stem = key.rstrip("0123456789")
-    return stem if stem != key and len(stem) >= STEM_MIN else ""
+    return (stem, stem == key) if len(stem) >= STEM_MIN else None
 
 
 def card_name(urls, display=""):
@@ -168,6 +179,7 @@ class _Twins:
     def __init__(self):
         self.names, self.kinds, self.listed, self.attached = {}, {}, {}, 0
         self.owner, self.urls, self.declared, self.named_by, self.alias = {}, {}, {}, {}, {}
+        self.stems = {}                           # stem -> [(card, whether the account is the plain stem)]
         with db.connect() as c:
             for r in c.execute("SELECT id, name, listed FROM artists ORDER BY id"):
                 self.register(r["id"], r["name"], bool(r["listed"]))
@@ -184,7 +196,7 @@ class _Twins:
     def url_keys(self, url):
         """The names an account is found by: the name the site shows, its account name and that without the digits."""
         alias = self.alias.get(url) or ""
-        return {k for k in (name_key(alias), _base_key(alias), handle_key(url), stem_key(url)) if len(k) >= self.MIN}
+        return {k for k in (name_key(alias), _base_key(alias), handle_key(url)) if len(k) >= self.MIN}
 
     def attach(self, artist_id, kind, url=None, links=(), alias=None):
         self.kinds.setdefault(artist_id, set()).add(kind)
@@ -197,6 +209,9 @@ class _Twins:
             self.alias[url] = alias
         for key in self.url_keys(url):
             self.names.setdefault(key, []).append(artist_id)           # found as a name is
+        stem = stem_of(url)
+        if stem:
+            self.stems.setdefault(stem[0], []).append((artist_id, stem[1]))
         for link in links:
             self.declared.setdefault(artist_id, set()).add(link)
             self.named_by.setdefault(link, set()).add(artist_id)
@@ -212,6 +227,20 @@ class _Twins:
         mine = [i for i in ids if not self.listed[i]]
         return (mine[0] if len(mine) == 1 else None) if mine else (ids[0] if ids else None)
 
+    def by_stem(self, url, name, kinds, skip=(), below=None):
+        """The listed cards an account joins by its name without the digits -- the weakest evidence there is, so only
+        where it is not likely two people: one of the two names is the plain one (@blackmoon and @blackmoon_77: the
+        number is what was free on the other site) or the display names say the same too; never a card the user made
+        (an automatic join cannot be undone); and only when exactly one card fits."""
+        stem = stem_of(url or "")
+        if not stem:
+            return None
+        said = {i for key in {name_key(name), _base_key(name)} if len(key) >= self.MIN for i in self.names.get(key, ())}
+        found = {i for i, plain in self.stems.get(stem[0], ())
+                 if i not in skip and self.listed.get(i) and (below is None or i < below) and not (self.kinds[i] & kinds)
+                 and (plain != stem[1] or i in said)}
+        return found.pop() if len(found) == 1 else None
+
     def find(self, name, kinds, url=None, links=()):
         """The one card that takes an account called name (at url, naming links) with sources of these kinds, or None.
         An unsupported site never conflicts."""
@@ -219,9 +248,10 @@ class _Twins:
         said = self.said(links, url, kinds)
         if said:
             return self.pick(said)
-        keys = {name_key(name), _base_key(name), handle_key(url or ""), stem_key(url or "")} - {""}
+        keys = {name_key(name), _base_key(name), handle_key(url or "")} - {""}
         ids = {i for key in keys for i in self.names.get(key, ())}
-        return self.pick([i for i in sorted(ids) if not (self.kinds[i] & kinds)])
+        strong = [i for i in sorted(ids) if not (self.kinds[i] & kinds)]
+        return self.pick(strong) if strong else self.by_stem(url, name, kinds)
 
     def absorb(self, target, card):
         """The card went into target: its accounts, kinds and declared links are target's now."""
@@ -232,6 +262,9 @@ class _Twins:
             self.urls.setdefault(target, set()).add(url)
             for key in self.url_keys(url):
                 self.names.setdefault(key, []).append(target)
+            stem = stem_of(url)
+            if stem:
+                self.stems.setdefault(stem[0], []).append((target, stem[1]))
         self.declared.setdefault(target, set()).update(self.declared.pop(card, ()))
         for named in self.named_by.values():
             if card in named:
@@ -303,6 +336,7 @@ def _add(page, kind, public, twins=None):
 
 def _look(key):
     """One login's lists. Returns how many cards they made."""
+    global _retry
     db.set_setting("follows_at:" + key, str(time.time()))
     site, label, total, public, twins = _site(key), accounts.label(key), 0, {}, _Twins()
     # A list read to its end by *this* login (a new login is another account, maybe) may stop early.
@@ -320,8 +354,9 @@ def _look(key):
     except Exception as e:
         why = net.reason(e)
         hours = getattr(site, "FOLLOWS_HOURS", 0)
-        if hours:                                     # a failed look of a costly list is tried again in about four hours, not a day
-            db.set_setting("follows_at:" + key, str(time.time() - max(0, hours - 4) * 3600))
+        if hours:                                     # a failed look of a costly list: tried again after RETRY_HOURS (start())
+            _retry = True
+            db.set_setting("follows_at:" + key, str(time.time() - max(0, hours - RETRY_HOURS) * 3600))
         log.info("%s: the list of followed accounts stopped: %s", key, why)
         sync.event("warn", "%s: the list of followed accounts stopped (%s); the next look carries on" % (label, why))
     if total or twins.attached:
@@ -359,6 +394,9 @@ def combine():
             keys = {name_key(names[card]), _base_key(names[card])}.union(*(twins.url_keys(u) for u in twins.urls.get(card, ())))
             near = {i for key in keys if len(key) >= twins.MIN for i in twins.names.get(key, ())} - {card} - gone
             target = twins.pick([i for i in sorted(near) if fits(i)])
+            if target is None and not near:        # nothing by name: the name without its digits, the weakest evidence (by_stem)
+                target = next((t for t in (twins.by_stem(u, names[card], kinds, {card} | gone, below=card)
+                                           for u in sorted(twins.urls.get(card, ()))) if t), None)
         if target is None:
             continue
         try:
@@ -375,27 +413,46 @@ def combine():
     return done
 
 
+class _Names(collections.Counter):
+    """The folder names of the cards, counted: `_unique` asks `in` and `add`, and a card being renamed leaves its own out."""
+    def __contains__(self, key):
+        return self[key] > 0
+
+    def add(self, key):
+        self[key] += 1
+
+
 def rename_listed():
-    """Every *listed* card is called by its @name (`card_name`): nothing of it is downloaded, so the name -- and the folder
-    that follows from it -- is free to change, and it follows the accounts a card gains by combining. A card the user touched
-    keeps what it is called. Returns how many were renamed."""
+    """Every *listed* card that has nothing downloaded is called by its @name (`card_name`): its name -- and the folder
+    that follows from it -- is free to change, and it follows the accounts a card gains by combining. A card with files
+    keeps its name (listed is only cleared by an edit, a sync, auto-download or a merge: a picture saved in Browse leaves
+    it listed, and a new name would split the artist over two folders), as does one the user touched. Returns how many
+    were renamed."""
     done = 0
     with db.connect() as con:
-        cards = con.execute("SELECT id, name FROM artists WHERE listed = 1 ORDER BY id").fetchall()
-        taken = {}
-        for r in con.execute("SELECT id, name FROM artists"):
-            taken[r["id"]] = sync.safe_name(r["name"]).lower()
+        cards = con.execute("SELECT id, name FROM artists WHERE listed = 1 AND NOT EXISTS "
+                            "(SELECT 1 FROM files f WHERE f.artist_id = artists.id AND f.path IS NOT NULL) ORDER BY id").fetchall()
+        if not cards:
+            return 0
+        urls = {}
+        for r in con.execute("SELECT artist_id, url FROM sources ORDER BY id"):
+            urls.setdefault(r[0], []).append(r[1])
+        taken = _Names(sync.safe_name(r[0]).lower() for r in con.execute("SELECT name FROM artists"))
         for card in cards:
-            urls = [r[0] for r in con.execute("SELECT url FROM sources WHERE artist_id = ? ORDER BY id", (card["id"],))]
-            want = card_name(urls, card["name"])
-            if not urls or want == card["name"]:
+            mine = urls.get(card["id"])
+            want = card_name(mine, card["name"]) if mine else card["name"]
+            if want == card["name"]:
                 continue
-            others = {v for k, v in taken.items() if k != card["id"]}
-            name = _unique(want, urls[0], others)
-            if name != card["name"]:
-                con.execute("UPDATE artists SET name = ? WHERE id = ?", (name, card["id"]))
-                taken[card["id"]] = sync.safe_name(name).lower()
+            own = sync.safe_name(card["name"]).lower()
+            taken[own] -= 1
+            name = _unique(want, mine[0], taken)             # (adds the name it takes; the old one is free now)
+            if name == card["name"]:
+                continue
+            if con.execute("UPDATE artists SET name = ? WHERE id = ? AND listed = 1", (name, card["id"])).rowcount:
                 done += 1
+            else:                                             # touched since: it keeps its name
+                taken[sync.safe_name(name).lower()] -= 1
+                taken[own] += 1
     if done:
         _touch(True)
     return done
@@ -435,10 +492,12 @@ def start():
     skipped -- and every ten to fourteen hours."""
     def run():
         time.sleep(random.uniform(90, 150))
+        global _retry
         while True:
+            _retry = False
             try:
                 look()
             except Exception:
                 log.exception("follows")
-            time.sleep(random.uniform(*HOURS) * 3600)
+            time.sleep((RETRY_HOURS if _retry else random.uniform(*HOURS)) * 3600)
     threading.Thread(target=run, daemon=True, name="follows").start()

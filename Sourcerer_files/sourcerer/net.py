@@ -220,6 +220,21 @@ def spend(url, n=1):
               "today's %d requests are done; the rest follows tomorrow" % BUDGETS.get(site, BUDGET))
 
 
+SCAN_SHARE = 0.5            # a sweep's look at cards that do not download (Refresh all) may use this much of a day's budget
+
+
+def scan_room(url):
+    """Whether a look at a card that does not download may still be made on this site today: a sweep over hundreds of
+    follows must leave the rest of the day's requests to the artists that download, to Browse and to single pictures."""
+    site, limit = site_of(url), BUDGETS.get(site_of(url))
+    if not limit:
+        return True
+    with _lock:
+        entry = _stored("spent").get(site)
+    used = entry[1] if entry and entry[0] == time.strftime("%Y-%m-%d") else 0
+    return used < limit * SCAN_SHARE
+
+
 _refused = {}               # site -> [refusals in a row, since]
 
 

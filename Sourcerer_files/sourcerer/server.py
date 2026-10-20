@@ -102,15 +102,15 @@ def name_from_url(url):
 
 
 def _guess_name(urls):
-    """The first source's own display name; failing that, the account in a link."""
+    """(the first source's own display name, the link it belongs to); failing that, the account in a link."""
     for url in urls:
         try:
             info = sources.profile(url)
             if info and info.get("name"):
-                return _display_name(info["name"])
+                return _display_name(info["name"]), url
         except Exception as e:
             log.info("no name from %s: %s", url, net.reason(e))
-    return _display_name(name_from_url(urls[0])) if urls else ""
+    return (_display_name(name_from_url(urls[0])), None) if urls else ("", None)
 
 
 def _clean(body):
@@ -120,10 +120,10 @@ def _clean(body):
         # Compared after normalising: "site/@a/media" and "https://site/@a" are one.
         if url and url not in urls:
             urls.append(url)
-    name, shown = _display_name(body.get("name")), ""
+    name, shown = _display_name(body.get("name")), (None, None)
     if not name:                                          # named by the artist's @name where an address has one; the name the site shows stays an alias
         shown = _guess_name(urls)
-        name = follows.card_name(urls, shown)
+        name = follows.card_name(urls, shown[0])
     if not name:
         return None, "Give the card a name or at least one link."
     folder = (body.get("folder") or "").strip()
@@ -150,7 +150,7 @@ def _save(con, artist_id, data):
     for url in data["urls"]:
         if url not in current:
             con.execute("INSERT INTO sources (artist_id, url, kind, alias) VALUES (?, ?, ?, ?)",
-                        (artist_id, url, sources.kind_of(url), (data["shown"] or None) if url == data["urls"][0] and not current else None))
+                        (artist_id, url, sources.kind_of(url), data["shown"][0] if url == data["shown"][1] and not current else None))
     master = con.execute("SELECT id FROM sources WHERE artist_id = ? AND url = ?",
                          (artist_id, data["master"])).fetchone()
     con.execute("UPDATE artists SET name = ?, layout = ?, dedupe = ?, master_source_id = ?, "
@@ -539,7 +539,8 @@ def start_sync():
     mode = body.get("mode") if body.get("mode") in ("download", "refresh") else None
     order = [i for i in body.get("order") or [] if isinstance(i, int)] if ids is None else None
     # No artist: Refresh all -- every card, in the order the list shows them (sync.enqueue).
-    return jsonify(added=sync.enqueue(ids, only=only, mode=mode, everyone=ids is None, order=order))
+    # (a download asked for without an artist is the cards that download, as ever: only a plain Refresh all reaches the rest)
+    return jsonify(added=sync.enqueue(ids, only=only, mode=mode, everyone=ids is None and mode is None, order=order))
 
 
 @app.post("/api/artists/<int:artist_id>/auto-download")
@@ -588,6 +589,9 @@ def focus_sync():
 @app.post("/api/sync/cancel")
 def cancel_sync():
     body = request.get_json(silent=True) or {}
+    if body.get("all"):
+        sync.cancel_all()
+        return jsonify(ok=True)
     return jsonify(ok=sync.cancel(int(body.get("artist_id") or 0)))
 
 

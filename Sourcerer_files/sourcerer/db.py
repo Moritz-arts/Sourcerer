@@ -117,8 +117,9 @@ COLUMNS = {
         "auto_download": "INTEGER NOT NULL DEFAULT 0",
         "pending": "INTEGER NOT NULL DEFAULT 0",   # new posts the last look found that are not downloaded
         # 1: made from a login's follows and not touched since -- it is only in the list. No look in the
-        # background (previews, Sync all, automatic sync) and not in "All artists" until the user does
-        # something with the card (edits it, syncs it, turns auto-download on, merges it).
+        # background (the automatic sync, the scan at start) and not in "All artists" until the user does
+        # something with the card (edits it, syncs it, turns auto-download on, merges it); Refresh all
+        # scans it (the newest page, mode "scan") without clearing this.
         "listed": "INTEGER NOT NULL DEFAULT 0",
         "favorite": "INTEGER NOT NULL DEFAULT 0",   # 1: starred by the user (the list can put these first)
     },
@@ -168,10 +169,11 @@ def init():
         if not con.execute("SELECT 1 FROM settings WHERE key = 'follow_links_v1'").fetchone():
             con.execute("DELETE FROM settings WHERE key LIKE 'follows_read:%'")
             con.execute("INSERT INTO settings (key, value) VALUES ('follow_links_v1', '1')")
-        # A card is named by its @name now (follows.card_name); the display name it had stays with its first source.
+        # A card is named by its @name now (follows.card_name); the display name a one-account card had stays with that
+        # account (a card of several accounts does not say which of them the name was).
         if not con.execute("SELECT 1 FROM settings WHERE key = 'aliases_v1'").fetchone():
             con.execute("UPDATE sources SET alias = (SELECT a.name FROM artists a WHERE a.id = sources.artist_id) WHERE alias IS NULL "
-                        "AND id = (SELECT MIN(s.id) FROM sources s WHERE s.artist_id = sources.artist_id)")
+                        "AND artist_id IN (SELECT artist_id FROM sources GROUP BY artist_id HAVING COUNT(*) = 1)")
             con.execute("INSERT INTO settings (key, value) VALUES ('aliases_v1', '1')")
         # The speed settings were set to values worked out for the sites' limits (v0.33): whatever was chosen
         # before -- most of it just the old defaults saved by a change of another row -- is dropped, once.
