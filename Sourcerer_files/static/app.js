@@ -358,7 +358,6 @@ function sync(artistId, download) {
 }
 
 function removeArtist(a) {
-  if (!confirm('Delete the card "' + a.name + '"? The downloaded files stay in the library.')) return;
   api("DELETE", "/api/artists/" + a.id).then(function () {
     galDrop(a.id);
     galDrop(0);                                    // All artists listed this card
@@ -683,7 +682,7 @@ function galWatch() {
 }
 
 var BR_HIDDEN = "sourcerer.browse.hidden";
-var BR_FIT = "sourcerer.browse.fit", BR_SIZE = "sourcerer.browse.size";
+var BR_FIT = "sourcerer.browse.fit", BR_SIZE = "sourcerer.browse.size", BR_FOLDED = "sourcerer.browse.folded";
 var BR_SORT = "sourcerer.browse.sort", BR_COUNT = "sourcerer.browse.count", BR_LAST = "sourcerer.browse.last";
 function brOrder(v) { return v === "logo" ? "source" : /^(activity|favorites|source)$/.test(v) ? v : "name"; }      // ("logo" was Source's twin; the numbers are the second choice's)
 function brNumber(v) { return v === "files" ? "images" : /^(images|downloads|percent)$/.test(v) ? v : "sources"; }
@@ -695,6 +694,7 @@ try {
 } catch (e) {}
 $("br-sort").value = S.brSort; $("br-count").value = S.brCount;
 try { S.brHidden = JSON.parse(localStorage.getItem(BR_HIDDEN) || "{}"); } catch (e) { S.brHidden = {}; }
+try { S.brFolded = JSON.parse(localStorage.getItem(BR_FOLDED) || "{}"); } catch (e) { S.brFolded = {}; }      // the list's folded groups
 try { S.brFit = localStorage.getItem(BR_FIT) === "full" ? "full" : "square"; } catch (e) {}
 
 // A gallery the user has left stays: it keeps loading on the server, its posts stay here, and picking the artist
@@ -778,15 +778,24 @@ function renderBrowseList() {
     if (on || queue.indexOf(a.id) >= 0) return '<i class="spin" title="' + (on ? "Working…" : "Queued") + '"></i>';
     return countText(a);
   }
+  // A group (a site, or Favorites / Others) folds under its head; a search shows everything it finds.
+  var grouped = byStar && stars && stars < list.length;
+  function groupOf(a, i) { return bySite ? "s:" + siteOf(a) : grouped ? (i < stars ? "f:fav" : "f:rest") : ""; }
+  function groupHead(g, inner) {
+    var open = q || !S.brFolded[g];
+    return '<div class="br-group fold" role="button" data-grp="' + esc(g) + '" aria-expanded="' + open + '">' + icon("chevron-right", "fold-ic") + inner + "</div>";
+  }
   var html = (q ? "" : '<button type="button" class="br-item all' + (!S.brArtist ? " selected" : "") +
     '" data-id="0">' + icon("photo") + '<span class="br-name">All artists</span><span class="br-n">' + allText() + "</span></button>") +
     list.map(function (a, i) {
-      var site = bySite ? siteOf(a) : "", head = bySite && (!i || siteOf(list[i - 1]) !== site) ?
-        '<div class="br-group">' + (siteLogo(site) || "") + "<span>" + esc(site || "No source") + '</span><span class="num">' + sites[site] + "</span></div>" : "";
-      if (byStar && stars && stars < list.length && (i === 0 || i === stars)) {         // Favorites, then everybody else
-        head = '<div class="br-group">' + (i === 0 ? '<svg class="ic star"><use href="#i-star"/></svg><span>Favorites</span><span class="num">' + stars + "</span>"
-          : '<span>Others</span><span class="num">' + (list.length - stars) + "</span>") + "</div>";
+      var g = groupOf(a, i), head = "";
+      if (g && (!i || groupOf(list[i - 1], i - 1) !== g)) {
+        var site = siteOf(a);
+        head = groupHead(g, bySite ? (siteLogo(site) || "") + "<span>" + esc(site || "No source") + '</span><span class="num">' + sites[site] + "</span>"
+          : g === "f:fav" ? '<svg class="ic star"><use href="#i-star"/></svg><span>Favorites</span><span class="num">' + stars + "</span>"
+          : '<span>Others</span><span class="num">' + (list.length - stars) + "</span>");
       }
+      if (g && !q && S.brFolded[g]) return head;
       return head + '<button type="button" class="br-item' + (S.brArtist === a.id ? " selected" : "") + '" data-id="' + a.id + '">' +
         avatarHtml(a) + '<span class="br-name" title="' + esc(a.name) + '">' + esc(a.name) + "</span>" +
         '<span class="br-n">' + count(a) + "</span>" +
@@ -1564,6 +1573,13 @@ $("br-list").addEventListener("contextmenu", function (e) {
   openMenu(a, e.clientX, e.clientY);
 });
 $("br-list").addEventListener("click", function (e) {
+  var grp = e.target.closest("[data-grp]");
+  if (grp) {                                         // a group head folds or opens its artists
+    var key = grp.dataset.grp;
+    if (S.brFolded[key]) delete S.brFolded[key]; else S.brFolded[key] = 1;
+    try { localStorage.setItem(BR_FOLDED, JSON.stringify(S.brFolded)); } catch (e2) {}
+    return renderBrowseList();
+  }
   var b = e.target.closest("[data-id]");
   if (b && +b.dataset.id !== S.brArtist) browseOpen(+b.dataset.id);
 });
@@ -2201,7 +2217,6 @@ $("acc-grid").addEventListener("click", function (e) {
     return accLogin({ key: key }).catch(fail).then(function () { b.disabled = false; });
   }
   if (act === "logout" || act === "drop") {
-    if (act === "logout" && !confirm("Log out? Sourcerer forgets what it kept for this login.")) return;
     b.disabled = true;
     api("POST", "/api/accounts/logout", { key: key }).then(function () {
       return loadAccounts();
@@ -2357,15 +2372,11 @@ $("btn-install").addEventListener("click", function () {
     .then(function () { $("btn-install").disabled = false; });
 });
 
-var REPAIR_ASK = {
-  venv: "Rebuild the Python environment? Sourcerer restarts, and the next start takes a minute.",
-  reinstall: "Download this version again and replace the program files? Sourcerer restarts.",
-  restart: "Restart Sourcerer?"
-};
+// The repairs that restart Sourcerer. No dialog asks first (the user's rule: no warning boxes at all).
+var REPAIR_ASK = { venv: 1, reinstall: 1, restart: 1 };
 $$("[data-repair]").forEach(function (b) {
   b.addEventListener("click", function () {
     var action = b.dataset.repair;
-    if (REPAIR_ASK[action] && !confirm(REPAIR_ASK[action])) return;
     b.disabled = true;
     api("POST", "/api/repair", { action: action }).then(function (d) {
       if (REPAIR_ASK[action]) restarting(action === "reinstall" ? "Reinstalling" : "Restarting", d.message);
@@ -2402,7 +2413,6 @@ $("btn-acc-check").addEventListener("click", function () {
 });
 // Only in the browser: there the page is all there is, no window to close.
 $("btn-quit").addEventListener("click", function () {
-  if (!confirm("Quit Sourcerer? A running sync stops.")) return;
   api("POST", "/api/quit").then(function () {
     $("overlay-title").textContent = "Sourcerer has stopped";
     $("overlay-text").textContent = "You can close this tab. The start file starts it again.";
