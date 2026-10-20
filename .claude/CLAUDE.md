@@ -401,12 +401,17 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   against a real X login**) hand out pages of `{url, name, avatar}`
   through `following(key)` -- it yields `(list name, pages)` -- and each account becomes a card once.
   Patreon has no list of memberships to read yet.
-  **A listed card is in no sweep**: `enqueue(None)` (Sync all, automatic sync) and "All
+  **A listed card is in no automatic sweep**: `enqueue(None)` (the automatic sync, the scan at start) and "All
   artists" (`gallery._Gallery`) skip `listed = 1`, because a thousand pixiv follows read in the
-  background are a thousand requests nobody asked for. Anything the user does with the card clears
+  background are a thousand requests nobody asked for. Only **Refresh all** reaches them (`everyone`, only when the
+  page asked for no mode) and it only *scans* them (the newest page per source; a scan is not free: pixiv 2 requests,
+  X a page of 20 counted against `BUDGETS`), **and only while the site's day has used less than half of its budget**
+  (`net.scan_room`, `SCAN_SHARE`): the other half is for the cards that download, Browse and single pictures. Past
+  that the scans of that site are left out, said once a day (`sync._scan_told`) -- not once per card. The activity bar's
+  Cancel drops the whole queue (`sync.cancel_all`), or a sweep over every card could only be ended by quitting. Anything the user does with the card clears
   it (`_save` on an edit, auto-download on, `enqueue` of that card by name, a merge); a card made by
   hand for an account that is listed takes the listed card over (`server._absorb_listed`). A new place
-  that reads *every* card must say `WHERE listed = 0`. What was added is remembered by lower-cased
+  that reads *every* card must say `WHERE listed = 0` (Refresh all is the one on purpose). What was added is remembered by lower-cased
   profile URL (`followed`): a deleted or merged card does not return. A list read to its end once by
   this login (`follows_read:<key>:<list>` holds the login's `saved` stamp, so another account starts
   over) is read again only up to its first page of known accounts -- the newest follows come first. A
@@ -430,10 +435,13 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   not a booru's `/posts`; `handlesOf` in app.js is its twin with a minimum of 3, for suggestions only); (3) the display name
   by `follows.name_key` (letters and digits only, NFKC, case-folded -- `nameKey` in `app.js` is its twin for the merge dialog's
   suggestions: keep them alike), at least 3 characters. Names and account names live in one index, so an account name matches a
-  display name too. **The digits at the end of an account name are dropped for a second match** (`follows.stem_key`: @Blackmoon,
-  @blackmoon_77 and @BlackMoon1985 are one artist -- the number is whatever was free on each site; the stem has at least 5
-  letters, `stemsOf` in app.js is its twin). **Every name a site showed stays with its account** (`sources.alias`, set when a
-  card or a joined account comes in; v0.34 filled the first source from the card's name once, `aliases_v1`), because a card is
+  display name too. **The digits at the end of an account name are dropped for a second match, the weakest there is** (`follows.stem_of`,
+  `_Twins.by_stem`: @blackmoon and @blackmoon_77 are one artist -- the number is whatever was free on the other site; the
+  stem has at least 5 letters). It joins **only listed cards** (an automatic join cannot be undone, so never a card the
+  user made), **only when one of the two names is the plain stem or the display names say the same too** (@mochi1 and
+  @mochi2 are two people who each took a free number), **and only when exactly one card fits**. In the merge dialog
+  (`stemsOf` in app.js) it is only a suggestion. **Every name a site showed stays with its account** (`sources.alias`, set when a
+  card or a joined account comes in; v0.34 filled the first source from the card's name once, `aliases_v1`, for cards of one account only: a card of several does not say which account the name was), because a card is
   named by its @name now and "Marimo" must still find the card whose Mastodon account is shown as Marimo (`_Twins.url_keys`,
   `namesOf` in app.js, and the list's search). Where the accounts share no name at all (@Marimo, @manmosumario, a pixiv name in
   kanji) only a profile that names the other (1) or the merge dialog helps -- there is nothing more to compute.
@@ -446,11 +454,15 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   on a site that has one (order of `HANDLE_KINDS`: X, Bluesky, Mastodon, Misskey, Patreon, Fanbox, forum), without the digits at
   its end when two accounts agree on the name but for them; a card whose accounts have no @name (pixiv) keeps the name the site
   shows. A card from a follow list, one made by hand without a name typed, and -- after every look -- every *listed* card
-  (nothing of it is downloaded, so its name and folder are free to change; one the user touched keeps its name) are named so.
+  **with no file** (`rename_listed`; listed is cleared by an edit, a sync, auto-download or a merge, *not* by a picture saved in
+  Browse, so a card with files keeps its name or its artist would be split over two folders; one the user touched keeps its
+  name too) are named so. `handle_text` is "" where the address names no account: a forum routed through
+  `index.php?media/users/name.12` (the member is in the query), Patreon's `/user?u=1`, a Bluesky DID.
   A name two cards would share gets the account in brackets (`_unique`).
 - **X's follows said nothing when they failed** (no `twid` cookie in the saved login, gallery-dl missing): `x.following` returned
   without a word, and "my X follows are missing" had no trace. It raises now, the log says why, and a failed look of a list
-  with `FOLLOWS_HOURS` is tried again in about four hours instead of the next day. Still not run against a real X login.
+  with `FOLLOWS_HOURS` is tried again after `follows.RETRY_HOURS` (4): the stamp is set back and `start()` sleeps that
+  long instead of its ten to fourteen hours. Still not run against a real X login.
 - **A follow list is the site's word, not ours.** A link is taken only when it is a profile of the
   list's own site (`follows._add`: another site's address -- a pixiv work's -- would cost a request on
   a login inside a write transaction) and on a public https host (`net.public_https`; checked before
@@ -628,10 +640,10 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   **There is no "Download all"**, and **"Refresh all" (F5, Ctrl+R) looks at every artist, one after the other down the list as it
   is shown** (the page sends the ids in that order: `S.brOrderIds`; `enqueue(None, everyone=True, order=...)`, listed cards
   included -- somebody asked for it, and a look does not un-list them): a card with auto-download is looked at *and* downloaded as
-  before, **every other card is only scanned** (mode `scan`, `_peek`/`_peeked`: the newest page of each source, one request,
+  before, **every other card is only scanned** (mode `scan`, `_peek`/`_peeked`: the newest page of each source, one page,
   kept as its snapshot -- so "Latest activity" and Browse's first screen are fresh -- and the log says "N new posts online since
   the last look" only when there are some, comparing with the *previous snapshot*, never with the library; no snapshot yet, nothing
-  is claimed; no "Checking" line and no profile request per card, a sweep over hundreds must not bury the log). Comparing a card's
+  is claimed; no "Checking" line and no profile request per card, a card nothing was asked of -- a site rests, its scans had their share -- says nothing and is not stamped `last_sync`; a sweep over hundreds must not bury the log; and a plain Refresh of a card whose scan waits makes it a look of its own). Comparing a card's
   posts with its library is what costs the time (a card never downloaded reads `REFRESH_PAGES` pages every time, its first page
   never being in the library): so **Automatic sync and the scan at every start still look at the cards with auto-download only**
   (`sync.enqueue(None)` without `everyone`: `WHERE listed = 0 AND auto_download = 1`) -- nothing downloads every artist on one click. **Favorites** (`artists.favorite`, `/api/artists/<id>/favorite`, menu entry and key `F`, a gold star in the list):
@@ -709,7 +721,7 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   away), so an X artist's long download no longer holds pixiv up and nobody reads one account's site twice at once; the
   other sites' lanes (`net`) pace whoever comes. A card just picked counts as running (`_starting`) before its sync begins,
   or two workers would both take pixiv. Cancel is per card (`_cancels[artist_id]`, `_cancelled(cur)`); "Cancel" in the
-  activity bar cancels every running card. The queue is taken in order, except that the card Browse just opened goes first
+  activity bar cancels every running card and drops the queue (`sync.cancel_all`). The queue is taken in order, except that the card Browse just opened goes first
   (`/api/sync/focus` from `browseOpen`; its sites' pauses are the short `FOCUS_GAP`) and a card whose *careful*-login site
   is still cooling from the last card yields to the first of the next `PICK_FROM` whose sites are not (so 100 pixiv cards
   no longer hold the Bluesky ones up).

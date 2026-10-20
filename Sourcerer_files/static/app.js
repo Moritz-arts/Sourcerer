@@ -196,8 +196,8 @@ function renderActivity() {
       (!scan && cur.speed ? '<span class="num">' + bytes(cur.speed) + "/s</span>" : "") +
       (cur.file ? '<span class="file" title="' + esc(cur.file) + '">' + esc(cur.file) + "</span>" : "") + "</div>";
     if (q.length) {
-      html += '<span class="queue" title="Waiting: ' + esc(q.map(function (id) {
-        return (artistById(id) || {}).name; }).join(", ")) + '">' +
+      html += '<span class="queue" title="Waiting: ' + esc(q.slice(0, 20).map(function (id) {
+        return (artistById(id) || {}).name; }).join(", ") + (q.length > 20 ? ", … (" + q.length + " in all)" : "")) + '">' +
         q.slice(0, 4).map(function (id) { return avatarHtml(artistById(id) || { name: "?" }, "xs"); }).join("") +
         (q.length > 4 ? '<span class="more">+' + (q.length - 4) + "</span>" : "") + "</span>";
     }
@@ -410,9 +410,9 @@ function handlesOf(a) {
 }
 // The same without the digits at the end: @Blackmoon, @blackmoon_77 and @BlackMoon1985 are one artist's accounts (the number is
 // whatever was free on each site). (`follows.stem_key`.)
-function stemsOf(a) {
+function stemsOf(handles) {
   var out = [];
-  handlesOf(a).forEach(function (h) { var t = h.replace(/\d+$/, ""); if (t !== h && t.length >= 4 && out.indexOf(t) < 0) out.push(t); });
+  handles.forEach(function (h) { var t = h.replace(/\d+$/, ""); if (t !== h && t.length >= 5 && out.indexOf(t) < 0) out.push(t); });
   return out;
 }
 // The accounts a card's profiles name themselves (pixiv's declared twitter, a Mastodon field, Fanbox's links), lower-cased.
@@ -428,7 +428,7 @@ function urlsOf(a) { return a.sources.map(function (s) { return String(s.url).to
 // counts), 4 the same account name, 3 the same but for the digits at its end, 2 a name that is the other's account name,
 // 1 one name inside the other. 0: nothing.
 function sameness(b) {
-  var nb = namesOf(b), hb = handlesOf(b), sb = stemsOf(b), kb = nameKey(b.name);
+  var nb = namesOf(b), hb = handlesOf(b), sb = stemsOf(hb), kb = nameKey(b.name);
   var theirs = urlsOf(b), mine = M.urls || [];
   var has = function (list) { return function (x) { return list.indexOf(x) >= 0; }; };
   if (M.links.some(has(theirs)) || linksOf(b).some(has(mine))) return 6;
@@ -443,7 +443,7 @@ var WHY = { 6: "its profile names the other account", 5: "the same name", 4: "th
             2: "a name that is the other's account name", 1: "a similar name" };
 function openMerge(a) {
   closeMenu();
-  M = { from: a.id, picked: [], keep: 0, key: nameKey(a.name), names: namesOf(a), handles: handlesOf(a), stems: stemsOf(a), links: linksOf(a),
+  M = { from: a.id, picked: [], keep: 0, key: nameKey(a.name), names: namesOf(a), handles: handlesOf(a), stems: stemsOf(handlesOf(a)), links: linksOf(a),
         urls: urlsOf(a), suggested: [], why: {} };
   var scored = S.artists.filter(function (b) { return b.id !== a.id; })
     .map(function (b) { return [sameness(b), b]; }).filter(function (x) { return x[0]; })
@@ -550,7 +550,7 @@ document.addEventListener("click", function (e) {
   switch (btn.dataset.act) {
     case "add": openCard(null); break;
     case "cancel-current":
-      (S.sync.active || []).forEach(function (c) { api("POST", "/api/sync/cancel", { artist_id: c.artist_id }); });
+      api("POST", "/api/sync/cancel", { all: true });          // what runs and what waits
       break;
     case "log": toggleLog(); break;
     case "accounts": e.preventDefault(); openAccounts(); break;

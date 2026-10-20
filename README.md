@@ -203,7 +203,7 @@ sites allow:
 - after the first sync, only the newest posts are looked at;
 - automatic syncs come at a random time within the interval, take the cards
   that waited longest first, leave a logged-in site alone for hours between
-  them (X 12, Pixiv and Patreon 6) and let 20–90 s pass between two cards on
+  them (X 12, Pixiv and Patreon 6) and let 10–30 s pass (Settings: 15–60 s careful, 3–15 s fast) between two cards on
   the same site; logins are checked spread out, not all at once.
 
 None of this makes scraping something X's or Pixiv's terms allow; it keeps
