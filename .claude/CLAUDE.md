@@ -404,7 +404,10 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   full list does not come (no `twid` in the saved login, an empty or failed answer) and says why in the log; **Patreon** reads its
   memberships (`/api/pledges`) and the feed (`/api/stream`, `https://www.patreon.com/feed`; a 400 to `filter[is_following]` is
   retried without it) -- each alone, the other's failure is a note. `following` may yield `(name, pages, note)`: the note is
-  logged as a warning. Both **written from what the sites' pages ask, never run against a real login**; an empty list is said once per run.
+  logged as a warning. **Patreon's list works** (the user saw five creators in v0.35); X's fallback was **not yet seen against a real login**.
+  An empty list is said once per run, and so is a login whose list waits (expired, site resting): a silent skip left "my follows are missing"
+  with no trace. **A look that read no accounts does not hold the next one back** (`follows_seen:<key>`; gap `RETRY_HOURS` instead of
+  `FOLLOWS_HOURS`): v0.34's silent empty look for X stamped a day and v0.35's fallback never ran.
   **A listed card is in no automatic sweep**: `enqueue(None)` (the automatic sync, the scan at start) and "All
   artists" (`gallery._Gallery`) skip `listed = 1`, because a thousand pixiv follows read in the
   background are a thousand requests nobody asked for. Only **Refresh all** reaches them (`everyone`, only when the
@@ -625,6 +628,10 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   are Simple Icons (CC0, symbols `l-<site>` in the sprite; `SITE_LOGOS` in `app.js` maps a
   source's `LABEL` to one, a site without one shows its name). The forum and the booru draw a
   Tabler icon in their own colour. A new site adds its symbol there.
+- **A new function must not take a module's existing name** (`patreon._campaigns` was a cache dict; a new `def _campaigns` replaced it and
+  every Patreon source failed with "'function' object has no attribute 'get'" in v0.35 -- the new code alone worked, only opening an
+  artist showed it). `.github/redefined.py` finds such names; after touching a source module, also *use* its older paths (a guest
+  `pages(url)` call of Patreon needs no login).
 - **No warning boxes** (the user's rule, 2026-10-20): never `confirm()`, `alert()` or `prompt()` -- Log out, Delete card, Quit and the
   repairs act at once. A destructive thing is undone by a way back (backups, Login files), not by a question. Reset's typed word is
   the one exception, and it is a dialog of the page's own.
@@ -1053,6 +1060,7 @@ There is no test suite yet. Run at least:
 
 ```bash
 python3 -m py_compile .github/*.py .github/exe/*.py Sourcerer_files/*.py Sourcerer_files/sourcerer/*.py Sourcerer_files/sourcerer/sources/*.py
+python3 .github/redefined.py   # a name defined twice at the top of a module: the second silently replaces the first
 node --check Sourcerer_files/static/app.js
 python3 -c "import yaml; [yaml.safe_load(open(f)) for f in ('.github/workflows/version-bump.yml', '.github/workflows/release-zip.yml', '.github/workflows/build-exe.yml')]"
 sh -n start-linux.sh && sh -n start-macos.command

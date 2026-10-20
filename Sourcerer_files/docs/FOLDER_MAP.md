@@ -108,7 +108,8 @@ Only in the repository, never in the ZIP (`export-ignore` in `.gitattributes`):
 │   │                               result like a user; exe/Sourcerer.iss is the Windows installer;
 │   │                               exe/Sourcerer.ico / .icns / .png are the logo as icons
 │   ├─ bump_version.py            rewrites the number everywhere it is written
-│   └─ changelog_entry.py         turns commit subjects into the changelog entry
+│   ├─ changelog_entry.py         turns commit subjects into the changelog entry
+│   └─ redefined.py               a check: names a module defines twice at its top level
 ├─ .gitattributes
 └─ .gitignore
 ```
