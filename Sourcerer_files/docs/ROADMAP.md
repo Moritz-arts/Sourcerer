@@ -297,6 +297,10 @@ add the one that replaced it.
   its full list does not come, Patreon reads memberships and the feed (`https://www.patreon.com/feed`); both
   say in the activity log what they took and why. Written from the sites' own requests, **not yet seen against a
   real X / Patreon login** -- the log line after the next look says what happened.
+- 2026-10-20 — **All artists shows a site's followed accounts when it has few, and the forum login opens at once.** The user
+  (v0.36): Patreon's five creators were not in All artists (listed cards are left out of it). A site with at most 20 listed
+  accounts is read there now; hundreds (pixiv) stay out. A XenForo login window opened `/login/`, showed the guard's 403 for
+  seconds and only then went to `index.php?login/`; it opens the second route directly now.
 
 ## Done
 

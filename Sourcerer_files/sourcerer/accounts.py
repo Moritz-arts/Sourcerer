@@ -124,19 +124,25 @@ def label(key):
     return host
 
 
+XF_LOGIN = "/index.php?login/"
+
+
 def describe(key, base=None):
     """(label, login url, domains, logged-in test) of a window account.
 
     A forum may live below the root (example.com/community/): its base URL,
-    taken from a card's link or typed in, comes before /login/ -- the root's
-    /login/ is somebody else's page, often a 403 or a 404.
+    taken from a card's link or typed in, comes before the login route -- the root's
+    /login/ is somebody else's page, often a 403 or a 404. The route is `index.php?login/`,
+    which every XenForo answers (the friendly /login/ is a rewrite of it, and a forum with a
+    guard lets only "/" and "index.php?*" through): the window used to open /login/, show the
+    guard's bare 403 for seconds and only then swap it.
     """
     if key in SITES:
         return SITES[key]
     if key.startswith("xenforo:"):
         host = key.split(":", 1)[1]
         base = (base or _bases.get(key) or (load(key) or {}).get("base") or "https://" + host).rstrip("/")
-        return (host, base + "/login/", (host,),
+        return (host, base + XF_LOGIN, (host,),
                 lambda c: any(_XF_USER.match(n) and v for n, v in c.items()))
     raise KeyError(key)
 
@@ -400,7 +406,7 @@ def login_in_window(key, base=None, url=None, finish=None, ask=None):
     window = webview.create_window("Log in to %s - Sourcerer" % title, url, width=520, height=760)
     closed = threading.Event()
     window.events.closed += closed.set
-    extra = {"base": url[:-len("/login/")]} if key.startswith("xenforo:") else {}
+    extra = {"base": url[:-len(XF_LOGIN)]} if key.startswith("xenforo:") else {}
     threading.Thread(target=_watch, args=(key, window, ok, closed, extra, finish, ask),
                      daemon=True, name="login-" + key).start()
 
@@ -425,7 +431,8 @@ def _page_says_logged_in(key, window):
 
 def _window_says_403(window):
     """Whether the window shows a bare 403 page (nginx's: a title and one line, no forum). A forum with a
-    guard that lets only "/" and "index.php?*" through answers the friendly /login/ so."""
+    guard that lets only "/" and "index.php?*" through answers the friendly /login/ so (the login opens at
+    index.php?login/ now and falls back to /login/ when that shows a 403)."""
     try:
         text = window.evaluate_js("(document.title || '') + ' ' + (document.body ? document.body.innerText : '')") or ""
     except Exception:
@@ -459,7 +466,7 @@ def _watch(key, window, ok, closed, extra, finish, ask=None):
     found = code = at = None
     rerouted = not (key.startswith("xenforo:") and extra.get("base"))      # a forum's login page is tried by its other route once
     while not closed.is_set() and time.monotonic() < deadline:
-        time.sleep(1.5)
+        time.sleep(1.5 if rerouted else 0.4)         # a bare 403 is swapped quickly: the window shows it meanwhile
         try:        # where the window is, for the log: a forum's 403 page has no address bar to read
             here = urllib.parse.urlparse(window.get_current_url() or "")
             here = here.netloc + here.path          # never the query: an oauth code sits there
@@ -470,9 +477,9 @@ def _watch(key, window, ok, closed, extra, finish, ask=None):
             log.info("%s: login window at %s", key, at)
         if not rerouted and _window_says_403(window):
             rerouted = True              # once: a forum that is really down must not be asked in a loop
-            log.info("%s: the login page answered 403, trying it as index.php?login/", key)
+            log.info("%s: the login page answered 403, trying it as /login/", key)
             try:
-                window.load_url(extra["base"] + "/index.php?login/")
+                window.load_url(extra["base"] + "/login/")
             except Exception as e:
                 log.info("%s: login page not reloaded: %s", key, e)
             continue

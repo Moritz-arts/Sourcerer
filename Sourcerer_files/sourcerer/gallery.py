@@ -76,6 +76,8 @@ _spaced = {}                             # login site -> (card id, when another 
 _work = queue.Queue()
 _workers = []
 CARD_GAP = (5, 12)           # seconds before All artists asks a login site for another card than the last one's
+LISTED_IN_ALL = 20           # All artists reads a site's followed (listed) accounts too when it has this few: a handful of
+                             # creators is a minute of requests, hundreds of pixiv follows would be an hour on a login
 
 
 class _Workers:
@@ -287,15 +289,19 @@ class _Gallery:
         self.sharp = db.get_setting("grid_quality") != "fast"      # the grid shows the largest rendition, not the small one
         with db.connect() as con:
             artists = {r["id"]: dict(r) for r in con.execute(
-                "SELECT * FROM artists" + (" WHERE listed = 0" if self.all else " WHERE id = ?"), () if self.all else (artist_id,))}
+                "SELECT * FROM artists" + ("" if self.all else " WHERE id = ?"), () if self.all else (artist_id,))}
             if not artists and not self.all:
                 raise KeyError(artist_id)
             rows = con.execute("SELECT * FROM sources ORDER BY artist_id, id").fetchall() if self.all else \
                 con.execute("SELECT * FROM sources WHERE artist_id = ? ORDER BY id", (artist_id,)).fetchall()
         self.artist = None if self.all else artists[artist_id]
         self.name = "All artists" if self.all else self.artist["name"]
-        self.sources = [_Source(r, artists[r["artist_id"]]) for r in rows
-                        if r["artist_id"] in artists and sources.site_for(r["url"])]
+        # (All artists:) the user's own cards always; the accounts a login follows (listed) only of a site that has few of them.
+        mine = [(r, sources.site_for(r["url"])) for r in rows if r["artist_id"] in artists]
+        mine = [(r, site) for r, site in mine if site]
+        followed = collections.Counter(site.KIND for r, site in mine if artists[r["artist_id"]]["listed"])
+        self.sources = [_Source(r, artists[r["artist_id"]]) for r, site in mine
+                        if not (self.all and artists[r["artist_id"]]["listed"] and followed[site.KIND] > LISTED_IN_ALL)]
         for s in self.sources:
             s.spaced = self.all
             s.seed()
