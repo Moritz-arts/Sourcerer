@@ -184,7 +184,7 @@ def _creator(camp):
     return {"url": url, "name": a.get("name") or vanity, "avatar": pictures.get("thumbnail_large") or a.get("avatar_photo_url") or ""}
 
 
-def _campaigns(path, extra, pages):
+def _creators_of(path, extra, pages):
     """The creators an API list (pledges, the feed) names, once each: its `included` campaigns, page by page."""
     params = dict({"include": "campaign", "fields[campaign]": _CAMPAIGN_FIELDS, "json-api-use-default-includes": "false",
                    "json-api-version": "1.0"}, **extra)
@@ -206,11 +206,11 @@ def _read(path, queries, pages):
     """The creators of the first query Patreon takes: a 400 to one that is not the last means a filter it does not know."""
     for extra in queries[:-1]:
         try:
-            return _campaigns(path, extra, pages)
+            return _creators_of(path, extra, pages)
         except requests.HTTPError as e:
             if e.response is None or e.response.status_code != 400:
                 raise
-    return _campaigns(path, queries[-1], pages)
+    return _creators_of(path, queries[-1], pages)
 
 
 def following(key):

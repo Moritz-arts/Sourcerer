@@ -339,6 +339,7 @@ def _look(key):
     """One login's lists. Returns how many cards they made."""
     global _retry
     db.set_setting("follows_at:" + key, str(time.time()))
+    db.set_setting("follows_seen:" + key, "0")        # until a look has read accounts, the next start looks again (look())
     site, label, total, public, twins, seen = _site(key), accounts.label(key), 0, {}, _Twins(), 0
     # A list read to its end by *this* login (a new login is another account, maybe) may stop early.
     stamp = accounts.saved(key) or "-"
@@ -364,6 +365,8 @@ def _look(key):
         log.info("%s: the list of followed accounts stopped: %s", key, why)
         sync.event("warn", "%s: the list of followed accounts stopped (%s); the next look carries on" % (label, why))
     else:
+        if seen:
+            db.set_setting("follows_seen:" + key, str(seen))
         if not seen and key not in _told_empty:         # an empty list used to be silent, and "my follows are missing" left no trace
             _told_empty.add(key)
             sync.event("info", "%s: the site's list of followed accounts is empty" % label)
@@ -466,16 +469,36 @@ def rename_listed():
     return done
 
 
+_told_skipped = set()        # logins whose list waits, said once per run: a silent skip left "my follows are missing" with no trace
+
+
+def _say_skipped(only):
+    """A login that cannot be read right now says why in the log, once (an expired login, a site that rests)."""
+    for a in accounts.accounts():
+        key = a["key"]
+        if (only and key not in only) or not getattr(_site(key), "following", None) or not a["logged_in"] or key in _told_skipped:
+            continue
+        why = "its login ran out -- log in again in Manage Accounts" if a["state"] == "expired" else \
+            "the site rests for now" if net.paused(sync._site_url(key)) else ""
+        if why:
+            _told_skipped.add(key)
+            sync.event("warn", "%s: the list of followed accounts waits: %s" % (a["label"], why))
+
+
 def look(only=None):
     """Every login's followed accounts (or those of the keys in only), one login after another;
     then the cards that turn out to be one artist are combined."""
     if db.get_setting("import_follows") == "1":
         with _lock:
+            _say_skipped(only)
             for key in only or keys():
                 if net.paused(sync._site_url(key)):
                     continue
                 hours = getattr(_site(key), "FOLLOWS_HOURS", 0)      # a list that is costly to read is read less often
-                if hours and not only and time.time() - float(db.get_setting("follows_at:" + key, "0") or 0) < hours * 3600:
+                # ... but only once it has given accounts: a look that found none (an older version's, a list that failed to
+                # parse) must not hold the next one back for a day -- that was "X still shows nothing" after the fix came.
+                gap = (hours * 3600 if int(db.get_setting("follows_seen:" + key, "0") or 0) else RETRY_HOURS * 3600) if hours else 0
+                if gap and not only and time.time() - float(db.get_setting("follows_at:" + key, "0") or 0) < gap:
                     continue
                 _look(key)
     with _lock:
