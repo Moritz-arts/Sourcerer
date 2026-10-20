@@ -408,9 +408,10 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   An empty list is said once per run, and so is a login whose list waits (expired, site resting): a silent skip left "my follows are missing"
   with no trace. **A look that read no accounts does not hold the next one back** (`follows_seen:<key>`; gap `RETRY_HOURS` instead of
   `FOLLOWS_HOURS`): v0.34's silent empty look for X stamped a day and v0.35's fallback never ran.
-  **A listed card is in no automatic sweep**: `enqueue(None)` (the automatic sync, the scan at start) and "All
-  artists" (`gallery._Gallery`) skip `listed = 1`, because a thousand pixiv follows read in the
-  background are a thousand requests nobody asked for. Only **Refresh all** reaches them (`everyone`, only when the
+  **A listed card is in no automatic sweep**: `enqueue(None)` (the automatic sync, the scan at start) skips `listed = 1`, because a
+  thousand pixiv follows read in the background are a thousand requests nobody asked for. **"All artists" (`gallery._Gallery`)
+  takes the user's own cards, and the listed ones of a site only when it has at most `gallery.LISTED_IN_ALL` (20) of them** -- five
+  Patreon creators are a minute of requests, 428 pixiv follows would be an hour on a login (v0.36: "All artists" showed no Patreon). Only **Refresh all** reaches them (`everyone`, only when the
   page asked for no mode) and it only *scans* them (the newest page per source; a scan is not free: pixiv 2 requests,
   X a page of 20 counted against `BUDGETS`), **and only while the site's day has used less than half of its budget**
   (`net.scan_room`, `SCAN_SHARE`): the other half is for the cards that download, Browse and single pictures. Past
@@ -523,8 +524,9 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
 - **A XenForo forum may route only through `index.php?`** (a custom anti-DDOS guard answers the friendly
   `/forum/media/users/...` and `/login/` with a bare nginx 403, and `/forum/` with a 301): a link keeps
   the route it was pasted with (`xenforo._PATH` captures `index.php?`, `normalize` preserves it), and the
-  login window that shows a bare 403 is sent once to `base + "/index.php?login/"` (`accounts._watch`,
-  `_window_says_403`; once, so a forum that is really down is not asked in a loop). **The forum is made
+  login window **opens at `base + "/index.php?login/"`** (`accounts.XF_LOGIN`; every XenForo answers that route) and one that shows a bare
+  403 anyway is sent once to `base + "/login/"` (`accounts._watch`, `_window_says_403`, polled every 0.4 s until then; once, so a
+  forum that is really down is not asked in a loop) -- it used to open `/login/`, show the guard's 403 for seconds and only then swap. **The forum is made
   known to gallery-dl by its base**: `"xenforo:<url>"` takes only scheme and host as the forum, so a forum
   in a folder lost the folder and was listed at the wrong place (a 403 read as "members only"). The URL
   goes plain and `xenforo._options` registers `extractor.xenforo.sourcerer-<host> = {"root": base}`
