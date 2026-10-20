@@ -5,6 +5,10 @@ automatically -- one line per change, newest first. A release is drafted by hand
 from the tag of whichever version is judged ready, and this is the text to paste
 into it.
 
+## v0.36 — 2026-10-20
+
+- Patreon: opening a followed creator works again, and a follow list that read nothing is looked at again at the next start
+
 ## v0.35 — 2026-10-20
 
 - Browse: the site chips no longer overlap, source groups fold, and no warning dialogs are asked any more
