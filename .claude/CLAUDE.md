@@ -536,6 +536,15 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   (`_gdl.items(..., None, options)`; a section named `xenforo` or the host leaves every one ignored: a guest
   read, checked against gallery-dl 1.32). The "one read per site" lock is per forum host (`lock=`), not per
   section. `remote_key` (`xenforo:<host>:<id>`) does not depend on the link's form.
+  **The member of a link is in the query on a forum that routes through `index.php?`** (`index.php?media/users/name.12`): the last part of the
+  path says "index.php", which was the name of every such card, its alias and (in `handlesOf`) a handle all of them shared -- use
+  `xenforo.account_name` (name_from_url does) and mind `follows._NOT_NAMES` / `NOT_NAMES` in app.js. **A member's name and picture come from the
+  member's own page** (`members/<slug>.<id>/`: schema.org `mainEntity.name` / `image`, og:image as the fallback), not from the media page,
+  whose header shows the viewer's. **A picture's title** (the listing's alt text, `FIELDS["title"]`, no request) is `Media.name` -- the file name's
+  last resort and what a tile says; `Media.filename` stays empty (it drives `_local_names` adoption and `_from_memory`, and a title is not a
+  file name). **Everything else the forum knows of a picture** (description, who, when, size, views) is asked when the viewer opens it
+  (`xenforo.info`, `/api/gallery/info`, one request through the forum's lane, kept per gallery; a site gets this by having an `info(media)`;
+  the date it finds is put on the item): gallery-dl's `metadata` would ask for every picture of a listing page.
 - **A Misskey looks like a Mastodon in the address** (`https://misskey.io/@user`) **and answers nothing a
   Mastodon client asks** (404 on `/api/v1/...`): Baraag's follow list names such accounts, and they were
   cards that never worked. `sources/misskey.py` has the whole API (POST + JSON, also what only reads:

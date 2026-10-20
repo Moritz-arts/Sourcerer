@@ -393,6 +393,7 @@ function namesOf(a) {
 // foo.fanbox.cc -- what a display name is not (an artist known as "Mew" is @Mewnet). Numbers (pixiv's ids) and short ones
 // say nothing. (`follows.handle_key` does the same for the automatic combining, with a longer minimum.)
 var HANDLE_KINDS = ["bluesky", "mastodon", "misskey", "x", "patreon", "fanbox", "xenforo"];
+var NOT_NAMES = ["index", "user", "users", "profile", "profiles", "members", "member", "u", "c", "media", "m", "creator"];     // follows._NOT_NAMES
 function handlesOf(a) {
   var out = [];
   a.sources.forEach(function (s) {
@@ -400,10 +401,12 @@ function handlesOf(a) {
     var last = "";
     try {
       var u = new URL(s.url);
-      last = /\.fanbox\.cc$/i.test(u.hostname) ? u.hostname.split(".")[0] : decodeURIComponent(u.pathname.replace(/\/+$/, "").split("/").pop());
+      // A forum that routes through "index.php?" has the member in the query (index.php?media/users/name.12), not the path.
+      var where = s.kind === "xenforo" && u.search.indexOf("/") >= 0 ? u.search.slice(1) : u.pathname;
+      last = /\.fanbox\.cc$/i.test(u.hostname) ? u.hostname.split(".")[0] : decodeURIComponent(where.replace(/\/+$/, "").split("/").pop());
     } catch (e) { return; }
     var h = nameKey(last.replace(/^@/, "").split("@")[0].split(".")[0]);
-    if (h.length >= 3 && !/^\d+$/.test(h) && out.indexOf(h) < 0) out.push(h);
+    if (h.length >= 3 && !/^\d+$/.test(h) && NOT_NAMES.indexOf(h) < 0 && out.indexOf(h) < 0) out.push(h);
   });
   return out;
 }
@@ -1093,12 +1096,45 @@ function viewItem(i) {
   $("gal-source").innerHTML = siteLogo(it.source, it.kind, it.host) || '<b>' + esc(it.source) + "</b>";
   $("gal-source").title = it.source;
   $("gal-who").innerHTML = avatarHtml(artistById(it.artist_id) || { name: it.artist }) + "<span>" + esc(it.artist) + "</span>";
-  $("gal-info").textContent = [it.posted ? new Date(it.posted).toLocaleString() : "",
-    it.w ? it.w + " × " + it.h : "", it.fname || "", (i + 1) + " / " + G.items.length + (G.done ? "" : "+")].filter(Boolean).join(" · ");
+  galInfoLine(i);
+  galAbout(it);
   galDlState(it);
   $("gal-view").classList.remove("hidden");
   // Near the end of what is listed: the next page, before it is needed.
   if (i > G.items.length - 8) moreGallery();
+}
+
+function galInfoLine(i) {
+  var it = G.items[i];
+  $("gal-info").textContent = [it.posted ? new Date(it.posted).toLocaleString() : "",
+    it.w ? it.w + " × " + it.h : "", it.fname || "", (i + 1) + " / " + G.items.length + (G.done ? "" : "+")].filter(Boolean).join(" · ");
+}
+
+// What the site knows of the picture beyond its listing -- a forum's title, description, who and when, size, views -- asked when the
+// viewer opens it (one request; a listing page holds a title only). Quietly: the picture is what matters, a failure shows nothing.
+function galAbout(it) {
+  var box = $("gal-about");
+  box.classList.add("hidden");
+  if (!it.info) return;
+  if (it.about) return galAboutShow(it);
+  var g = G;
+  api("POST", "/api/gallery/info", { gallery: g.id, n: it.id }).then(function (d) {
+    it.about = d;
+    if (d.posted && !it.posted) it.posted = d.posted;
+    if (g === G && G.items[G.view] === it) { galInfoLine(G.view); galAboutShow(it); }
+  }).catch(function () { it.about = {}; });
+}
+function galAboutShow(it) {
+  var a = it.about || {}, bits = [];
+  if (a.author) bits.push("by " + a.author);
+  if (a.posted) bits.push(new Date(a.posted).toLocaleString());
+  if (a.width) bits.push(a.width + " × " + a.height);
+  if (a.size) bits.push(a.size);
+  ["views", "likes", "comments"].forEach(function (k) { if (a[k]) bits.push(a[k] + " " + k); });
+  var box = $("gal-about");
+  box.innerHTML = (a.title ? "<b>" + esc(a.title) + "</b>" : "") + (a.description ? "<p>" + esc(a.description) + "</p>" : "") +
+    (bits.length ? "<small>" + esc(bits.join(" · ")) + "</small>" : "");
+  box.classList.toggle("hidden", !box.innerHTML);
 }
 
 // The viewer's Download button: green "Downloaded" once the picture is in the library.
@@ -1137,6 +1173,7 @@ function step(by) {
 
 function closeView() {
   zoomReset();
+  $("gal-about").classList.add("hidden");
   $("gal-view").classList.add("hidden");
   $("gal-stage").innerHTML = "";                  // stops a video
   if (G) G.view = -1;

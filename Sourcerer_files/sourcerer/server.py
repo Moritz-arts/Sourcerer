@@ -90,6 +90,10 @@ def _display_name(name):
 
 def name_from_url(url):
     """A name when no site says one: the account part of the link."""
+    site = sources.site_for(url)
+    named = site.account_name(url) if getattr(site, "account_name", None) else ""
+    if named:                                             # a forum's member: "index.php?media/users/name.12" is not "index.php"
+        return named
     tags = (urllib.parse.parse_qs(urllib.parse.urlparse(url).query).get("tags") or [""])[0].split()
     if tags:                                              # a booru's tag search: the first tag
         return re.sub(r"_\((?:artist|cosplayer)\)$", "", tags[0]).replace("_", " ")
@@ -742,6 +746,20 @@ def gallery_older():
         return jsonify(gallery.older(gallery_id if isinstance(gallery_id, str) else ""))
     except KeyError:
         return jsonify(error="This gallery was closed; open it again."), 410
+
+
+@app.post("/api/gallery/info")
+def gallery_info():
+    """What the site knows of one picture besides its listing (a forum's title, description, date, author, views)."""
+    body = _body()
+    try:
+        return jsonify(gallery.info(body.get("gallery") if isinstance(body.get("gallery"), str) else "", int(body.get("n") or 0)))
+    except KeyError:
+        return jsonify(error="This gallery was closed; open it again."), 410
+    except (TypeError, ValueError):
+        abort(400)
+    except Exception as e:
+        return jsonify(error=net.reason(e)), 502
 
 
 @app.post("/api/gallery/state")

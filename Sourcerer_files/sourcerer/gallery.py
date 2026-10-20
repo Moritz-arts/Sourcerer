@@ -38,6 +38,7 @@ import dataclasses
 import datetime
 import hashlib
 import io
+import json
 import logging
 import os
 import queue
@@ -428,7 +429,7 @@ class _Gallery:
 
     def item(self, number):
         s, m = self.items[number]
-        d = {"id": number, "source": s.label, "kind": s.kind, "host": s.host, "src": s.row["id"], "posted": m.posted, "w": m.width,
+        d = {"id": number, "source": s.label, "kind": s.kind, "host": s.host, "src": s.row["id"], "info": bool(getattr(s.site, "info", None)), "posted": m.posted, "w": m.width,
              "h": m.height, "video": bool(m.video), "post": m.post_url, "saved": False, "fname": _fname(m),
              "key": m.remote_key,
              "artist": s.artist["name"], "artist_id": s.artist["id"]}
@@ -543,6 +544,26 @@ def _fname(m):
 def saved_changes(gallery_id):
     """See _Gallery.refresh_saved. Asks no site."""
     return _get(gallery_id).refresh_saved()
+
+
+def info(gallery_id, number):
+    """What the site knows of one picture beyond its listing (a forum's title, description, date, author, views), asked when the
+    viewer opens it -- one request through the site's own lane, kept for the gallery. {} for a site that has no such thing or
+    says nothing; a failure is an error the viewer shows quietly."""
+    g = _get(gallery_id)
+    s, m = g.items[number]
+    ask = getattr(s.site, "info", None)
+    if not ask:
+        return {}
+
+    def get():
+        with net.interactive():
+            return ask(m)
+    got = _once(gallery_id, (gallery_id, number, "info", ""), lambda: ("application/json", json.dumps(get()).encode()))
+    data = json.loads(got[1])
+    if data.get("posted") and not m.posted:
+        m.posted = data["posted"]                    # the date is known now: the viewer and the item say so
+    return data
 
 
 def progress(gallery_id):
