@@ -5,6 +5,12 @@ automatically -- one line per change, newest first. A release is drafted by hand
 from the tag of whichever version is judged ready, and this is the text to paste
 into it.
 
+## v0.34 — 2026-10-20
+
+- Refresh all scans every artist down the list, the artist list is bigger, Quick is the standard grid quality, the cookie-login gaps are 3-15 / 10-30 / 15-60 s
+- Cards are called by the artist's @name, accounts that differ only in the digits at the end of their name are combined, the names sites show stay as aliases, and X's follow list says why it failed
+- Refresh all keeps half of a login site's day for downloads, Cancel drops the queue, digit-stem joins are careful, and renaming spares cards with files
+
 ## v0.33 — 2026-10-19
 
 - Sourcerer keeps no pictures and syncs three artists at once on different sites; order and number lists cleaned up, download rings, file names, ugoira plays, taskbar stays, more follows
