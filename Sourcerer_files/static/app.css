@@ -599,3 +599,10 @@ details summary { cursor: pointer; margin: 12px 0 6px; }
   border: .5px solid var(--border); font: 12px/1.5 ui-monospace, "Cascadia Mono", Menlo, Consolas, monospace; white-space: pre-wrap; word-break: break-word; }
 .log-text .lw { color: var(--text-warning); }
 .log-text .le { color: var(--text-danger); }
+
+/* What a site says of the open picture (a forum's title, description, who and when): a caption low on the stage. */
+.gal-about { position: absolute; left: 140px; bottom: 18px; max-width: min(560px, calc(100% - 300px)); z-index: 2; padding: 8px 12px;
+  border-radius: 8px; background: rgba(0, 0, 0, .62); color: #eee; font-size: 13px; line-height: 1.4; pointer-events: none; }
+.gal-about b { display: block; font-weight: 600; }
+.gal-about p { margin: 2px 0 0; max-height: 4.2em; overflow: hidden; white-space: pre-wrap; }
+.gal-about small { display: block; margin-top: 3px; color: #b9b8b0; font-size: 12px; }

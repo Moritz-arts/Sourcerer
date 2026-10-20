@@ -304,6 +304,10 @@ add the one that replaced it.
   route directly now. "Mastodon" / "XenForo" said nothing about which site: the lists, chips and tiles use the server's, forum's or
   booru's own name and pull its icon (memory only). The logs: a viewer (Activity > Log files), a README in the folder, the console log
   holds only warnings and crashes, every start opens a block.
+- 2026-10-20 — **XenForo: names, profile picture and picture information.** A forum routing through `index.php?` made every card
+  "index.php"; the member is read from the query now, and the name and picture come from the member's own page. A picture
+  wears the title from the listing, and the viewer asks the forum for its description, author, date, size and views (one request, when
+  opened -- not one per picture of a listing).
 
 ## Done
 
