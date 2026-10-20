@@ -138,6 +138,10 @@ input[type=range] { accent-color: var(--fill-accent); cursor: pointer; }
 .br-list > .br-group:first-child, .br-list > .br-item.all + .br-group { padding-top: 4px; }
 .br-group::after { content: ""; flex: 1; height: 1px; background: var(--border-strong); }
 .br-group .ic.logo { width: 14px; height: 14px; }
+.br-group.fold { cursor: pointer; user-select: none; }
+.br-group.fold:hover { color: var(--text-primary); }
+.br-group .fold-ic { width: 14px; height: 14px; flex: none; margin-right: -2px; transition: transform .12s; }
+.br-group[aria-expanded="true"] .fold-ic { transform: rotate(90deg); }
 .br-group .num { font-weight: 400; color: var(--text-muted); }
 .br-n { min-width: 24px; text-align: right; font-size: 12px; color: var(--text-muted); }
 .br-item.selected .br-n { color: inherit; opacity: .8; }
@@ -170,11 +174,13 @@ input[type=range] { accent-color: var(--fill-accent); cursor: pointer; }
 #br-auto.on .track::after { transform: translateX(12px); }
 #br-auto.on .ic { color: var(--dot-ok); }
 @media (max-width: 800px) { .br-side { width: 160px; } .br-order { flex-direction: column; } #br-sort { flex: none; } #version { display: none; } }
-.gal-sources { display: flex; flex-wrap: wrap; flex: 1 1 140px; gap: 8px; margin-left: 6px; min-width: 0; }
+.gal-sources { display: flex; flex-wrap: wrap; flex: 1 1 140px; gap: 4px; margin-left: 6px; min-width: 0; }
 .chip { font-size: 12px; font-weight: 400; padding: 2px 10px; border-radius: 12px; display: inline-flex; align-items: center; gap: 6px; }
 /* A site that is switched off is grey and faint, one that is on is in colour: the head says at a glance what is shown. */
 .chip.off { opacity: .4; filter: grayscale(1); }
-.chip.logo { padding: 7px 9px; margin-right: 0; border-color: transparent; border-radius: 14px; }
+/* `.logo` (the 24 px brand mark) also matched this class: the chip was 24 px wide, its content spilled over the next chip and the
+   grey backgrounds of neighbours overlapped. A chip is as big as its mark and padding. */
+.chip.logo { width: auto; height: auto; padding: 6px 8px; margin-right: 0; border-color: transparent; border-radius: 14px; }
 .gal-sources .chip.logo:not(.off) { background: var(--surface-2); }
 .gal-sources .mark, .gal-sources .ic.logo { width: 22px; height: 22px; }
 .chip.logo:hover:not(:disabled), .chip.logo:active:not(:disabled) { background: transparent; border-color: transparent; transform: none; }
