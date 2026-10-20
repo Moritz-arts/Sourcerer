@@ -289,6 +289,14 @@ add the one that replaced it.
   not return. *Merge into...* (menu, `M`) moves a card's sources and files to another. X and Patreon
   are not in yet: X's follows need gallery-dl and the account's handle (and X locks accounts),
   Patreon's are memberships.
+- 2026-10-20 — **No warning boxes, X and Patreon follows from the feeds, Browse's groups fold.** The user:
+  the Log out / Delete / Quit / repair questions (`confirm()`) are unwanted -- *no* such box anywhere
+  (Reset keeps its typed word: it wipes everything). The head's site chips overlapped (the `.logo` class of
+  the brand mark made them 24 px wide). The artist list ordered by source folds and opens under each site's head.
+  X's and Patreon's follows were still missing: X falls back to the Following timeline (`https://x.com/home`) when
+  its full list does not come, Patreon reads memberships and the feed (`https://www.patreon.com/feed`); both
+  say in the activity log what they took and why. Written from the sites' own requests, **not yet seen against a
+  real X / Patreon login** -- the log line after the next look says what happened.
 
 ## Done
 
@@ -357,7 +365,7 @@ add the one that replaced it.
       green chips, "N new posts"); Squares / Full picture layout; previews for cards
       with login sources without a sync first
 
-- [x] Follows import: Bluesky, Mastodon and pixiv follows become listed cards after a login;
+- [x] Follows import: Bluesky, Mastodon, Misskey, pixiv, Fanbox, Fantia, X and Patreon follows become listed cards after a login;
       Merge into... for accounts the sites did not show to be one artist
 - [x] Refresh one artist at a time, the opened artist first; only auto-download cards in sweeps; token logins
       (Bluesky, Mastodon, Misskey, boorus) no longer spaced like cookie logins; a cookie-login gap setting

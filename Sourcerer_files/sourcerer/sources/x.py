@@ -85,42 +85,90 @@ def _run(fn, *args):
 
 
 FOLLOW_TIMEOUT = 900     # seconds: a list of thousands, one request per hundred with gallery-dl's gaps
+HOME_FILES = 300         # the Following timeline is read as far as this many media files: who posted lately, not the whole list
+
+
+def _picture(url):
+    return "" if not url or "default_profile" in url else url.replace("_normal.", "_400x400.")
+
+
+def _followed(messages):
+    """The accounts of gallery-dl's list of followed users (messages of type 6, one user each)."""
+    out = []
+    for m in messages:
+        user = m[-1] if m and m[0] == 6 and isinstance(m[-1], dict) else None
+        if not user:
+            continue
+        legacy = user.get("legacy") if isinstance(user.get("legacy"), dict) else {}
+        core = user.get("core") if isinstance(user.get("core"), dict) else {}
+        name = core.get("screen_name") or legacy.get("screen_name") or user.get("screen_name") or user.get("name")
+        if not name or not _URL.match("https://x.com/%s" % name):
+            continue
+        out.append({"url": "https://x.com/%s" % name,
+                    "name": core.get("name") or legacy.get("name") or user.get("nick") or name,
+                    "avatar": _picture((user.get("avatar") or {}).get("image_url") or legacy.get("profile_image_url_https") or
+                                       user.get("profile_image") or "")})
+    return out
+
+
+def _authors(messages, me):
+    """The accounts that posted the files of a timeline (type 2 and 3 messages say whose tweet it is), once each."""
+    out, seen = [], set()
+    for m in messages:
+        meta = m[-1] if m and m[0] in (2, 3) and isinstance(m[-1], dict) else {}
+        user = meta.get("author") if isinstance(meta.get("author"), dict) else meta.get("user")
+        if not isinstance(user, dict):
+            continue
+        name = user.get("name")
+        if not name or name.lower() in seen or str(user.get("id")) == me or not _URL.match("https://x.com/%s" % name):
+            continue
+        seen.add(name.lower())
+        out.append({"url": "https://x.com/%s" % name, "name": user.get("nick") or name,
+                    "avatar": _picture(user.get("profile_image") or "")})
+    return out
 
 
 def following(key):
-    """(list name, pages) of the accounts the login follows: [{"url", "name", "avatar"}], newest follow first. The
-    account is told by the login's own `twid` cookie, which gallery-dl takes as `id:<number>` in place of a name.
-    gallery-dl prints the whole list at the end (-j), so it is read in one go -- once a day at most (follows.HOURS)."""
+    """(list name, pages[, note]) of the accounts the login follows: [{"url", "name", "avatar"}], newest follow first.
+    The whole list is gallery-dl's `/id:<number>/following` (the number is the login's own `twid` cookie), printed at the
+    end (-j) -- one go, once a day at most (follows.HOURS). When that does not come -- no twid in the saved login, X
+    changed the endpoint, an empty answer -- the accounts of the Following timeline (https://x.com/home, what the
+    page shows after the login) are taken instead: only those that posted media lately, but never nothing, and the
+    note says why the full list is missing."""
+    from . import LoginRequired
     twid = accounts.jar("x").get("twid") or ""
     me = re.sub(r"\D", "", twid.rpartition("%3D")[2] or twid.rpartition("=")[2])
-    # Said, not skipped: a list that silently never came was a month of "my X follows are missing".
-    if not me:
-        raise RuntimeError("the saved login has no twid cookie, so X's own account is unknown -- log in to X again in Manage Accounts")
     if not _gdl.available():
         raise RuntimeError("X's list needs gallery-dl, which did not install: Settings > Repair")
-
-    def pages():
-        net._stopped("https://x.com")
-        messages = _run(_gdl.info, "https://x.com/id:%s/following" % me, "twitter", _options(), FOLLOW_TIMEOUT)
-        net.spend("https://x.com", max(1, len(messages) // 50))
-        out = []
-        for m in messages:
-            user = m[-1] if m and m[0] == 6 and isinstance(m[-1], dict) else None
-            if not user:
-                continue
-            legacy = user.get("legacy") if isinstance(user.get("legacy"), dict) else {}
-            core = user.get("core") if isinstance(user.get("core"), dict) else {}
-            name = core.get("screen_name") or legacy.get("screen_name") or user.get("screen_name") or user.get("name")
-            if not name or not _URL.match("https://x.com/%s" % name):
-                continue
-            picture = ((user.get("avatar") or {}).get("image_url") or legacy.get("profile_image_url_https") or
-                       user.get("profile_image") or "")
-            out.append({"url": "https://x.com/%s" % name,
-                        "name": core.get("name") or legacy.get("name") or user.get("nick") or name,
-                        "avatar": "" if "default_profile" in picture else picture.replace("_normal.", "_400x400.")})
-        for i in range(0, len(out), 100):
-            yield out[i:i + 100]
-    yield "", pages()
+    problem = ""
+    net._stopped("https://x.com")
+    if me:
+        try:
+            messages = _run(_gdl.info, "https://x.com/id:%s/following" % me, "twitter", _options(), FOLLOW_TIMEOUT)
+            net.spend("https://x.com", max(1, len(messages) // 50))
+            out = _followed(messages)
+            problem = "" if out else "X's list of followed accounts came back empty"
+        except (net.SlowDown, LoginRequired):
+            raise
+        except Exception as e:
+            out, problem = [], net.reason(e)
+    else:
+        out, problem = [], "the saved login has no twid cookie, so X's own account is unknown"
+    note = ""
+    if not out:
+        try:
+            net._stopped("https://x.com")
+            messages = _run(_gdl.info, "https://x.com/home", "twitter", dict(_options(), **{"file-range": "1-%d" % HOME_FILES}), FOLLOW_TIMEOUT)
+            net.spend("https://x.com", max(1, len(messages) // 50))
+            out = _authors(messages, me)
+        except (net.SlowDown, LoginRequired):
+            raise
+        except Exception as e:
+            raise RuntimeError("%s; the Following timeline did not work either: %s" % (problem, net.reason(e))) from e
+        if not out:
+            raise RuntimeError("%s; the Following timeline showed no account" % problem)
+        note = "%s -- the %d accounts of the Following timeline were taken instead (log in to X again if the full list should come)" % (problem, len(out))
+    yield "home" if note else "", [out[i:i + 100] for i in range(0, len(out), 100)], note
 
 
 def profile(url):

@@ -42,6 +42,7 @@ RETRY_HOURS = 4              # a costly list that failed is looked at again afte
 _retry = False               # a look of the last round failed
 _bumped = 0.0
 _lock = threading.Lock()     # one look at a time
+_told_empty = set()           # logins whose empty list was said once, this run
 
 
 def _touch(force=False):
@@ -338,13 +339,16 @@ def _look(key):
     """One login's lists. Returns how many cards they made."""
     global _retry
     db.set_setting("follows_at:" + key, str(time.time()))
-    site, label, total, public, twins = _site(key), accounts.label(key), 0, {}, _Twins()
+    site, label, total, public, twins, seen = _site(key), accounts.label(key), 0, {}, _Twins(), 0
     # A list read to its end by *this* login (a new login is another account, maybe) may stop early.
     stamp = accounts.saved(key) or "-"
     try:
-        for name, pages in site.following(key):
+        for name, pages, *note in site.following(key):
+            if note and note[0]:                      # the site's own list did not come: what was taken instead, and why
+                sync.event("warn", "%s: %s" % (label, note[0]))
             done = "follows_read:%s:%s" % (key, name)
             for page in pages:
+                seen += len(page)
                 made, all_known = _add(page, site.KIND, public, twins)
                 total += made
                 if all_known and db.get_setting(done, "") == stamp:
@@ -359,6 +363,10 @@ def _look(key):
             db.set_setting("follows_at:" + key, str(time.time() - max(0, hours - RETRY_HOURS) * 3600))
         log.info("%s: the list of followed accounts stopped: %s", key, why)
         sync.event("warn", "%s: the list of followed accounts stopped (%s); the next look carries on" % (label, why))
+    else:
+        if not seen and key not in _told_empty:         # an empty list used to be silent, and "my follows are missing" left no trace
+            _told_empty.add(key)
+            sync.event("info", "%s: the site's list of followed accounts is empty" % label)
     if total or twins.attached:
         _touch(True)
         sync.event("info", "%s: %d followed account%s added to the list%s" % (

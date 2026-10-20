@@ -38,6 +38,8 @@ _campaigns = {}      # url -> (when, campaign): the profile and the pages of one
 CAMPAIGN_SECONDS = 600
 MAX_NEW = 500            # a patron's years of posts come over several syncs
 LOGIN = ("recommended", "Logged out, only public posts come; a patron's posts need the login.")
+FOLLOWS_HOURS = 11       # follows.py reads the creators the login follows at most this often
+FEED_PAGES = 15          # the feed is read this far at most (20 posts a page): who posted lately, not a list
 
 
 def _parse(url):
@@ -169,6 +171,73 @@ def pages(url):
         cursor = (((doc.get("meta") or {}).get("pagination") or {}).get("cursors") or {}).get("next")
         if not cursor or not doc.get("data"):
             return
+
+
+def _creator(camp):
+    """{"url", "name", "avatar"} of a campaign object (a creator's page), or None."""
+    a = camp.get("attributes") or {}
+    vanity = (a.get("vanity") or "").strip()
+    url = SITE + vanity.lower() if re.fullmatch(r"[\w.-]+", vanity) else (a.get("url") or "") or SITE + "m/" + str(camp.get("id"))
+    if not match(url):
+        return None
+    pictures = a.get("avatar_photo_image_urls") or {}
+    return {"url": url, "name": a.get("name") or vanity, "avatar": pictures.get("thumbnail_large") or a.get("avatar_photo_url") or ""}
+
+
+def _campaigns(path, extra, pages):
+    """The creators an API list (pledges, the feed) names, once each: its `included` campaigns, page by page."""
+    params = dict({"include": "campaign", "fields[campaign]": _CAMPAIGN_FIELDS, "json-api-use-default-includes": "false",
+                   "json-api-version": "1.0"}, **extra)
+    out, seen, cursor = [], set(), None
+    for _ in range(pages):
+        doc = net.get_json(API + path, dict(params, **({"page[cursor]": cursor} if cursor else {})))
+        for camp in doc.get("included") or []:
+            creator = camp.get("type") == "campaign" and camp.get("id") not in seen and _creator(camp)
+            if creator:
+                seen.add(camp["id"])
+                out.append(creator)
+        cursor = (((doc.get("meta") or {}).get("pagination") or {}).get("cursors") or {}).get("next")
+        if not cursor or not doc.get("data"):
+            break
+    return out
+
+
+def _read(path, queries, pages):
+    """The creators of the first query Patreon takes: a 400 to one that is not the last means a filter it does not know."""
+    for extra in queries[:-1]:
+        try:
+            return _campaigns(path, extra, pages)
+        except requests.HTTPError as e:
+            if e.response is None or e.response.status_code != 400:
+                raise
+    return _campaigns(path, queries[-1], pages)
+
+
+def following(key):
+    """(list name, pages[, note]) of the creators the login follows: the memberships (`/api/pledges`), and the creators of
+    the feed (`/api/stream`, what https://www.patreon.com/feed shows: those that posted lately). Patreon publishes no list
+    of followed creators; these two are what its own page asks for. Written from the page's requests, not run against a real
+    login -- so each is tried alone, what one of them lacks is said (note), and only when both fail is that an error."""
+    from . import LoginRequired
+    problems, found, seen = [], [], set()
+    feed = {"fields[post]": "published_at", "page[count]": 20}
+    for name, path, queries, pages in (("memberships", "pledges", ({"page[count]": 100},), 10),
+                                       ("feed", "stream", (dict(feed, **{"filter[is_following]": "true"}), feed), FEED_PAGES)):
+        try:
+            creators = _read(path, queries, pages)
+        except (net.SlowDown, LoginRequired):
+            raise
+        except Exception as e:
+            problems.append((name, net.reason(e)))
+            continue
+        creators = [c for c in creators if c["url"] not in seen]
+        seen.update(c["url"] for c in creators)
+        found.append((name, [creators[i:i + 100] for i in range(0, len(creators), 100)]))
+    if not found:
+        raise RuntimeError("; ".join("%s: %s" % p for p in problems))
+    note = "; ".join("Patreon's %s could not be read (%s)" % p for p in problems)
+    for i, (name, pages) in enumerate(found):
+        yield name, pages, note if not i else ""
 
 
 def still_logged_in(key):

@@ -400,7 +400,11 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   minimum between two looks, X 23 h, Fanbox/Fantia 11 h -- keeps it to once a day; **written from gallery-dl's source, not run
   against a real X login**) hand out pages of `{url, name, avatar}`
   through `following(key)` -- it yields `(list name, pages)` -- and each account becomes a card once.
-  Patreon has no list of memberships to read yet.
+  **X** falls back to the Following timeline (`https://x.com/home`, gallery-dl `file-range` 1-300: who posted media lately) when its
+  full list does not come (no `twid` in the saved login, an empty or failed answer) and says why in the log; **Patreon** reads its
+  memberships (`/api/pledges`) and the feed (`/api/stream`, `https://www.patreon.com/feed`; a 400 to `filter[is_following]` is
+  retried without it) -- each alone, the other's failure is a note. `following` may yield `(name, pages, note)`: the note is
+  logged as a warning. Both **written from what the sites' pages ask, never run against a real login**; an empty list is said once per run.
   **A listed card is in no automatic sweep**: `enqueue(None)` (the automatic sync, the scan at start) and "All
   artists" (`gallery._Gallery`) skip `listed = 1`, because a thousand pixiv follows read in the
   background are a thousand requests nobody asked for. Only **Refresh all** reaches them (`everyone`, only when the
@@ -621,9 +625,16 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   are Simple Icons (CC0, symbols `l-<site>` in the sprite; `SITE_LOGOS` in `app.js` maps a
   source's `LABEL` to one, a site without one shows its name). The forum and the booru draw a
   Tabler icon in their own colour. A new site adds its symbol there.
+- **No warning boxes** (the user's rule, 2026-10-20): never `confirm()`, `alert()` or `prompt()` -- Log out, Delete card, Quit and the
+  repairs act at once. A destructive thing is undone by a way back (backups, Login files), not by a question. Reset's typed word is
+  the one exception, and it is a dialog of the page's own.
+- **A class named `logo` is the 24 px brand mark** (`.logo`): a chip given it (`.chip.logo`) was 24 px wide, its mark spilled over
+  the next chip and the grey backgrounds overlapped -- `.chip.logo` sets `width: auto`. Look at the head with several sites after
+  touching those rules (a test page and Playwright's `chromium-1194` are enough).
 - **Browse's list** (`renderBrowseList`): the order (*Alphabetic | Latest activity | Favorites | Source*; the logo
   is part of Source's group heads) and the number beside a name (*Sources | Images | Downloads | Downloads (%)*, the
-  second choice) are kept in localStorage; the numbers are never an order (the user's wish: two clean lists).
+  second choice) are kept in localStorage; the numbers are never an order (the user's wish: two clean lists). **A group head folds its artists** (Source's sites, Favorites / Others; chevron,
+  `data-grp`, kept in localStorage `sourcerer.browse.folded`; a search shows everything it finds, folded or not).
   **Latest activity** is `activityKey`: the newest post a look saw (`sources.latest`, set by
   `snapshots.save` from the posts' dates), else the last download or look; a card with nothing known goes
   last -- its `created` is the day it was imported, and as a sort key it put every imported follow first.
