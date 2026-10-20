@@ -34,7 +34,8 @@ DEDUPES = ("keep_all", "best", "master")
 CHOICES = {"filenames": ("original", "dated"), "theme": ("system", "light", "dark"),
            "auto_sync": ("0", "1"), "import_follows": ("0", "1"), "channel": ("stable", "beta"),
            "tile_logo": ("0", "1"), "scan_on_start": ("0", "1"), "grid_quality": ("best", "fast"),
-           "login_gap": ("careful", "normal", "fast")}
+           "login_gap": ("careful", "normal", "fast"),
+           "browse_window": ("0", "7", "14", "30", "90")}
 RANGES = {"card_size": (160, 800), "auto_hours": (1, 168), "parallel": (1, 64),
           "per_host": (1, 32), "pace_ms": (0, 5000)}
 
@@ -527,6 +528,76 @@ def avatar(artist_id):
     return resp
 
 
+_icons = collections.OrderedDict()       # host -> the site's icon as PNG: memory only, as the profile pictures are
+_icon_failed = {}                        # host -> when the site gave none: not asked again for an hour
+_icon_hosts = [0.0, set()]               # the hosts of the cards' sources, looked up at most once a minute
+ICONS_KEPT = 300
+_ICON_LINK = re.compile(r"<link\b[^>]*\brel=[\"'](?:shortcut )?icon[\"'][^>]*>", re.I)
+_HREF = re.compile(r"\bhref=[\"']([^\"']+)[\"']", re.I)
+
+
+def _site_icon_from(host):
+    """The icon of https://host: /favicon.ico, else the one its front page links. Only a public https address. None when the
+    site has none (said once, at the end: a missing favicon.ico is the usual case where the page names its icon)."""
+    tries, why = ["https://%s/favicon.ico" % host], ""
+    for attempt in range(2):
+        for url in tries:
+            if not net.public_https(url):
+                continue
+            try:
+                ctype, raw = net.fetch_picture(url, limit=1 << 20)
+                return imaging.site_icon(io.BytesIO(raw))
+            except Exception as e:
+                why = net.reason(e)
+        if attempt:
+            break
+        try:                           # the page names its icon (a PNG, a sized one) when favicon.ico is not there
+            page = net.fetch_bytes("https://%s/" % host, limit=300 << 10).decode("utf-8", "replace")
+            link = _ICON_LINK.search(page)
+            href = _HREF.search(link.group(0)) if link else None
+            tries = [urllib.parse.urljoin("https://%s/" % host, href.group(1))] if href else []
+        except Exception as e:
+            why, tries = net.reason(e), []
+        tries = [u for u in tries if urllib.parse.urlsplit(u).scheme == "https"]
+    log.info("no icon for %s (%s): its mark stands in", host, why or "none named")
+    return None
+
+
+@app.get("/api/site-icon/<host>")
+def site_icon(host):
+    """The icon of a site that has a source (a Mastodon server, a forum, a booru), for the lists and chips that name it. Only
+    hosts of existing sources: a page cannot make Sourcerer fetch anywhere else. Memory only; the page falls back to the
+    software's own mark (siteLogo)."""
+    host = host.lower()
+    if not re.fullmatch(r"[a-z0-9-]+(\.[a-z0-9-]+)+", host):
+        abort(404)
+    now = time.monotonic()
+    if now - _icon_hosts[0] > 60:
+        with db.connect() as con:
+            _icon_hosts[1] = {sources._host(r[0]) for r in con.execute("SELECT url FROM sources")}
+        _icon_hosts[0] = now
+    if host not in _icon_hosts[1]:
+        abort(404)
+    with _avatar_lock:
+        data = _icons.get(host)
+        if data is not None:
+            _icons.move_to_end(host)
+    if data is None:
+        if now - _icon_failed.get(host, -1e9) < 3600:
+            abort(404)
+        data = _site_icon_from(host)
+        if data is None:
+            _icon_failed[host] = now
+            abort(404)
+        with _avatar_lock:
+            _icons[host] = data
+            while len(_icons) > ICONS_KEPT:
+                _icons.popitem(last=False)
+    resp = app.response_class(data, mimetype="image/png")
+    resp.cache_control.max_age = 86400
+    return resp
+
+
 # ---- syncing -------------------------------------------------------------------
 
 @app.post("/api/sync")
@@ -660,6 +731,15 @@ def gallery_more():
     body = request.get_json(force=True) or {}
     try:
         return jsonify(gallery.more(body.get("gallery") or "", body.get("n") or gallery.PAGE))
+    except KeyError:
+        return jsonify(error="This gallery was closed; open it again."), 410
+
+
+@app.post("/api/gallery/older")
+def gallery_older():
+    gallery_id = _body().get("gallery")
+    try:
+        return jsonify(gallery.older(gallery_id if isinstance(gallery_id, str) else ""))
     except KeyError:
         return jsonify(error="This gallery was closed; open it again."), 410
 
@@ -883,6 +963,53 @@ def open_path():
     except OSError:                       # no file manager (a bare Linux): say where the folder is
         return jsonify(error="No file manager found. The folder is: %s" % path), 501
     return jsonify(ok=True)
+
+
+_STAMPED = re.compile(r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d")
+_PROBLEM = re.compile(r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d(?:,\d+)? (?:WARNING|ERROR|CRITICAL)\b")
+LOG_VIEW_LINES = 600
+
+
+@app.get("/api/logs")
+def logs():
+    """The log files that exist, with what each one is for (config.LOG_FILES), for the log viewer."""
+    out = []
+    for name, title, about in config.LOG_FILES:
+        try:
+            st = (config.LOG_DIR / name).stat()
+        except OSError:
+            continue
+        out.append({"name": name, "title": title, "about": about, "size": st.st_size, "modified": int(st.st_mtime)})
+    return jsonify(files=out, folder=str(config.LOG_DIR))
+
+
+@app.get("/api/logs/<name>")
+def log_file(name):
+    """The end of one log file: the last LOG_VIEW_LINES lines, or of those matching ?q= (any case); ?problems=1 keeps the
+    warnings and errors, each with the lines after it that belong to it (a traceback)."""
+    if name not in [f[0] for f in config.LOG_FILES]:
+        abort(404)
+    try:
+        with open(config.LOG_DIR / name, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            f.seek(max(0, f.tell() - (2 << 20)))                 # the last 2 MB are plenty for 600 lines
+            lines = f.read().decode("utf-8", "replace").splitlines()
+    except OSError:
+        return jsonify(lines=[], total=0)
+    problems, q = request.args.get("problems") == "1", (request.args.get("q") or "").strip().lower()
+    if problems:
+        keep, kept = False, []
+        for line in lines:
+            if _STAMPED.match(line):
+                keep = bool(_PROBLEM.match(line))
+            elif name == "console.log" and line.strip() and not line.startswith(" "):
+                keep = keep or "Traceback" in line or "Error" in line
+            if keep:
+                kept.append(line)
+        lines = kept
+    if q:
+        lines = [l for l in lines if q in l.lower()]
+    return jsonify(lines=lines[-LOG_VIEW_LINES:], total=len(lines))
 
 
 @app.get("/api/info")

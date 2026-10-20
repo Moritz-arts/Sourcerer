@@ -297,10 +297,13 @@ add the one that replaced it.
   its full list does not come, Patreon reads memberships and the feed (`https://www.patreon.com/feed`); both
   say in the activity log what they took and why. Written from the sites' own requests, **not yet seen against a
   real X / Patreon login** -- the log line after the next look says what happened.
-- 2026-10-20 — **All artists shows a site's followed accounts when it has few, and the forum login opens at once.** The user
-  (v0.36): Patreon's five creators were not in All artists (listed cards are left out of it). A site with at most 20 listed
-  accounts is read there now; hundreds (pixiv) stay out. A XenForo login window opened `/login/`, showed the guard's 403 for
-  seconds and only then went to `index.php?login/`; it opens the second route directly now.
+- 2026-10-20 — **All artists is all artists, with a time window; sites are named; the logs are explained.** The user (v0.36): Patreon's
+  creators were missing in All artists, which left the followed (listed) cards out -- all cards are in it now, and to spare the sites it
+  reaches back one week first (Settings: 2 weeks / month / 3 months / everything), with *Load older posts* at the end of the grid. A
+  XenForo login window opened `/login/`, showed the guard's 403 for seconds and only then `index.php?login/`; it opens the second
+  route directly now. "Mastodon" / "XenForo" said nothing about which site: the lists, chips and tiles use the server's, forum's or
+  booru's own name and pull its icon (memory only). The logs: a viewer (Activity > Log files), a README in the folder, the console log
+  holds only warnings and crashes, every start opens a block.
 
 ## Done
 

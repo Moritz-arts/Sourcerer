@@ -15,6 +15,7 @@ import json
 import logging
 import logging.handlers
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -32,20 +33,43 @@ RUNNING = config.USERDATA / "running.json"
 IDLE_MINUTES = 15
 
 
+class _Short(logging.Formatter):
+    """`2026-10-20 18:30:01 WARNING follows | X: ...` -- the module without its package, the level one word wide."""
+    def format(self, record):
+        record.short = record.name.replace("sourcerer.sources.", "").replace("sourcerer.", "")
+        return super().format(record)
+
+
 def _logging():
     config.LOG_DIR.mkdir(parents=True, exist_ok=True)
-    fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
     file = logging.handlers.RotatingFileHandler(
         config.LOG_DIR / "sourcerer.log", maxBytes=1 << 20, backupCount=3, encoding="utf-8")
-    file.setFormatter(fmt)
+    file.setFormatter(_Short("%(asctime)s %(levelname)-7s %(short)s | %(message)s"))
+    # stderr is Logs/console.log when Sourcerer runs without a console: only what needs a look is written there (the rest
+    # is the program log, and a second copy of it made the two files read alike). A console somebody watches gets it all.
     console = logging.StreamHandler()
     console.setFormatter(logging.Formatter("  %(message)s"))
+    console.setLevel(logging.INFO if sys.stderr is not None and sys.stderr.isatty() else logging.WARNING)
     root = logging.getLogger()
     root.setLevel(logging.INFO)
     root.addHandler(file)
     root.addHandler(console)
     # One line per request drowns everything else; errors still get through.
     logging.getLogger("werkzeug").setLevel(logging.WARNING)
+    # Every start opens a block in both files, so a line is found under the start it belongs to.
+    head = "Sourcerer v%s started: %s, Python %s%s" % (config.VERSION, platform.platform(), platform.python_version(),
+                                                      ", standalone build" if config.FROZEN else "")
+    logging.getLogger("sourcerer").info("=== %s ===", head)
+    if sys.stderr is not None and not sys.stderr.isatty():
+        print("\n=== %s ===\n(This file is the program's raw output: warnings and crashes. What Sourcerer did, with the time, "
+              "is in sourcerer.log.)" % head, file=sys.stderr, flush=True)
+    try:        # which file holds what, where somebody looks for it
+        (config.LOG_DIR / "README.txt").write_text(
+            "Sourcerer's log files\n\n" + "\n\n".join("%s -- %s\n%s" % (name, title, about) for name, title, about in config.LOG_FILES) +
+            "\n\nSourcerer shows them too: Activity > Log files.\nA line starts with its time; WARNING and ERROR are the ones to look at.\n",
+            encoding="utf-8")
+    except OSError:
+        pass
 
 
 def _after_update():

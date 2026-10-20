@@ -39,6 +39,17 @@ else:
     USERDATA = ROOT / "Userdata"
 DB_PATH = USERDATA / "sourcerer.db"
 LOG_DIR = USERDATA / "Logs"
+# The log files, in the order to look in: (file, title, what is in it and when to look there). Shown by the log viewer and
+# written into Logs/README.txt, so the one who looks knows which file holds what.
+LOG_FILES = (
+    ("sourcerer.log", "Program log", "What Sourcerer did, with the time: syncs, followed accounts, logins, sites that rest, errors. "
+     "Look here first; Problems shows only the warnings and errors."),
+    ("console.log", "Console", "What the program printed by itself, and its crashes (tracebacks): a start that fails, a window that "
+     "closes alone. Little else; the story is in the program log."),
+    ("update.log", "Updates", "Every step of the last updates, written by the update helper. Look here when an update did not happen."),
+    ("setup.log", "Installer", "The Windows installer's own log of the last update by Sourcerer-Setup.exe (technical). Only when "
+     "that update failed."),
+)
 # Sourcerer keeps no pictures of its own. These two folders were made by v0.32 and older (profile pictures, small copies
 # of the newest posts); db.init removes them, and security.wipe still names them.
 AVATARS = USERDATA / "Avatars"
@@ -64,6 +75,7 @@ DEFAULTS = {
     "theme": "system",          # 'system', 'light', 'dark'
     "grid_quality": "fast",     # 'fast': the sites' small pictures in the grid (a wide tile is sharpened); 'best': the largest rendition below the original, always
     "tile_logo": "1",           # '0': no site mark on the pictures of the gallery
+    "browse_window": "7",       # All artists reaches back this many days first ('0': everything); "Load older" goes on (gallery.py)
     "login_gap": "normal",     # the pause between two artists on a site where a login can get banned: 'careful', 'normal', 'fast'
     "scan_on_start": "1",       # '1': every start looks for new posts of every card, as Refresh does
     "auto_sync": "0",           # '1': sync every card on its own

@@ -152,15 +152,33 @@ def normalize(url):
     return url
 
 
+MANY = ("mastodon", "misskey", "xenforo", "booru")    # kinds that are many sites: each is told by its own name and icon
+
+
+def site_name(url):
+    """The website's own name. Mastodon, Misskey, XenForo and the boorus are software that many sites run: "Mastodon" says
+    nothing about which server, so a card's account is under the server (baraag.net), the forum's host or the booru's name.
+    The other kinds are one site each: their LABEL."""
+    site = site_for(url)
+    if not site:
+        return describe(url)["label"]
+    if site.KIND == "booru":
+        from . import booru
+        return booru.BOORUS.get(_host(url), (None, _host(url)))[1]
+    return _host(url) or site.LABEL if site.KIND in MANY else site.LABEL
+
+
 def describe(url):
-    """kind, label and whether Sourcerer can download from it yet."""
+    """kind, label (the software or site: what the login and the card dialog go by), site (the website's own name, see
+    site_name), host, and whether Sourcerer can download from it yet."""
     site = site_for(url)
     if site:
-        return {"kind": site.KIND, "label": site.LABEL, "supported": True}
+        return {"kind": site.KIND, "label": site.LABEL, "supported": True, "site": site_name(url), "host": _host(url)}
     name = _known(url)
     if not name and ("/media/users/" in url or "/members/" in url):
         name = "XenForo"                       # its media gallery and member pages
-    return {"kind": "unsupported", "label": name or _host(url) or url, "supported": False}
+    label = name or _host(url) or url
+    return {"kind": "unsupported", "label": label, "supported": False, "site": label, "host": _host(url)}
 
 
 _TEXT_URL = re.compile(r"https?://[^\s\"'<>)\]]+", re.I)
