@@ -41,7 +41,9 @@ version = 0                  # counts the changes the page should reload for (ca
 RETRY_HOURS = 4              # a costly list that failed is looked at again after this, not at the next ten to fourteen hours
 _retry = False               # a look of the last round failed
 _bumped = 0.0
-_lock = threading.Lock()     # one look at a time
+_lock = threading.Lock()     # combining the cards: one at a time
+_adding = threading.Lock()   # cards made from a page: one page at a time (the lists themselves are read side by side)
+_reading = {}                # a login's list is read once at a time: key -> lock
 _told_empty = set()           # logins whose empty list was said once, this run
 
 
@@ -224,9 +226,11 @@ class _Twins:
         return [i for i in sorted(ids) if i not in skip and not (self.kinds[i] & kinds)]
 
     def pick(self, ids):
-        """The one card out of ids: a card the user made beats a listed one, and two of those make it unclear: None."""
+        """The one card out of ids: a card the user made beats a listed one, and two of either make it unclear: None
+        (an automatic join cannot be undone, so the lowest id is not a reason: three 'Mochi' are three artists)."""
         mine = [i for i in ids if not self.listed[i]]
-        return (mine[0] if len(mine) == 1 else None) if mine else (ids[0] if ids else None)
+        pool = mine or list(ids)
+        return pool[0] if len(pool) == 1 else None
 
     def by_stem(self, url, name, kinds, skip=(), below=None):
         """The listed cards an account joins by its name without the digits -- the weakest evidence there is, so only
@@ -277,7 +281,7 @@ def _add(page, kind, public, twins=None):
     """Cards for the accounts of a page not seen before; one that has a twin on another site joins its card
     instead. Returns (cards made, page was all known).
     public: host -> whether it is a public one, kept for the whole look. twins: _Twins of the look."""
-    mine = []
+    mine, blocked = [], 0
     for f in page:
         raw = f.get("url") or ""
         site = sources.site_for(raw)
@@ -291,7 +295,9 @@ def _add(page, kind, public, twins=None):
                 public[host] = net.public_https(raw)
             if public[host]:
                 mine.append((sources.normalize(raw), f))
-    made, known = [], len(page) - len(mine)
+            else:
+                blocked += 1                                # not 'known': the walk goes on, and _look says so
+    made, known = [], len(page) - len(mine) - blocked
     with db.connect() as con:
         have = {r[0].lower() for r in con.execute("SELECT url FROM sources")}
         taken = {sync.safe_name(r[0]).lower() for r in con.execute("SELECT name FROM artists")}
@@ -341,16 +347,19 @@ def _look(key):
     db.set_setting("follows_at:" + key, str(time.time()))
     db.set_setting("follows_seen:" + key, "0")        # until a look has read accounts, the next start looks again (look())
     site, label, total, public, twins, seen = _site(key), accounts.label(key), 0, {}, _Twins(), 0
+    fallback = False
     # A list read to its end by *this* login (a new login is another account, maybe) may stop early.
     stamp = accounts.saved(key) or "-"
     try:
         for name, pages, *note in site.following(key):
             if note and note[0]:                      # the site's own list did not come: what was taken instead, and why
                 sync.event("warn", "%s: %s" % (label, note[0]))
+                fallback = True
             done = "follows_read:%s:%s" % (key, name)
             for page in pages:
                 seen += len(page)
-                made, all_known = _add(page, site.KIND, public, twins)
+                with _adding:                        # (the lists of several logins are read side by side, the cards made one look at a time)
+                    made, all_known = _add(page, site.KIND, public, twins)
                 total += made
                 if all_known and db.get_setting(done, "") == stamp:
                     break                    # read to its end before: the rest is known
@@ -365,11 +374,18 @@ def _look(key):
         log.info("%s: the list of followed accounts stopped: %s", key, why)
         sync.event("warn", "%s: the list of followed accounts stopped (%s); the next look carries on" % (label, why))
     else:
-        if seen:
+        if fallback:                                  # a part of the list is no list: the full one is tried again soon, not after a day
+            _retry = True
+            db.set_setting("follows_at:" + key, str(time.time() - max(0, getattr(site, "FOLLOWS_HOURS", 0) - RETRY_HOURS) * 3600))
+        elif seen:
             db.set_setting("follows_seen:" + key, str(seen))
         if not seen and key not in _told_empty:         # an empty list used to be silent, and "my follows are missing" left no trace
             _told_empty.add(key)
             sync.event("info", "%s: the site's list of followed accounts is empty" % label)
+    bad = sorted(h for h, ok in public.items() if not ok)
+    if bad:                                           # these accounts were dropped without a trace before
+        sync.event("warn", "%s: accounts on %s were left out: the address does not resolve to a public https site "
+                           "(a VPN, a proxy or a DNS filter?)" % (label, ", ".join(bad[:3])))
     if total or twins.attached:
         _touch(True)
         sync.event("info", "%s: %d followed account%s added to the list%s" % (
@@ -486,24 +502,39 @@ def _say_skipped(only):
 
 
 def look(only=None):
-    """Every login's followed accounts (or those of the keys in only), one login after another;
-    then the cards that turn out to be one artist are combined."""
+    """Every login's followed accounts (or those of the keys in only), each login in its own thread (X's list must not
+    wait behind pixiv's, which takes minutes); then the cards that turn out to be one artist are combined."""
+    global _retry
     if db.get_setting("import_follows") == "1":
-        with _lock:
-            _say_skipped(only)
-            for key in only or keys():
-                if net.paused(sync._site_url(key)):
-                    continue
-                hours = getattr(_site(key), "FOLLOWS_HOURS", 0)      # a list that is costly to read is read less often
-                # ... but only once it has given accounts: a look that found none (an older version's, a list that failed to
-                # parse) must not hold the next one back for a day -- that was "X still shows nothing" after the fix came.
-                gap = (hours * 3600 if int(db.get_setting("follows_seen:" + key, "0") or 0) else RETRY_HOURS * 3600) if hours else 0
-                if gap and not only and time.time() - float(db.get_setting("follows_at:" + key, "0") or 0) < gap:
-                    continue
-                _look(key)
+        _say_skipped(only)
+        todo = []
+        for key in only or keys():
+            if net.paused(sync._site_url(key)):
+                _retry = True                         # a rest ends within hours: ask again then, not after ten to fourteen
+                continue
+            hours = getattr(_site(key), "FOLLOWS_HOURS", 0)      # a list that is costly to read is read less often
+            # ... but only once it has given accounts: a look that found none (an older version's, a list that failed to
+            # parse) must not hold the next one back for a day -- that was "X still shows nothing" after the fix came.
+            gap = (hours * 3600 if int(db.get_setting("follows_seen:" + key, "0") or 0) else RETRY_HOURS * 3600) if hours else 0
+            if gap and not only and time.time() - float(db.get_setting("follows_at:" + key, "0") or 0) < gap:
+                continue
+            todo.append(key)
+        threads = [threading.Thread(target=_look_one, args=(key,), daemon=True, name="follows:" + key) for key in todo]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
     with _lock:
         combine()
         rename_listed()
+
+
+def _look_one(key):
+    with _reading.setdefault(key, threading.Lock()):
+        try:
+            _look(key)
+        except Exception:
+            log.exception("follows %s", key)
 
 
 def look_async(only=None):
@@ -530,5 +561,7 @@ def start():
                 look()
             except Exception:
                 log.exception("follows")
-            time.sleep((RETRY_HOURS if _retry else random.uniform(*HOURS)) * 3600)
+            began, wait = time.time(), random.uniform(*HOURS) * 3600
+            while time.time() - began < (RETRY_HOURS * 3600 if _retry else wait):     # (a look started by a login may ask for it meanwhile)
+                time.sleep(60)
     threading.Thread(target=run, daemon=True, name="follows").start()

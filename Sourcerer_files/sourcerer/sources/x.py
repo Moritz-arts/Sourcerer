@@ -144,7 +144,7 @@ def following(key):
     net._stopped("https://x.com")
     if me:
         try:
-            messages = _run(_gdl.info, "https://x.com/id:%s/following" % me, "twitter", _options(), FOLLOW_TIMEOUT)
+            messages = _run(_gdl.info, "https://x.com/id:%s/following" % me, "twitter", _options(), FOLLOW_TIMEOUT, True)
             net.spend("https://x.com", max(1, len(messages) // 50))
             out = _followed(messages)
             problem = "" if out else "X's list of followed accounts came back empty"
