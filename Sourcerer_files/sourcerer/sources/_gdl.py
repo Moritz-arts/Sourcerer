@@ -207,22 +207,30 @@ def _items(url, section, options, fmt):
         conf.unlink(missing_ok=True)
 
 
-def info(url, section, options, timeout=120):
-    """The JSON gallery-dl gives for a small listing (a profile's info, a list of followed accounts): its messages."""
+def info(url, section, options, timeout=120, partial=False):
+    """The JSON gallery-dl gives for a small listing (a profile's info, a list of followed accounts): its messages.
+    partial: a list read -- when gallery-dl stops with an error after some messages, those are returned (the accounts
+    already read are not thrown away) unless it was a login or a rate limit."""
     lock = _site_lock(section)
     if not lock.acquire(timeout=WAIT_INFO):
         raise net.SlowDown("busy with another listing of this site; try again in a moment")
     try:
-        return _info(url, section, options, timeout)
+        return _info(url, section, options, timeout, partial)
     finally:
         lock.release()
 
 
-def _info(url, section, options, timeout=120):
+def _info(url, section, options, timeout=120, partial=False):
     conf = _config(section, options)
     try:
         proc = _start(_command(conf, ["-j"], url))
-        out, err = proc.communicate(timeout=timeout)
+        try:
+            out, err = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            # Left running it would go on asking the site with the account's cookies while the next listing starts.
+            proc.kill()
+            proc.communicate()
+            raise Failed("gallery-dl took more than %d s; it was stopped" % timeout) from None
     finally:
         conf.unlink(missing_ok=True)
     lines = err.decode("utf-8", "replace").splitlines()
@@ -230,10 +238,14 @@ def _info(url, section, options, timeout=120):
         raise _failure(proc.returncode, [l for l in lines if "][error]" in l], lines)
     messages = json.loads(out.decode("utf-8") or "[]")
     # -j reports an error as a message [-1, {"error": ..., "message": ...}] and exits 0.
-    for m in messages:
+    for i, m in enumerate(messages):
         if m and m[0] == -1:
             e = m[-1] if isinstance(m[-1], dict) else {}
-            name = e.get("error", "")
-            raise Failed("%s: %s" % (name, e.get("message", "")),
-                         auth=name.startswith("Auth"), slow=name == "ChallengeError")
+            name, text = e.get("error", ""), e.get("message", "")
+            auth = name.startswith("Auth")
+            slow = name == "ChallengeError" or "rate limit" in text.lower()      # ratelimit: abort ends with this
+            if partial and i and not (auth or slow):
+                log.warning("gallery-dl stopped after %d messages: %s: %s", i, name, text)
+                return messages[:i]
+            raise Failed("%s: %s" % (name, text), auth=auth, slow=slow)
     return messages
