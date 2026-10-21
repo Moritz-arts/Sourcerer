@@ -138,7 +138,12 @@ function applySettings() {
 
 // ---- artists ---------------------------------------------------------------
 
-function artistById(id) { return S.artists.filter(function (a) { return a.id === id; })[0]; }
+// By id from a map that is built again only when the list is a new one (it is asked for per log entry and per queued card).
+var byIdOf = null, byId = null;
+function artistById(id) {
+  if (byIdOf !== S.artists) { byIdOf = S.artists; byId = {}; S.artists.forEach(function (a) { byId[a.id] = a; }); }
+  return byId[id];
+}
 
 // When something last happened on a card: a download, else a sync, else its making.
 // When an artist last did something, as one string to compare ("YYYY-MM-DD HH:MM:SS", UTC): the newest post a look at
@@ -183,6 +188,7 @@ function problems() {
   }).length;
 }
 
+var activityHtml = "";
 function renderActivity() {
   var s = S.sync || {}, cur = s.current, q = s.queue || [], html;
   if (cur) {
@@ -224,7 +230,8 @@ function renderActivity() {
   var open = !$("logpanel").classList.contains("hidden"), n = open ? 0 : problems();
   html += '<button id="btn-log" class="mini' + (open ? " open" : "") + '" data-act="log" title="Activity log (Ctrl+L)">' +
     icon("list") + " Activity" + (n ? '<span class="count">' + n + "</span>" : "") + icon("chevron-up", "chev") + "</button>";
-  $("activity").innerHTML = html;
+  // Only when the markup changed: it is drawn at every poll (0.7 s) and a click whose press and release straddle a rebuild is lost.
+  if (html !== activityHtml) { activityHtml = html; $("activity").innerHTML = html; }
   $("btn-sync-all").disabled = !S.artists.length;
   if (open) renderLog();
 }
@@ -779,10 +786,10 @@ function renderBrowseList() {
   S.brOrderIds = list.map(function (a) { return a.id; });                  // what Refresh all follows
   if (bySite) list.forEach(function (a) { var k = siteOf(a); sites[k] = (sites[k] || 0) + 1; });
   if (byStar) list.forEach(function (a) { if (a.favorite) stars++; });
-  var active = (S.sync.active || []).map(function (c) { return c.artist_id; }), queue = S.sync.queue || [];
+  var active = new Set((S.sync.active || []).map(function (c) { return c.artist_id; })), queue = new Set(S.sync.queue || []);
   function count(a) {
-    var on = active.indexOf(a.id) >= 0;
-    if (on || queue.indexOf(a.id) >= 0) return '<i class="spin" title="' + (on ? "Working…" : "Queued") + '"></i>';
+    var on = active.has(a.id);
+    if (on || queue.has(a.id)) return '<i class="spin" title="' + (on ? "Working…" : "Queued") + '"></i>';
     return countText(a);
   }
   // A group (a site, or Favorites / Others) folds under its head; a search shows everything it finds.
