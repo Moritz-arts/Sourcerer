@@ -241,16 +241,30 @@ def following(key):
     yield "", pages()
 
 
+_known = {}                     # ("pds", did) / ("did", handle) -> (when, value): both asked for at every look, gallery open and live check
+
+
+def _remembered(kind, key, ask, ttl=3600):
+    hit = _known.get((kind, key))
+    if hit and time.time() - hit[0] < ttl:
+        return hit[1]
+    value = ask()
+    _known[(kind, key)] = (time.time(), value)
+    return value
+
+
 def _pds(did):
     """The server that holds the account's files."""
-    if did.startswith("did:web:"):
-        doc = net.get_json("https://%s/.well-known/did.json" % urllib.parse.unquote(did[8:]))
-    else:
-        doc = net.get_json("https://plc.directory/" + urllib.parse.quote(did))
-    for service in doc.get("service") or []:
-        if service.get("id", "").endswith("#atproto_pds"):
-            return service["serviceEndpoint"].rstrip("/")
-    raise RuntimeError("no file server found for %s" % did)
+    def ask():
+        if did.startswith("did:web:"):
+            doc = net.get_json("https://%s/.well-known/did.json" % urllib.parse.unquote(did[8:]))
+        else:
+            doc = net.get_json("https://plc.directory/" + urllib.parse.quote(did))
+        for service in doc.get("service") or []:
+            if service.get("id", "").endswith("#atproto_pds"):
+                return service["serviceEndpoint"].rstrip("/")
+        raise RuntimeError("no file server found for %s" % did)
+    return _remembered("pds", did, ask, 6 * 3600)
 
 
 def _blobs(embed):
@@ -289,7 +303,8 @@ def _ref(blob):
 def pages(url):
     from . import Media
     actor = _URL.match(url.strip()).group(1)
-    did = _get("app.bsky.actor.getProfile", {"actor": actor})["did"]
+    did = actor if actor.startswith("did:") else \
+        _remembered("did", actor.lower(), lambda: _get("app.bsky.actor.getProfile", {"actor": actor})["did"])
     pds = _pds(did)
     cursor = None
     while True:

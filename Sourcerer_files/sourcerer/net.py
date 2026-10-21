@@ -139,9 +139,25 @@ def _stored(key):
     return _state[key]
 
 
+_dirty = {}
+_flushing = threading.Lock()
+
+
 def _store(key):
+    """Marks key to be saved; called under _lock, which every request to every host takes -- the write waits for the
+    database (a follows page, a merge can hold it for seconds) and must not hold them all, so _flush() writes it."""
+    _dirty[key] = json.dumps(_state[key])
+
+
+def _flush():
     from . import db
-    db.set_setting(key, json.dumps(_state[key]))
+    with _flushing:
+        while _dirty:
+            key, text = _dirty.popitem()
+            try:
+                db.set_setting(key, text)
+            except Exception as e:               # the state stays in memory and is written with the next change
+                log.warning("could not save %s: %s", key, e)
 
 
 def pause(url, seconds, why):
@@ -153,6 +169,7 @@ def pause(url, seconds, why):
             return
         pauses[site] = [until, why]
         _store("paused")
+    _flush()
     log.info("%s paused for %d min: %s", site, seconds // 60, why)
     for fn in PAUSED:
         try:
@@ -176,6 +193,7 @@ def lift(url):
         if entry and any(w in entry[1] for w in LOGIN_PAUSES):
             del pauses[site]
             _store("paused")
+    _flush()
 
 
 def paused(url):
@@ -214,6 +232,7 @@ def spend(url, n=1):
         over = entry[1] >= BUDGETS.get(site, BUDGET)
         if over or entry[1] % 10 < n:
             _store("spent")
+    _flush()
     if over:
         tomorrow = time.mktime(time.strptime(day, "%Y-%m-%d")) + 86400
         pause(url, tomorrow - time.time() + _hours(0.5, 3),
@@ -435,15 +454,21 @@ class _Polite:
                 # One at a time: the gap runs from the end of the last request,
                 # so a slow answer does not eat it.
                 at = (entry["end"] if self.login else entry["start"]) + pace * random.uniform(*JITTER)
+                pause = 0.0
                 if self.login:
                     entry["count"] += 1
                     if entry["count"] >= entry["break"] and not self.first:
                         entry["count"], entry["break"] = 0, random.randint(*READ_EVERY)
-                        at += random.uniform(*READ_BREAK)
+                        pause = random.uniform(*READ_BREAK)
                 now = time.monotonic()
-                entry["start"] = max(at, now)
+                entry["start"] = max(at + pause, now)
             if at > now:
                 time.sleep(at - now)
+            # The reading break is slept holding the lane's only slot: somebody who opens the artist meanwhile
+            # (first) must not wait a minute for it. It ends as soon as one waits; the gap above stays.
+            end = time.monotonic() + pause
+            while time.monotonic() < end and not entry["first"]:
+                time.sleep(0.2)
             _stopped(self.url)                   # a pause may have begun meanwhile
         except BaseException:
             entry["sem"].release()

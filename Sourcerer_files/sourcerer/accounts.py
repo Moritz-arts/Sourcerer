@@ -168,10 +168,25 @@ def _path(key):
     return DIR / (re.sub(r"[^a-z0-9.-]+", "_", key.lower()) + ".json")
 
 
+_texts = {}                      # file -> (mtime, size, text): hot paths ask for a login several times per request
+
+
 def load(key):
+    """The saved login, read afresh whenever the file changed (Login files put back by hand work without a restart);
+    the file itself is only opened then -- a few hundred opens a second were the slow part on Windows."""
+    path = _path(key)
     try:
-        return json.loads(_path(key).read_text(encoding="utf-8"))
+        st = path.stat()
+        mark = (st.st_mtime_ns, st.st_size)
+        cached = _texts.get(path)
+        if cached and cached[0] == mark:
+            text = cached[1]
+        else:
+            text = path.read_text(encoding="utf-8")
+            _texts[path] = (mark, text)
+        return json.loads(text)
     except (OSError, ValueError):
+        _texts.pop(path, None)
         return None
 
 
@@ -238,6 +253,7 @@ def _write(key, data):
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(data, f)
     os.replace(tmp, path)
+    _texts.pop(path, None)                   # (a coarse file clock could show the same mark for a rewrite)
 
 
 def saved(key):
