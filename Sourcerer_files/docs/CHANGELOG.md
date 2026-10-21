@@ -5,6 +5,13 @@ automatically -- one line per change, newest first. A release is drafted by hand
 from the tag of whichever version is judged ready, and this is the text to paste
 into it.
 
+## v0.38 — 2026-10-21
+
+- Speed: indexes on files, duplicates are found by sha first, adopting files no longer holds the save lock, and the scan at start does not wait for every login check
+- X follows: a list that fell back, rests or is cut off is tried again within hours, each login's list is read in its own thread, and a rate limit pauses X
+- Speed: the reading break of a login lane ends when somebody waits, saving state no longer blocks requests, saved logins and Bluesky lookups are cached
+- Browse: an artist's gallery goes before All artists' sources in the queue, gallery-dl listings past the window are parked, and the activity bar is redrawn only when it changed
+
 ## v0.37 — 2026-10-20
 
 - All artists includes the followed accounts of a site that has few, and the XenForo login window opens at once
