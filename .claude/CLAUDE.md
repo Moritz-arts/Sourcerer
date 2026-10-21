@@ -467,6 +467,18 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   name too) are named so. `handle_text` is "" where the address names no account: a forum routed through
   `index.php?media/users/name.12` (the member is in the query), Patreon's `/user?u=1`, a Bluesky DID.
   A name two cards would share gets the account in brackets (`_unique`).
+- **Lists are read side by side, one thread per login** (`follows.look`, `_look_one`; cards are made one page at a time, `_adding`):
+  X's list used to wait behind pixiv's, which takes minutes. A look that fell back to the Following timeline (`note`), a login
+  skipped because its site rests, and a `gallery-dl` list cut off by an error all count as *not done*: `_retry`, `RETRY_HOURS`, no
+  `follows_seen` stamp, so the full list is tried again within hours, not a day later. Switching `import_follows` on reads every list
+  at once (`save_settings`). `_gdl.info(..., partial=True)` keeps the accounts read before gallery-dl's `-1` error message; a
+  timeout kills the process (it would go on asking X with the account's cookies); "Rate limit" is `slow` (pause), as in `_failure`.
+  Accounts whose host fails `net.public_https` are logged once per look and are **not** counted as known.
+- **Hot paths must not scan `files`.** `files` has indexes for the page's counts (`source_id, path` / `artist_id, path`) and for
+  lookups by `path` and by `sha256` alone; without them /api/state took seconds with a thousand cards. `sync._decide` looks the sha
+  up and stats only other sources' phash candidates; `sync._adopt` globs and hashes **outside** the global `_save` lock. `net._store`
+  only marks state dirty, `_flush()` writes it outside `net._lock` (every request takes it). `accounts.load` caches the file text by
+  mtime. `/api/state` leaves out `pending_keys`.
 - **X's follows said nothing when they failed** (no `twid` cookie in the saved login, gallery-dl missing): `x.following` returned
   without a word, and "my X follows are missing" had no trace. It raises now, the log says why, and a failed look of a list
   with `FOLLOWS_HOURS` is tried again after `follows.RETRY_HOURS` (4): the stamp is set back and `start()` sleeps that
@@ -836,6 +848,9 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   or download that answers after its gallery was left must still be stored in it** (the server
   never hands the items out twice) -- only the drawing is skipped (`g !== G`). The picture
   cache is per gallery id, which is why reopening a gallery refetched every proxied thumbnail.
+- **A gallery-dl listing of a source past the window is parked** (`_Source.fill`: `SERIAL` kinds in All artists once `enough()`):
+  a suspended process stays alive (about 40 MB, still asking the site), a few hundred follows left that many. *Load older posts* reopens
+  it and passes over `skip` pages. The pool's queue is a priority queue: an artist's own gallery goes before All artists' sources.
 - **The gallery asks its sources at the same time** (`gallery._Source`, on
   `POOL` daemon threads shared by all galleries, each source in its own polite
   lane; a site gallery-dl reads -- `SERIAL`: X, forums -- and every login's

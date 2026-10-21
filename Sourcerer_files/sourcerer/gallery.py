@@ -38,6 +38,7 @@ import dataclasses
 import datetime
 import hashlib
 import io
+import itertools
 import json
 import logging
 import os
@@ -74,7 +75,8 @@ _cached = [0]
 _flight = {}                             # (gallery, item, size) -> Event, while it is being fetched
 _serial = set()                          # sites with a serial source being listed now
 _spaced = {}                             # login site -> (card id, when another card may ask it): All artists
-_work = queue.Queue()
+_work = queue.PriorityQueue()           # (priority, order, future, fn): an artist's own gallery before All artists' hundreds of sources
+_order = itertools.count()
 _workers = []
 CARD_GAP = (5, 12)           # seconds before All artists asks a login site for another card than the last one's
 WINDOWS = ("0", "7", "14", "30", "90")   # Settings > All artists shows: the days (0: everything)
@@ -84,20 +86,20 @@ class _Workers:
     """POOL daemon threads that run the listings. (A ThreadPoolExecutor's threads are not daemons:
     closing the window would wait for every fill still queued.)"""
 
-    def submit(self, fn):
+    def submit(self, fn, priority=0):
         future = concurrent.futures.Future()
         with _lock:
             if len(_workers) < POOL:
                 t = threading.Thread(target=self._run, daemon=True, name="gallery-source")
                 _workers.append(t)
                 t.start()
-        _work.put((future, fn))
+        _work.put((priority, next(_order), future, fn))
         return future
 
     @staticmethod
     def _run():
         while True:
-            future, fn = _work.get()
+            _, _, future, fn = _work.get()
             if not future.set_running_or_notify_cancel():
                 continue
             try:
@@ -147,6 +149,7 @@ class _Source:
         self.pages = 0
         self.new = 0                          # posts the check found that the snapshot did not have
         self.listing = None
+        self.skip = 0                         # pages a reopened listing passes over (see fill)
         self.buffer = collections.deque()
         self.done, self.error = self.site is None, ""
         self.last = None                      # an undated item keeps the time of the one before it
@@ -200,7 +203,7 @@ class _Source:
                             return             # another card was asked lately: not the next one at once
                     _serial.add(self.where)
             self.asked_at = time.monotonic()
-            self.future = _pool.submit(self._run)
+            self.future = _pool.submit(self._run, 1 if self.spaced else 0)
 
     def _run(self):
         try:
@@ -230,6 +233,9 @@ class _Source:
         try:
             if self.listing is None:
                 self.listing = self.site.pages(self.row["url"])
+                for _ in range(self.skip):         # reopened after it was parked: the pages read before are passed over
+                    next(self.listing)
+                self.skip = 0
             page = next(self.listing)
         except StopIteration:
             self.done, self.checked = True, True
@@ -269,6 +275,11 @@ class _Source:
             when = _when(m.posted)
             self.last = when if when is not None else self.last
             self.buffer.append((self.last, m))         # None: this source has no dates at all
+        if self.spaced and self.kind in SERIAL and self.enough() and not self.closed:
+            # A gallery-dl process suspended between pages stays alive (about 40 MB each, still asking the site) -- a few
+            # hundred follows left that many behind. The window is reached: park it; "Load older" reopens and passes these pages.
+            self._end()
+            self.listing, self.skip = None, self.pages
 
     def _end(self):
         # Ends a gallery-dl process (and frees X's or a forum's turn for a sync).
