@@ -405,7 +405,11 @@ def scheduler():
     ACCOUNT_HOURS, so a login that ran out is shown before a sync needs it."""
     def run():
         time.sleep(random.uniform(20, 60))    # the window first, and not the start's own second
-        check_accounts_at_start()
+        # The checks are spaced out (seconds between logins, a paced request each): the scan for new posts does not wait
+        # for all of them -- only a little, so a login that ran out is mostly known -- it was 2-4 minutes after the start.
+        checking = threading.Thread(target=check_accounts_at_start, daemon=True, name="account-check")
+        checking.start()
+        checking.join(45)
         threading.Thread(target=backfill_avatars, daemon=True, name="avatar-addresses").start()
         if db.get_setting("scan_on_start") == "1":           # as Refresh: a card with auto-download downloads what it finds
             try:
@@ -1244,14 +1248,20 @@ def _adopt(artist, src, media, folder, cur):
     """A file that is already there is taken over, not downloaded again: from
     the archive of a deleted card, or under its own name in the card's folder
     (a card made again, a collection that was there before Sourcerer)."""
-    with _save, db.connect() as con:
+    patterns = _local_names(media)
+    with db.connect() as con:                                 # the looking is outside the save lock: every download waits for it
         known = con.execute("SELECT * FROM archive WHERE remote_key = ?", (media.remote_key,)).fetchone()
-        if known and known["path"] and os.path.isfile(known["path"]):
-            path, sha, phash = known["path"], known["sha256"], known["phash"]
-            width, height, size = known["width"], known["height"], known["size"]
-        else:
-            path = None
-            for pattern in _local_names(media) if folder.is_dir() else []:
+        if not (known and known["path"] and os.path.isfile(known["path"])):
+            known = None
+            if not patterns or not folder.is_dir():
+                return False
+    if known:
+        path, sha, phash = known["path"], known["sha256"], known["phash"]
+        width, height, size = known["width"], known["height"], known["size"]
+    else:
+        path = None
+        with db.connect() as con:
+            for pattern in patterns:
                 for candidate in folder.glob(pattern):
                     taken = con.execute("SELECT 1 FROM files WHERE path = ?", (str(candidate),)).fetchone()
                     if candidate.is_file() and not taken:
@@ -1259,10 +1269,13 @@ def _adopt(artist, src, media, folder, cur):
                         break
                 if path:
                     break
-            if not path:
-                return False
-            sha, size = _sha256(path), os.path.getsize(path)
-            phash, width, height = imaging.info(path)
+        if not path:
+            return False
+        sha, size = _sha256(path), os.path.getsize(path)
+        phash, width, height = imaging.info(path)
+    with _save, db.connect() as con:
+        if not known and con.execute("SELECT 1 FROM files WHERE path = ?", (path,)).fetchone():
+            return False                                      # another worker took that file while this one hashed it
         _record(con, artist, src, media, sha, path, phash, width, height, size)
         con.execute("DELETE FROM archive WHERE remote_key = ?", (media.remote_key,))
     with _lock:
@@ -1282,16 +1295,20 @@ def _decide(artist, src, sha, phash, width, height, size):
     """(keep the new file?, files it replaces)."""
     if artist["dedupe"] == "keep_all":
         return True, []
+    # Not every file of the artist is statted for every new file (quadratic, and under the save lock): the sha is an
+    # indexed lookup, and only the rows that can matter -- another source's, with a phash -- are checked on disk.
     with db.connect() as con:
-        rows = [r for r in con.execute(
-            "SELECT id, source_id, path, sha256, phash, width, height, size FROM files "
-            "WHERE artist_id = ? AND path IS NOT NULL", (artist["id"],)) if os.path.exists(r["path"])]
-    if any(r["sha256"] == sha for r in rows):
-        return False, []
-    if not phash:
-        return True, []
-    same = [r for r in rows if r["phash"] and r["source_id"] != src["id"]
-            and imaging.distance(r["phash"], phash) <= imaging.SIMILAR]
+        twins = con.execute("SELECT path FROM files WHERE artist_id = ? AND sha256 = ? AND path IS NOT NULL",
+                            (artist["id"], sha)).fetchall()
+        if any(os.path.exists(r["path"]) for r in twins):
+            return False, []
+        if not phash:
+            return True, []
+        rows = con.execute(
+            "SELECT id, source_id, path, phash, width, height, size FROM files "
+            "WHERE artist_id = ? AND path IS NOT NULL AND phash IS NOT NULL AND source_id IS NOT ?",
+            (artist["id"], src["id"])).fetchall()
+    same = [r for r in rows if imaging.distance(r["phash"], phash) <= imaging.SIMILAR and os.path.exists(r["path"])]
     if not same:
         return True, []
     master = artist["master_source_id"] if artist["dedupe"] == "master" else None

@@ -68,7 +68,9 @@ def _artists():
         mine = {}
         for r in con.execute("SELECT s.*, (SELECT COUNT(*) FROM files f WHERE f.source_id = s.id "
                              "AND f.path IS NOT NULL) AS file_count FROM sources s ORDER BY s.artist_id, s.id"):
-            mine.setdefault(r["artist_id"], []).append(dict(r))
+            s = dict(r)
+            s.pop("pending_keys", None)                       # up to 400 keys a source, only sync.pending_down reads them
+            mine.setdefault(r["artist_id"], []).append(s)
         for a in artists:
             a["sources"] = []
             for s in mine.get(a["id"], []):
@@ -933,12 +935,14 @@ def save_settings():
         else:
             return jsonify(error="Unknown setting: %s." % key), 400
         clean[key] = value
+    follows_was = db.get_setting("import_follows")
     for key, value in clean.items():
         if key in ("auto_sync", "auto_hours") and db.get_setting(key) != value:
             db.set_setting("next_auto", "")        # drawn from the old interval: draw anew when due
         db.set_setting(key, value)
     if clean.get("import_follows") == "1":
-        follows.look_async()
+        # Switched on just now: every list is read, not held back by the time of an earlier look.
+        follows.look_async(follows.keys() if follows_was != "1" else None)
     net.configure(per_host=db.setting_int("per_host", 1, 32), pace_ms=db.setting_int("pace_ms", 0, 5000))
     return get_settings()
 

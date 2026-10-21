@@ -43,6 +43,12 @@ CREATE TABLE IF NOT EXISTS files (
     UNIQUE (artist_id, remote_key)
 );
 CREATE INDEX IF NOT EXISTS files_sha ON files (artist_id, sha256);
+-- The page's counts (/api/state: files per card and per source) and the lookups by path or by sha alone
+-- (sync._adopt, gallery._there) were full scans of this table: seconds each with a thousand cards.
+CREATE INDEX IF NOT EXISTS files_source ON files (source_id, path);
+CREATE INDEX IF NOT EXISTS files_artist_path ON files (artist_id, path);
+CREATE INDEX IF NOT EXISTS files_path ON files (path);
+CREATE INDEX IF NOT EXISTS files_sha_only ON files (sha256);
 -- The files of deleted cards. A card made again for the same artist finds
 -- them here (by remote_key) and takes over those still on disk instead of
 -- downloading them a second time.
