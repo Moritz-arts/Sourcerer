@@ -682,6 +682,11 @@ def get_json_next(url, params=None, headers=None):
         resp = _get(url, params, headers=headers)
         found = (resp.links.get("next") or {}).get("url")
     here, there = urllib.parse.urlsplit(url), urllib.parse.urlsplit(found or "")
+    if found and not (there.scheme == "https" and there.netloc.lower() == here.netloc.lower()):
+        # A server behind a proxy that does not know it is https writes http:// here: the list would end after its
+        # first page, "read to its end", with no word about the rest.
+        log.warning("%s: the next page is at %s, which is not followed (another host or not https): the list may be cut short",
+                    here.netloc, there.scheme + "://" + there.netloc)
     return resp.json(), (found if there.scheme == "https" and there.netloc.lower() == here.netloc.lower() else None)
 
 

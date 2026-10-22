@@ -277,10 +277,12 @@ class _Twins:
                 named.add(target)
 
 
-def _add(page, kind, public, twins=None):
+def _add(page, kind, public, twins=None, stats=None):
     """Cards for the accounts of a page not seen before; one that has a twin on another site joins its card
     instead. Returns (cards made, page was all known).
-    public: host -> whether it is a public one, kept for the whole look. twins: _Twins of the look."""
+    public: host -> whether it is a public one, kept for the whole look. twins: _Twins of the look.
+    stats: a Counter that says where every account of the page went (_look logs it: "158 follows, 106 cards" must be explainable)."""
+    stats = collections.Counter() if stats is None else stats
     mine, blocked = [], 0
     for f in page:
         raw = f.get("url") or ""
@@ -297,6 +299,9 @@ def _add(page, kind, public, twins=None):
                 mine.append((sources.normalize(raw), f))
             else:
                 blocked += 1                                # not 'known': the walk goes on, and _look says so
+                stats["not public: " + host] += 1
+        else:                                               # a Pixelfed, a Lemmy, a bridged account: nothing Sourcerer reads
+            stats["other site: " + (urllib.parse.urlsplit(raw).hostname or raw[:40] or "no address")] += 1
     made, known = [], len(page) - len(mine) - blocked
     with db.connect() as con:
         have = {r[0].lower() for r in con.execute("SELECT url FROM sources")}
@@ -308,10 +313,12 @@ def _add(page, kind, public, twins=None):
             if not con.execute("INSERT OR IGNORE INTO followed (url, avatar, headers) VALUES (?, ?, ?)",
                                (key, f.get("avatar") or "", json.dumps(headers) if headers else "")).rowcount:
                 known += 1
+                stats["known"] += 1
                 if links:                                   # a card made before profiles' links were kept: it learns them here
                     con.execute("UPDATE sources SET links = ? WHERE lower(url) = ? AND links IS NULL", (json.dumps(links), key))
                 continue
             if key in have:
+                stats["has a card"] += 1
                 continue                                    # a card of the user's has it already
             have.add(key)
             name, site_kind = _name(f, url), sources.kind_of(url)
@@ -325,6 +332,7 @@ def _add(page, kind, public, twins=None):
                                 (picture, json.dumps(headers) if headers else None, twin))
                 twins.attach(twin, site_kind, url, links, name)
                 twins.attached += 1
+                stats["joined an artist"] += 1
                 continue
             artist_id = con.execute("INSERT INTO artists (name, listed, avatar_url, avatar_headers) VALUES (?, 1, ?, ?)",
                                     (_unique(card_name([url], name), url, taken), picture, json.dumps(headers) if headers and picture else None)).lastrowid
@@ -334,6 +342,7 @@ def _add(page, kind, public, twins=None):
                 twins.register(artist_id, name, True)
                 twins.attach(artist_id, site_kind, url, links, name)
             made.append(artist_id)
+            stats["new card"] += 1
     if made or (twins and twins.attached):
         _touch()
     return len(made), bool(page) and known == len(page)
@@ -347,7 +356,7 @@ def _look(key):
     db.set_setting("follows_at:" + key, str(time.time()))
     db.set_setting("follows_seen:" + key, "0")        # until a look has read accounts, the next start looks again (look())
     site, label, total, public, twins, seen = _site(key), accounts.label(key), 0, {}, _Twins(), 0
-    fallback = False
+    fallback, early, stats = False, False, collections.Counter()
     # A list read to its end by *this* login (a new login is another account, maybe) may stop early.
     stamp = accounts.saved(key) or "-"
     try:
@@ -359,9 +368,10 @@ def _look(key):
             for page in pages:
                 seen += len(page)
                 with _adding:                        # (the lists of several logins are read side by side, the cards made one look at a time)
-                    made, all_known = _add(page, site.KIND, public, twins)
+                    made, all_known = _add(page, site.KIND, public, twins, stats)
                 total += made
                 if all_known and db.get_setting(done, "") == stamp:
+                    early = True
                     break                    # read to its end before: the rest is known
             else:
                 db.set_setting(done, stamp)
@@ -386,6 +396,15 @@ def _look(key):
     if bad:                                           # these accounts were dropped without a trace before
         sync.event("warn", "%s: accounts on %s were left out: the address does not resolve to a public https site "
                            "(a VPN, a proxy or a DNS filter?)" % (label, ", ".join(bad[:3])))
+    if seen:                                          # where every account went: "158 follows, 106 cards" is explained by this line
+        kinds = ("new card", "joined an artist", "has a card", "known")
+        left = sorted((k, n) for k, n in stats.items() if k not in kinds)
+        sync.event("info", "%s: %d followed account%s read: %s%s" % (
+            label, seen, "" if seen == 1 else "s",
+            ", ".join("%d %s" % (stats[k], k) for k in kinds if stats[k]) or "none new",
+            ("; left out: " + ", ".join("%s (%d)" % kn for kn in left[:12]) +
+             (" ..." if len(left) > 12 else "")) if left else "") + ("; stopped at the first page of known accounts" if early else ""))
+
     if total or twins.attached:
         _touch(True)
         sync.event("info", "%s: %d followed account%s added to the list%s" % (

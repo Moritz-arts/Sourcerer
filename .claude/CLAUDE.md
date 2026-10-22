@@ -474,6 +474,11 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   at once (`save_settings`). `_gdl.info(..., partial=True)` keeps the accounts read before gallery-dl's `-1` error message; a
   timeout kills the process (it would go on asking X with the account's cookies); "Rate limit" is `slow` (pause), as in `_failure`.
   Accounts whose host fails `net.public_https` are logged once per look and are **not** counted as known.
+  **Every look ends with a line in `sourcerer.log` that says where each account went** (`follows._look`, `_add(..., stats)`:
+  "N followed accounts read: X new card, Y joined an artist, Z known; left out: other site: pixelfed.social (3), not public: host (1)") --
+  "I follow 158 on Mastodon, Sourcerer shows 106" must be answerable from the log, which is the only place a user looks
+  (the Activity bar is not what they open). A Link header refused by `net.get_json_next` and a list cut at `MAX_FOLLOW_PAGES` are
+  warnings there too. `follow_count_v1` read the Mastodon and Misskey lists to their end once more so the first line is a whole count.
 - **Hot paths must not scan `files`.** `files` has indexes for the page's counts (`source_id, path` / `artist_id, path`) and for
   lookups by `path` and by `sha256` alone; without them /api/state took seconds with a thousand cards. `sync._decide` looks the sha
   up and stats only other sources' phash candidates; `sync._adopt` globs and hashes **outside** the global `_save` lock. `net._store`
