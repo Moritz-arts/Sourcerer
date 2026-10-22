@@ -1,7 +1,9 @@
 """gallery-dl's entry point for Sourcerer's reads of X's follows (`_gdl.info(..., verbose=True)`).
 
-Plain `gallery-dl` when SOURCERER_GDL_TRACE is not set. When it is set -- only the two runs that read who the login follows --
-two things are added, both on gallery-dl's own X client (`TwitterAPI`):
+Plain `gallery-dl` when SOURCERER_GDL_TRACE is not set. When it is "limits" -- the listings of X, Fanbox and Fantia that Sourcerer
+counts -- one thing is added: the rate limit X announces on its answers goes to stderr (`[sourcerer][limit] UserMedia 50 47 <reset>`:
+what it allows, what is left, when it resets), which is how Sourcerer learns what X really allows an account. When it is "1" -- only
+the two runs that read who the login follows -- two more things are added, both on gallery-dl's own X client (`TwitterAPI`):
 
 * what X's answers look like, on stderr (`[sourcerer][trace] Following {...}`): the keys, the kinds of values and the types of
   entries, never a value that is somebody's (a name, an id, a number) -- v0.38 and v0.39 got HTTP 200 and no follows from X and
@@ -83,6 +85,27 @@ def _bottom_cursor(node):
     return None
 
 
+def limits():
+    """X's answers carry x-rate-limit-limit / -remaining / -reset for the endpoint asked: said on stderr, one line per answer."""
+    from gallery_dl.extractor import common
+    plain = common.Extractor.request
+
+    def request(self, url, *args, **kwargs):
+        response = plain(self, url, *args, **kwargs)
+        try:
+            h = response.headers
+            if "x-rate-limit-remaining" in h:
+                sys.stderr.write("[sourcerer][limit] %s %s %s %s\n" % (
+                    url.split("?", 1)[0].rsplit("/", 1)[-1] or "?", h.get("x-rate-limit-limit", "0"),
+                    h["x-rate-limit-remaining"], h.get("x-rate-limit-reset", "0")))
+                sys.stderr.flush()
+        except Exception:
+            pass
+        return response
+
+    common.Extractor.request = request
+
+
 def install():
     from gallery_dl.extractor import twitter
     api = twitter.TwitterAPI
@@ -138,9 +161,12 @@ def install():
 
 
 def main():
-    if os.environ.get(TRACE):
+    mode = os.environ.get(TRACE)
+    if mode:
         try:
-            install()
+            limits()
+            if mode != "limits":
+                install()
         except Exception as e:                                   # a gallery-dl that changed: plain, as before
             sys.stderr.write("[sourcerer][trace] not installed: %s\n" % e)
     import gallery_dl

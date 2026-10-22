@@ -90,10 +90,15 @@ INTERACTIVE_PACE = 0.5      # ... when somebody waits for the answer (interactiv
 JITTER = (1.0, 1.6)         # every gap times this, drawn anew: longer, never shorter
 READ_EVERY = (20, 40)       # a logged-in site gets a break after this many requests ...
 READ_BREAK = (15, 60)       # ... of this many seconds
-# Requests a day carrying a login, per site. pixiv's terms name no number;
-# Pikura's users saw 24-72 h suspensions after long batch runs.
-BUDGETS = {"pixiv": 1500, "patreon": 1500, "x": 1500, "fanbox": 1500, "fantia": 1500}
+# Requests a day carrying a login, per site -- real HTTP requests, counted one by one (X, Fanbox and Fantia: what gallery-dl asked,
+# read from its log, _gdl.items(site=); until v0.42 they counted the files of a page, ~10 times what the site was asked, and the
+# 1500 of X were spent by "All artists" long before X had seen that many requests). None of the sites publishes a number for
+# these web endpoints: the figures are guesses (the research of 2026-10-21 put X at 300-500 and the feeds' sites far lower),
+# kept where users were not locked so far, and tuned by what the tally says (note(), the log's "requests today" lines).
+# pixiv's terms name no number; Pikura's users saw 24-72 h suspensions after long batch runs.
+BUDGETS = {"pixiv": 1500, "patreon": 1500, "x": 600, "fanbox": 300, "fantia": 300}
 BUDGET = 3000
+BOT_REST = (12, 24)         # hours a site rests after it answered with a block page (not a challenge that passes)
 
 # A site is every host one company runs: a stop from pixiv's API stops its
 # image host too, and a day's budget counts them together.
@@ -256,6 +261,152 @@ def scan_room(url):
         entry = _stored("spent").get(site)
     used = entry[1] if entry and entry[0] == time.strftime("%Y-%m-%d") else 0
     return used < limit * SCAN_SHARE
+
+
+# ---- what was really asked, and what the sites say about their limits -------------------------------------
+
+MAX_ENDPOINTS = 40          # kinds of request kept per site and day; the rest is counted together
+TALLY_EVERY = 50            # the tally is saved and said in the log every this many requests of a site
+_LIMIT_HEADERS = (("X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset"),         # Mastodon
+                  ("RateLimit-Limit", "RateLimit-Remaining", "RateLimit-Reset"),               # Bluesky
+                  ("x-rate-limit-limit", "x-rate-limit-remaining", "x-rate-limit-reset"))      # X's own (gdl_run.py hands them over)
+_said, _low, _refusals_said = set(), {}, {}
+
+
+def _endpoint(url):
+    """The kind of request, not the one: the path without ids and without the query ('/ajax/user/#/profile/all')."""
+    return re.sub(r"\d{3,}", "#", urllib.parse.urlparse(url).path or "/")[:60]
+
+
+def _tally_text(site, entry):
+    rows = sorted(entry[1].items(), key=lambda kv: -kv[1][0])
+    total, refused = sum(r[0] for _, r in rows), sum(r[1] for _, r in rows)
+    budget = BUDGETS.get(site)
+    return "requests today on %s: %d%s (%s%s)" % (
+        name_of(site), total, " of %d allowed" % budget if budget else "",
+        ", ".join("%s %d" % (e, r[0]) for e, r in rows[:5]) + (", ..." if len(rows) > 5 else ""),
+        "; %d refused" % refused if refused else "")
+
+
+def note(url, endpoint, status=200, n=1):
+    """One request really made, tallied per site and kind of request for the day. BUDGETS used to count whatever came by (X: the
+    files of a page) and nobody could say what a site was really asked, so no limit could be judged. The tally is kept in the
+    settings (a restart does not forget the day) and said in the log every TALLY_EVERY requests -- the one place a user looks, and
+    where the sites' limits get measured."""
+    site, day = site_of(url), time.strftime("%Y-%m-%d")
+    text = ""
+    with _lock:
+        tally = _stored("tally")
+        entry = tally.get(site)
+        if not entry or entry[0] != day:
+            entry = tally[site] = [day, {}]
+        if endpoint not in entry[1] and len(entry[1]) >= MAX_ENDPOINTS:
+            endpoint = "(other)"
+        row = entry[1].setdefault(endpoint, [0, 0])
+        row[0] += n
+        if status >= 400:
+            row[1] += n
+        if sum(r[0] for r in entry[1].values()) % TALLY_EVERY < n:
+            _store("tally")
+            text = _tally_text(site, entry)
+    if text:
+        _flush()
+        log.info("%s", text)
+
+
+def usage(site):
+    """What the site was asked today: {"used" (counted against the budget), "budget", "kinds": [[endpoint, n, refused], ...]}."""
+    day = time.strftime("%Y-%m-%d")
+    with _lock:
+        spent, tally = _stored("spent").get(site), _stored("tally").get(site)
+    return {"used": spent[1] if spent and spent[0] == day else 0, "budget": BUDGETS.get(site),
+            "kinds": [[e, r[0], r[1]] for e, r in sorted(tally[1].items(), key=lambda kv: -kv[1][0])[:8]]
+            if tally and tally[0] == day else []}
+
+
+def announce(url, headers, name=""):
+    """The limit a site says it has. Their own headers are the only measurement there is for these endpoints: told once a day per
+    host (and per kind of request where a site has several, X), and a warning when little is left of the window."""
+    for names in _LIMIT_HEADERS:
+        limit, left = headers.get(names[0]), headers.get(names[1])
+        if limit and left and str(limit).isdigit() and str(left).isdigit():
+            break
+    else:
+        return
+    limit, left, host = int(limit), int(left), (urllib.parse.urlparse(url).hostname or "")
+    key, now = (host, name), time.time()
+    with _lock:
+        first = (key, time.strftime("%Y-%m-%d")) not in _said
+        _said.add((key, time.strftime("%Y-%m-%d")))
+        warn = left <= max(3, limit // 20) and now - _low.get(key, 0) > 600
+        if warn:
+            _low[key] = now
+    where = "%s%s" % (host, " " + name if name else "")
+    if first:
+        log.info("%s says it allows %d requests per window (%d left, resets %s%s)", where, limit, left,
+                 headers.get(names[2]) or "?", ", policy " + headers["RateLimit-Policy"] if headers.get("RateLimit-Policy") else "")
+    if warn:
+        log.warning("%s: only %d of %d requests are left in this window (resets %s)", where, left, limit, headers.get(names[2]) or "?")
+
+
+def _sample(resp, size=4000):
+    """The start of an error answer (small ones only: a refusal is never a big file)."""
+    try:
+        if int(resp.headers.get("Content-Length") or 0) > 200000:
+            return ""
+        return resp.text[:size]
+    except Exception:
+        return ""
+
+
+def _describe(resp):
+    """What a refusal looked like, in a few words and nothing that is the account's: the kind of answer, who sent it, the title of an
+    HTML page or the code of a JSON error. 'refused access (403)' said nothing about whether it was a password, a bot check or a block."""
+    bits = [(resp.headers.get("Content-Type") or "no type").split(";")[0].strip()]
+    if resp.headers.get("Server"):
+        bits.append("server " + resp.headers["Server"][:20])
+    if resp.headers.get("cf-ray"):
+        bits.append("cf-ray")
+    if resp.headers.get("cf-mitigated"):
+        bits.append("cf-mitigated " + resp.headers["cf-mitigated"][:20])
+    text = _sample(resp)
+    if "json" in bits[0]:
+        try:
+            error = (resp.json().get("errors") or [{}])[0]
+            bits.append("error " + str(error.get("code_name") or error.get("code") or error.get("title") or "?")[:40])
+        except Exception:
+            pass
+    else:
+        title = re.search(r"<title[^>]*>(.*?)</title>", text, re.S | re.I)
+        if title:
+            bits.append('title "%s"' % " ".join(title.group(1).split())[:50])
+    return ", ".join(bits)
+
+
+# What a block page of Cloudflare's says (its challenge and its error pages); the big login sites answer their API in JSON.
+_BLOCK_WORDS = ("just a moment", "attention required", "checking your browser", "cf-chl", "challenge-platform")
+
+
+def _bot_page(url, resp):
+    """Whether a 403 is a bot check's page rather than a refused login. A password problem answers in JSON; an HTML page from behind
+    Cloudflare is its block. (A forum's 403 is an HTML page too -- 'you may not view this' -- so the Server header alone only counts
+    for the big sites, whose API is never HTML.)"""
+    if "html" not in (resp.headers.get("Content-Type") or "").lower():
+        return False
+    if any(w in _sample(resp).lower() for w in _BLOCK_WORDS):
+        return True
+    return site_of(url) in BUDGETS and ("cloudflare" in (resp.headers.get("Server") or "").lower() or bool(resp.headers.get("cf-ray")))
+
+
+def _say_refusal(url, resp):
+    """What a refused request looked like, once per site and kind of request every ten minutes."""
+    key = (site_of(url), _endpoint(url), resp.status_code)
+    now = time.time()
+    with _lock:
+        if now - _refusals_said.get(key, 0) < 600:
+            return
+        _refusals_said[key] = now
+    log.warning("%s answered %d on %s: %s", urllib.parse.urlparse(url).hostname, resp.status_code, key[1], _describe(resp))
 
 
 _refused = {}               # site -> [refusals in a row, since]
@@ -564,7 +715,8 @@ def _get(url, params=None, stream=False, headers=None, method="GET", data=None, 
     A stop is never argued with: a bot check, a 409, a 429 on pixiv or on a
     login, a wait longer than CAP -- the site is paused and SlowDown raised.
     """
-    login = _carries_login(url, headers, params) is True
+    lane = _carries_login(url, headers, params)
+    login = lane is True
     headers = dict(accounts.headers_for(url), **(headers or {}))
     host = urllib.parse.urlparse(url).hostname or ""
     tries = tries or (RETRIES if method == "GET" else 1)
@@ -577,6 +729,17 @@ def _get(url, params=None, stream=False, headers=None, method="GET", data=None, 
             resp = session.request(method, url, params=params, stream=stream, timeout=TIMEOUT,
                                    headers=headers, data=data, json=json)
             code = resp.status_code
+            if lane:                              # a login's or a token's request: tallied, and the limit it announces is read
+                note(url, _endpoint(url), code)
+                announce(url, resp.headers)
+            if login and code == 403:
+                if _bot_page(url, resp):          # Cloudflare's block page: not a password problem, and not for three tries
+                    why = _describe(resp)
+                    resp.close()
+                    log.warning("%s answered 403 with a bot check page (%s)", host, why)
+                    pause(url, _hours(*BOT_REST), "it showed a bot check")
+                    raise SlowDown("%s showed a bot check; Sourcerer leaves it alone for some hours" % host)
+                _say_refusal(url, resp)
             if resp.headers.get("cf-mitigated") == "challenge":
                 resp.close()
                 pause(url, _hours(6, 12), "it showed a bot check")

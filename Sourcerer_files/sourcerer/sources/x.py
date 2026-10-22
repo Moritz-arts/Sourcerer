@@ -9,7 +9,8 @@ X locks accounts that read too much too fast. So the listing is paced
 for an hour or two (waiting it out and going on is what drains an account),
 a locked account pauses X for a day or two instead of being worked around,
 a first sync of a long-running account takes at most MAX_NEW files at a
-time, and the day's files count against net.BUDGETS["x"].
+time, and the day's requests -- X's API calls, counted as gallery-dl makes them --
+count against net.BUDGETS["x"].
 """
 import logging
 import random
@@ -223,14 +224,14 @@ def pages(url):
     if not accounts.logged_in("x"):
         raise LoginRequired("X shows a profile's media only to a logged-in account")
     net._stopped("https://x.com")
-    listing = _gdl.items("https://x.com/%s/media" % _name(url), "twitter", _options(), FIELDS)
+    # The requests X is asked count against the day's budget as gallery-dl makes them (its API only: /i/api/), read from its log.
+    listing = _gdl.items("https://x.com/%s/media" % _name(url), "twitter", _options(), FIELDS, site="https://x.com", only="/i/api/")
     while True:
         net._stopped("https://x.com")      # spent or refused meanwhile: gallery-dl cannot see a pause
         try:
             batch = _run(next, listing)
         except StopIteration:
             return
-        net.spend("https://x.com", len(batch))
         yield [Media(remote_key="x:%s:%s" % (f["tweet"], f["num"]), url=f["url"],
                      post_url="https://x.com/%s/status/%s" % (f.get("user") or _name(url), f["tweet"]),
                      posted=f.get("date") or "", name="%s_%s" % (f["tweet"], f["num"]),

@@ -1068,9 +1068,13 @@ function galSources(list) {
     var of = list.filter(function (s) { return s.label === label; });
     var bad = of.filter(function (s) { return s.error; }), off = !!G.hidden[label];
     var busy = of.some(function (s) { return s.loading; });
-    var ready = !busy && !bad.length && of.every(function (s) { return s.checked || s.state === "done"; });
+    // All artists never asks a login site: its posts are what the last looks saved (Refresh all reads the sites).
+    var stored = of.every(function (s) { return s.offline; }), unlooked = of.filter(function (s) { return s.offline && !s.cached; }).length;
+    var ready = !busy && !bad.length && !stored && of.every(function (s) { return s.checked || s.state === "done"; });
     var news = of.reduce(function (n, s) { return n + (s.new || 0); }, 0);
     var tip = bad.length ? label + ": " + bad[0].error : off ? "Show " + label
+      : stored ? label + ": from the last look, the site is not asked here. Refresh all (F5) reads it" +
+        (unlooked ? " · " + plural(unlooked, "account") + " not looked at yet" : "")
       : busy ? label + ": asking the site…" + (of.length > 1 ? " (" + of.filter(function (s) { return !s.loading; }).length + " of " + of.length + " accounts answered)" : "") : "Hide " + label + (G.all ? " (" + plural(of.length, "source") + ")" : "") +
         (news ? " · " + plural(news, "new post") : "");
     // A spinner while the site is asked, green when it answered, orange when it did not.
@@ -2093,12 +2097,15 @@ S.accFocus = ""; S.accScroll = false; S.accHtml = ""; S.accData = null; S.accWai
 S.accAdding = false; S.accType = ""; S.accBooru = ""; S.accPre = ""; S.importBody = null; S.importAdd = false;
 S.accBusy = {}; S.accError = {}; S.accChecking = {};     // per box: sending, what the site said, being asked
 
+// What the site was asked today, as Sourcerer counted it (real requests; the budget is Sourcerer's own caution, not a limit of the site's).
+function accUsage(a) { return a.usage && a.usage.budget ? " · " + a.usage.used + " of " + a.usage.budget + " requests today" : ""; }
+
 function accState(a) {
   var expired = a.logged_in && a.state === "expired";
   return a.pending === "waiting" ? "Waiting for you to log in in the other window…"
     : expired ? "The login has run out" + (a.checked ? " (noticed " + ago(a.checked) + ")" : "") + " – log in again."
-    : a.logged_in && a.rest ? "Works, but the site rests until " + restUntil(a.rest.until) + ": " + a.rest.why
-    : a.logged_in ? "Logged in" + (a.user ? " as " + a.user : "") + (a.checked ? " · checked " + ago(a.checked) : "")
+    : a.logged_in && a.rest ? "Works, but the site rests until " + restUntil(a.rest.until) + ": " + a.rest.why + accUsage(a)
+    : a.logged_in ? "Logged in" + (a.user ? " as " + a.user : "") + (a.checked ? " · checked " + ago(a.checked) : "") + accUsage(a)
     : a.pending.indexOf("failed: ") === 0 ? a.pending.slice(8)
     : a.pending === "cancelled" ? "Login window closed before the login was finished."
     : "Not logged in";

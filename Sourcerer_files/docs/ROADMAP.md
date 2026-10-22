@@ -308,6 +308,18 @@ add the one that replaced it.
   "index.php"; the member is read from the query now, and the name and picture come from the member's own page. A picture
   wears the title from the listing, and the viewer asks the forum for its description, author, date, size and views (one request, when
   opened -- not one per picture of a listing).
+- 2026-10-22 — **Limits: count what a site is really asked, then ask less.** Two independent researches (2026-10-21, from a hand-off
+  written in v0.42) agree: Mastodon (300 requests / 5 min per account) and Bluesky (3000 / 5 min per IP; `createSession` 30 / 5 min and
+  300 / day) publish limits, while X's web GraphQL, pixiv's ajax and Patreon's web endpoints publish **none** (their terms forbid
+  scraping) -- every daily budget for them is a guess, kept where nobody was locked. A headless browser would change nothing: the
+  limits sit on the account and its cookie, and X, pixiv and Patreon are read through the web with the user's own cookies already --
+  not built, and no way round a protection will be. "X rests until tomorrow" was Sourcerer's own unit: `BUDGETS` counted the files of
+  a page (~10 per request). **v0.43:** `BUDGETS` count real requests (X, Fanbox, Fantia from gallery-dl's `-v` log, `_gdl._Watch`), the
+  log tells the tally per site and kind of request every 50 requests and Manage Accounts shows "N of M requests today", the limits a
+  site announces in its headers are logged (`net.announce`; X's through `gdl_run.py` -- **measured with a guest token: UserByScreenName
+  150, UserMedia 500 per 15 minutes**), a 403 is told by its answer (a Cloudflare block page is a bot check: 12-24 h; JSON is a refused
+  login) and what it looked like is logged (`net._describe`), and **All artists no longer asks login sites at all** -- it shows the
+  snapshots the looks saved (a sync, Refresh all, an artist opened on its own), and Refresh all (F5) reads the sites.
 
 ## Done
 
@@ -422,6 +434,14 @@ add the one that replaced it.
 
 ## Next
 
+- [ ] Limits, next (the research's order of effect): one **combined feed per login site** instead of a read per account (X
+      `HomeLatestTimeline`, pixiv `ajax/follow_latest/illust`, Patreon `/api/stream`, the Mastodon / Misskey home timeline), each
+      stopping at the first known post -- only after its completeness is measured against the per-account reads (nobody documents it;
+      it needs a real login); **tiers** for the per-account safety read (active: every 2-3 days, normal: weekly, dormant: monthly) and
+      Refresh all in the order of the oldest snapshot (it follows the list's order now, so once the share is spent the first cards are
+      scanned every day and the last never); a **backfill quota** of real requests per day (X <= 150, pixiv <= 200, only after 24 h
+      without a complaint of that site); follow lists weekly (daily only the count, compared); back off by the announced window
+      and `Retry-After`. The numbers in `net.BUDGETS` are to be tuned by the tally the logs now hold.
 - [ ] Follows of Patreon (memberships: the endpoint of the page "Memberships" is not documented and needs a real
       login to read; nothing is guessed until then), and a home
       timeline ("Following") in Browse that shows the newest posts of everybody a login follows
@@ -446,7 +466,6 @@ add the one that replaced it.
       newest pages again (gallery-dl's cursor).
 - [ ] Quiet hours: no automatic sync of a logged-in site at night.
 - [ ] Gallery: a filter by date.
-- [ ] Browse: "All artists" reads a first page per source live when no snapshot
-      exists yet; a background timeline that refreshes snapshots of cards
-      nobody has opened would make even the first opening instant.
+- [ ] Browse: a background timeline that refreshes the snapshots of cards nobody has opened would make "All artists" complete
+      without a Refresh all (a login site is never read live there since v0.43; an account with no snapshot shows nothing).
 - [ ] Browse: select several pictures and download them together.

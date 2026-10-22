@@ -124,9 +124,11 @@ def _command(conf, args, url, trace=False):
 def _start(cmd, trace=False):
     # In the one-file build gallery-dl is the program itself again; it shares the parent's unpacked
     # folder unless told otherwise, so it must not be told otherwise (see updater.INDEPENDENT).
+    # trace: True is gdl_run.py's whole shim (X's answers, the follows' recovery); "limits" only reports the limits X announces.
     env = {k: v for k, v in os.environ.items() if k != "PYINSTALLER_RESET_ENVIRONMENT"}
     kwargs = {"stdout": subprocess.PIPE, "stderr": subprocess.PIPE, "stdin": subprocess.DEVNULL,
-              "cwd": str(DIR), "env": dict(env, PYTHONIOENCODING="utf-8", **({"SOURCERER_GDL_TRACE": "1"} if trace else {}))}
+              "cwd": str(DIR), "env": dict(env, PYTHONIOENCODING="utf-8",
+                                           **({"SOURCERER_GDL_TRACE": "limits" if trace == "limits" else "1"} if trace else {}))}
     if os.name == "nt":
         kwargs["creationflags"] = 0x08000000           # CREATE_NO_WINDOW
     return subprocess.Popen(cmd, **kwargs)
@@ -144,17 +146,21 @@ def _failure(code, errors, lines=()):
     return Failed(text, auth=auth, slow=slow)
 
 
-def items(url, section, options, fields, lock=None):
+def items(url, section, options, fields, lock=None, site=None, only=None):
     """Yield pages (lists) of dicts, one per file, newest first.
 
     fields: {name: gallery-dl format expression}, e.g. {"url": "{_url!j}"}.
     lock: what one read at a time is per (the site; a forum is one host, though gallery-dl's section for
     every forum is the same), by default the section.
+    site: a URL of the site whose day's budget this read counts against. gallery-dl runs with -v then and every request it makes is
+    counted (_Watch) -- the files of a page said nothing about what the site was asked. only: a regex the path of a request must
+    match to count (X: its API, not the scripts it loads for the request signature).
     Stopping early -- closing this generator -- ends the gallery-dl process.
     """
     fmt = "prepare:{{" + ",".join('"%s":%s' % (k, v) for k, v in fields.items()) + "}}"
     lock = _site_lock(lock or section)
-    listing = _items(url, section, options, fmt)
+    watch = _Watch(site, only) if site else None
+    listing = _items(url, section, options, fmt, watch)
     try:
         while True:
             if not lock.acquire(timeout=WAIT_INFO):
@@ -165,20 +171,51 @@ def items(url, section, options, fields, lock=None):
                 lock.release()
             if page is None:
                 return
+            if watch and not watch.n:
+                net.spend(site)           # gallery-dl's log shows no request at all (its format changed?): a page is about one
             yield page
     finally:
         listing.close()
 
 
-def _items(url, section, options, fmt):
+class _Watch:
+    """The requests a gallery-dl run makes, read from its -v log: each is counted against the site's budget and tallied
+    (net.spend, net.note), and the limit X announces on its answers (gdl_run.py prints it) goes to net.announce."""
+    LIMIT = re.compile(r"\[sourcerer\]\[limit\] (\S+) (\d+) (\d+) (\S+)")
+
+    def __init__(self, site, only=None):
+        self.site, self.only, self.n = site, re.compile(only) if only else None, 0
+
+    def line(self, text):
+        try:
+            hit = _HTTP.search(text)
+            if hit:
+                if self.only and not self.only.search(hit.group(1)):
+                    return
+                self.n += 1
+                net.note(self.site, hit.group(1).rsplit("/", 1)[-1] or hit.group(1), int(hit.group(2)))
+                net.spend(self.site)
+                return
+            hit = self.LIMIT.search(text)
+            if hit:
+                net.announce(self.site, {"x-rate-limit-limit": hit.group(2), "x-rate-limit-remaining": hit.group(3),
+                                         "x-rate-limit-reset": hit.group(4)}, hit.group(1))
+        except Exception:
+            log.exception("counting gallery-dl's requests")
+
+
+def _items(url, section, options, fmt, watch=None):
     conf = _config(section, options)
-    proc = _start(_command(conf, ["-N", fmt], url))
-    errors, lines = [], []
+    proc = _start(_command(conf, ["-N", fmt] + (["-v"] if watch else []), url, "limits" if watch else False),
+                  "limits" if watch else False)
+    errors, lines = [], collections.deque(maxlen=400)       # (-v: a long listing would keep every debug line)
 
     def read_errors():
         for raw in proc.stderr:
             line = raw.decode("utf-8", "replace").strip()
             lines.append(line)
+            if watch:
+                watch.line(line)
             if "][error]" in line:
                 errors.append(line)
             elif "][warning]" in line:

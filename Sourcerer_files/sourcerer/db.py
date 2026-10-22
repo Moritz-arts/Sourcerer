@@ -3,6 +3,7 @@
 One connection per call site and thread -- the server's request threads and the
 sync thread each open their own, and WAL lets them read while one writes.
 """
+import json
 import shutil
 import sqlite3
 
@@ -191,6 +192,21 @@ def init():
         if not con.execute("SELECT 1 FROM settings WHERE key = 'speed_defaults_v2'").fetchone():
             con.execute("DELETE FROM settings WHERE key IN ('parallel', 'per_host', 'pace_ms', 'login_gap')")
             con.execute("INSERT INTO settings (key, value) VALUES ('speed_defaults_v2', '1')")
+        # X, Fanbox and Fantia counted the files of a page against their day's budget until v0.43; they count the requests gallery-dl
+        # really made now. What the old unit spent today, and the rest it ended ("today's 1500 requests are done"), is dropped once.
+        if not con.execute("SELECT 1 FROM settings WHERE key = 'budget_units_v1'").fetchone():
+            for key, test in (("spent", lambda v: True), ("paused", lambda v: str(v[1]).startswith("today's"))):
+                row = con.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+                try:
+                    data = json.loads(row[0]) if row else None
+                except ValueError:
+                    data = None
+                if isinstance(data, dict):
+                    for site in ("x", "fanbox", "fantia"):
+                        if site in data and test(data[site]):
+                            del data[site]
+                    con.execute("UPDATE settings SET value = ? WHERE key = ?", (json.dumps(data), key))
+            con.execute("INSERT INTO settings (key, value) VALUES ('budget_units_v1', '1')")
 
 
 def _forget_what_was_kept(con):
