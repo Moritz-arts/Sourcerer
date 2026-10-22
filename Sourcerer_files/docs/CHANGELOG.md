@@ -5,6 +5,10 @@ automatically -- one line per change, newest first. A release is drafted by hand
 from the tag of whichever version is judged ready, and this is the text to paste
 into it.
 
+## v0.45 — 2026-10-22
+
+- A sweep leaves a source alone for a while after it was read: Refresh all, the automatic sync and the scan at start hold a look gap that grows with the artist's quiet
+
 ## v0.44 — 2026-10-22
 
 - Patreon's follow lists no longer pause it on a 403, X rests until its rate-limit window reopens, X profile reads are counted
