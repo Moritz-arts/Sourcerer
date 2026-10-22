@@ -488,6 +488,12 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   up and stats only other sources' phash candidates; `sync._adopt` globs and hashes **outside** the global `_save` lock. `net._store`
   only marks state dirty, `_flush()` writes it outside `net._lock` (every request takes it). `accounts.load` caches the file text by
   mtime. `/api/state` leaves out `pending_keys`.
+- **A list that comes back empty without an error needs gallery-dl's own words** (X, v0.38: the log said "came back empty; the Following
+  timeline showed no account" and nothing about why -- `_info` threw its stderr away on exit 0). `_gdl.info(..., verbose=True)` runs
+  gallery-dl with `-v` and logs `gallery-dl twitter: messages {...}; requests: Following 200 1234, ...; it said: ...` (`_digest`: path's
+  last part, status, size, and gallery-dl's own warnings -- `-v` prints no cookie; checked), and `x.following` logs the cookie *names* the
+  login has and the ones gallery-dl is given (never values; a missing `auth_token` makes gallery-dl read as a guest). From this sandbox
+  x.com is reachable, so gallery-dl's behaviour can be tried with fake cookies (`-j -v` against x.com), but not with a real login.
 - **X's follows said nothing when they failed** (no `twid` cookie in the saved login, gallery-dl missing): `x.following` returned
   without a word, and "my X follows are missing" had no trace. It raises now, the log says why, and a failed look of a list
   with `FOLLOWS_HOURS` is tried again after `follows.RETRY_HOURS` (4): the stamp is set back and `start()` sleeps that

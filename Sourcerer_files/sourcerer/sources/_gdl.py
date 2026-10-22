@@ -13,6 +13,7 @@ Its cookies come from a config file written for the one run (mode 600, then
 deleted) -- never the command line, which other programs can read. Its cache
 holds login state and lives in Userdata, like everything Sourcerer keeps.
 """
+import collections
 import importlib.util
 import json
 import logging
@@ -207,23 +208,45 @@ def _items(url, section, options, fmt):
         conf.unlink(missing_ok=True)
 
 
-def info(url, section, options, timeout=120, partial=False):
+def info(url, section, options, timeout=120, partial=False, verbose=False):
     """The JSON gallery-dl gives for a small listing (a profile's info, a list of followed accounts): its messages.
     partial: a list read -- when gallery-dl stops with an error after some messages, those are returned (the accounts
-    already read are not thrown away) unless it was a login or a rate limit."""
+    already read are not thrown away) unless it was a login or a rate limit.
+    verbose: gallery-dl runs with -v and a digest of what it did goes to the log (_digest): a list that comes back empty
+    without an error otherwise says nothing, and gallery-dl's own words were thrown away."""
     lock = _site_lock(section)
     if not lock.acquire(timeout=WAIT_INFO):
         raise net.SlowDown("busy with another listing of this site; try again in a moment")
     try:
-        return _info(url, section, options, timeout, partial)
+        return _info(url, section, options, timeout, partial, verbose)
     finally:
         lock.release()
 
 
-def _info(url, section, options, timeout=120, partial=False):
+_HTTP = re.compile(r'"(?:GET|POST) (/[^ ?"]*)[^"]*" (\d{3}) (\S+)')
+
+
+def _digest(messages, lines):
+    """What a gallery-dl run did, for the log: the kinds of messages it printed, its requests (the last part of the path,
+    status, size) and its own warnings. -v prints no cookie, and the lines are cut to these parts."""
+    kinds = collections.Counter(m[0] for m in messages if m)
+    requests, said = [], []
+    for line in lines:
+        hit = _HTTP.search(line)
+        if hit:
+            requests.append("%s %s %s" % (hit.group(1).rsplit("/", 1)[-1] or hit.group(1), hit.group(2), hit.group(3)))
+        elif "][warning]" in line or "][error]" in line:
+            text = re.sub(r"^\[[\w.-]+\]\[\w+\]\s*", "", line)[:200]
+            if text not in said:
+                said.append(text)
+    return "messages %s; requests: %s; it said: %s" % (dict(kinds) or "none", ", ".join(requests[-12:]) or "none",
+                                                      " | ".join(said[:6]) or "nothing")
+
+
+def _info(url, section, options, timeout=120, partial=False, verbose=False):
     conf = _config(section, options)
     try:
-        proc = _start(_command(conf, ["-j"], url))
+        proc = _start(_command(conf, ["-j"] + (["-v"] if verbose else []), url))
         try:
             out, err = proc.communicate(timeout=timeout)
         except subprocess.TimeoutExpired:
@@ -235,14 +258,18 @@ def _info(url, section, options, timeout=120, partial=False):
         conf.unlink(missing_ok=True)
     lines = err.decode("utf-8", "replace").splitlines()
     if proc.returncode:
+        if verbose:
+            log.info("gallery-dl %s stopped (exit %d): %s", section, proc.returncode, _digest([], lines))
         raise _failure(proc.returncode, [l for l in lines if "][error]" in l], lines)
     messages = json.loads(out.decode("utf-8") or "[]")
+    if verbose:
+        log.info("gallery-dl %s: %s", section, _digest(messages, lines))
     # -j reports an error as a message [-1, {"error": ..., "message": ...}] and exits 0.
     for i, m in enumerate(messages):
         if m and m[0] == -1:
             e = m[-1] if isinstance(m[-1], dict) else {}
             name, text = e.get("error", ""), e.get("message", "")
-            auth = name.startswith("Auth")
+            auth = name.startswith("Auth") or "authenticate you" in text.lower()      # X: AbortExtraction "Could not authenticate you"
             slow = name == "ChallengeError" or "rate limit" in text.lower()      # ratelimit: abort ends with this
             if partial and i and not (auth or slow):
                 log.warning("gallery-dl stopped after %d messages: %s: %s", i, name, text)
