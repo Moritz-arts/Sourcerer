@@ -5,6 +5,12 @@ automatically -- one line per change, newest first. A release is drafted by hand
 from the tag of whichever version is judged ready, and this is the text to paste
 into it.
 
+## v0.39 — 2026-10-22
+
+- Follows: every look logs where each followed account went, and a refused next-page link or a cut list is a warning
+- Workshop: a branch is named after the version it will become, so the newest one is always the highest number
+- X follows: the log says what gallery-dl printed, which cookies it was given and why a list came back empty
+
 ## v0.38 — 2026-10-21
 
 - Speed: indexes on files, duplicates are found by sha first, adopting files no longer holds the save lock, and the scan at start does not wait for every login check
