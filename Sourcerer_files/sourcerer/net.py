@@ -271,6 +271,7 @@ _LIMIT_HEADERS = (("X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Re
                   ("RateLimit-Limit", "RateLimit-Remaining", "RateLimit-Reset"),               # Bluesky
                   ("x-rate-limit-limit", "x-rate-limit-remaining", "x-rate-limit-reset"))      # X's own (gdl_run.py hands them over)
 _said, _low, _refusals_said = set(), {}, {}
+_windows = {}               # (site, kind of request) -> (left, limit, reset as Unix time, when seen): the last window a site announced
 
 
 def _endpoint(url):
@@ -335,7 +336,10 @@ def announce(url, headers, name=""):
         return
     limit, left, host = int(limit), int(left), (urllib.parse.urlparse(url).hostname or "")
     key, now = (host, name), time.time()
+    reset = _as_time(headers.get(names[2]))
     with _lock:
+        if reset:
+            _windows[(site_of(url), name)] = (left, limit, reset, now)
         first = (key, time.strftime("%Y-%m-%d")) not in _said
         _said.add((key, time.strftime("%Y-%m-%d")))
         warn = left <= max(3, limit // 20) and now - _low.get(key, 0) > 600
@@ -347,6 +351,40 @@ def announce(url, headers, name=""):
                  headers.get(names[2]) or "?", ", policy " + headers["RateLimit-Policy"] if headers.get("RateLimit-Policy") else "")
     if warn:
         log.warning("%s: only %d of %d requests are left in this window (resets %s)", where, left, limit, headers.get(names[2]) or "?")
+
+
+def _as_time(value):
+    """A reset header as Unix time: X gives seconds since the epoch, Mastodon a date. None when it is neither."""
+    try:
+        if str(value).strip().replace(".", "", 1).isdigit():
+            return float(value)
+        return datetime.datetime.fromisoformat(str(value).strip().replace("Z", "+00:00")).timestamp()
+    except (TypeError, ValueError):
+        return None
+
+
+def window_wait(url):
+    """Seconds until the window a site announced reopens, when its last answers said little was left of it -- else None. gallery-dl
+    stops X's listing by itself below six requests (`ratelimit: abort`) before X refuses anything: the window is what to wait for,
+    not a random hour or two."""
+    site, now = site_of(url), time.time()
+    with _lock:
+        waits = [reset - now for (s, _), (left, limit, reset, seen) in _windows.items()
+                 if s == site and left <= max(5, limit // 20) and now - seen < 1200 and reset > now]
+    return max(waits) if waits else None
+
+
+@contextlib.contextmanager
+def guess():
+    """A request whose endpoint is a guess (written from a page's requests, never run against a real login: Patreon's follow
+    lists): a 403 on it says nothing about the login and is not counted as a refused one -- three of them paused Patreon for hours
+    although the cookie was fine. A 401, a bot check's page and a 429 are still what they are."""
+    before = getattr(_local, "guess", False)
+    _local.guess = True
+    try:
+        yield
+    finally:
+        _local.guess = before
 
 
 def _sample(resp, size=4000):
@@ -769,7 +807,8 @@ def _get(url, params=None, stream=False, headers=None, method="GET", data=None, 
                 attempt += 1
                 continue
             if login and code in (401, 403):
-                _refusal(url, False)
+                if not (code == 403 and getattr(_local, "guess", False)):
+                    _refusal(url, False)
             elif login and code < 400:
                 _refusal(url, True)
             resp.raise_for_status()

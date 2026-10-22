@@ -5,8 +5,9 @@ pixiv list that (`following(key)` in their modules, yielding (list name, pages o
 "avatar"})). Every followed account becomes a card -- once -- so the list fills itself and a source
 needs no pasted link. Such a card is only *listed* (`artists.listed`): nothing reads its sites in
 the background and nothing downloads until the user does something with it, because hundreds of
-cards looked at by every sweep (the automatic sync, All artists) would be hundreds of requests
-nobody asked for. (Refresh all only scans them -- the newest page -- and stops at half a day's requests.)
+cards looked at by every sweep (the automatic sync) would be hundreds of requests nobody asked for.
+(Refresh all only scans them -- the newest page -- and stops at half a day's requests. All artists
+shows them, from the snapshots those looks saved; it never asks a login site, gallery._Source.seed.)
 
 What is added is remembered (`followed`, by lower-cased profile URL), so a card the user deleted
 does not come back and a card merged into another is not made again. A list read to its end once

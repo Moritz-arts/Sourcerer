@@ -224,7 +224,8 @@ def following(key):
     for name, path, queries, pages in (("memberships", "pledges", ({"page[count]": 100},), 10),
                                        ("feed", "stream", (dict(feed, **{"filter[is_following]": "true"}), feed), FEED_PAGES)):
         try:
-            creators = _read(path, queries, pages)
+            with net.guess():                  # (endpoints written from the page: a 403 on them is no verdict on the login)
+                creators = _read(path, queries, pages)
         except (net.SlowDown, LoginRequired):
             raise
         except Exception as e:

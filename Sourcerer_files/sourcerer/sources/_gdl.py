@@ -196,12 +196,15 @@ class _Watch:
                 net.note(self.site, hit.group(1).rsplit("/", 1)[-1] or hit.group(1), int(hit.group(2)))
                 net.spend(self.site)
                 return
-            hit = self.LIMIT.search(text)
-            if hit:
-                net.announce(self.site, {"x-rate-limit-limit": hit.group(2), "x-rate-limit-remaining": hit.group(3),
-                                         "x-rate-limit-reset": hit.group(4)}, hit.group(1))
+            self.limit(text)
         except Exception:
             log.exception("counting gallery-dl's requests")
+
+    def limit(self, text):
+        hit = self.LIMIT.search(text)
+        if hit:
+            net.announce(self.site, {"x-rate-limit-limit": hit.group(2), "x-rate-limit-remaining": hit.group(3),
+                                     "x-rate-limit-reset": hit.group(4)}, hit.group(1))
 
 
 def _items(url, section, options, fmt, watch=None):
@@ -307,6 +310,10 @@ def _info(url, section, options, timeout=120, partial=False, verbose=False):
     finally:
         conf.unlink(missing_ok=True)
     lines = err.decode("utf-8", "replace").splitlines()
+    if verbose and section == "twitter":          # the limits X announced on this read (gdl_run.py): where its window stands
+        watch = _Watch("https://x.com", "/i/api/")
+        for line in lines:
+            watch.limit(line)
     if proc.returncode:
         if verbose:
             log.info("gallery-dl %s stopped (exit %d): %s", section, proc.returncode, _digest([], lines))
