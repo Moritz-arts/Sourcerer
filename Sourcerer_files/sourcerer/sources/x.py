@@ -153,6 +153,7 @@ def following(key):
     jar = accounts.jar("x")
     # Names only, never a value: an `auth_token` or `ct0` that is missing makes gallery-dl read as a guest, which shows no list.
     _gdl.LAST.pop("account", None)                       # whose list this read is: set by the read itself, never by an earlier one
+    _gdl.LAST.pop("cut", None)
     given = accounts.jar("x", fresh=True)
     log.info("X follows: the saved login has the cookies %s; gallery-dl gets %s%s", ", ".join(sorted(jar)) or "none",
              ", ".join(sorted(given)) or "none", ("; left out as expired: " + ", ".join(sorted(set(jar) - set(given)))) if set(jar) - set(given) else "")
@@ -160,7 +161,7 @@ def following(key):
     me = re.sub(r"\D", "", twid.rpartition("%3D")[2] or twid.rpartition("=")[2])
     if not _gdl.available():
         raise RuntimeError("X's list needs gallery-dl, which did not install: Settings > Repair")
-    problem = ""
+    problem, note, home = "", "", False
     net._stopped("https://x.com")
     if me:
         try:
@@ -168,13 +169,22 @@ def following(key):
             net.spend("https://x.com", max(1, len(messages) // 50))
             out = _followed(messages)
             problem = "" if out else "X's list of followed accounts came back empty" + _who()
+            cut = _gdl.LAST.pop("cut", None)
+            if out and cut:                                # an error after some accounts: what came is kept, and the look is not "done"
+                note = "X's list was cut off after %d accounts (%s: %s) -- the rest comes with the next look" % (
+                    cut["n"], cut["error"], cut["message"][:80])
         except (net.SlowDown, LoginRequired):
             raise
         except Exception as e:
             out, problem = [], net.reason(e)
     else:
         out, problem = [], "the saved login has no twid cookie, so X's own account is unknown"
-    note = ""
+    if not out and (_gdl.LAST.get("account") or {}).get("follows") == 0:
+        # An account that follows nobody has no timeline of followed accounts either: asking X for it again is no use, and
+        # the next look is the next ordinary one, not four hours away.
+        error = RuntimeError(problem)
+        error.final = True
+        raise error
     if not out:
         try:
             net._stopped("https://x.com")
@@ -188,7 +198,8 @@ def following(key):
         if not out:
             raise RuntimeError("%s; the Following timeline showed no account" % problem)
         note = "%s -- the %d accounts of the Following timeline were taken instead (log in to X again if the full list should come)" % (problem, len(out))
-    yield "home" if note else "", [out[i:i + 100] for i in range(0, len(out), 100)], note
+        home = True
+    yield "home" if home else "", [out[i:i + 100] for i in range(0, len(out), 100)], note
 
 
 def profile(url):

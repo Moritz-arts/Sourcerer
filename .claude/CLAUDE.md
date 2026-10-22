@@ -499,6 +499,19 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   follows `sourcerer/gdl_run.py` is gallery-dl's entry point (`SOURCERER_GDL_TRACE`): it writes the shape of X's answers to stderr
   (`[sourcerer][trace] Following {...}`, keys and kinds only), and reads users wherever X put them, page by page by the bottom cursor, when gallery-dl
   found none. The one-file build dispatches `--gallery-dl` through it (app.py); the plain run stays `python -m gallery_dl`.
+- **The wrong X account was the whole mystery** (v0.41, 2026-10-22: the login was @Moritz_Art, which follows nobody; after logging in as the account
+  that follows, `X: 329 followed accounts read: 291 new card, 38 joined an artist`). An account that follows nobody is final: no timeline fallback and no
+  retry within hours (`RuntimeError.final`, `follows._retry_soon`). A list **cut off** by an error (`_gdl.LAST["cut"]`) is kept but is a note, so `_look`
+  neither stamps it "read to its end" nor holds the next look back. A Mastodon `Link: rel=next` with `http://` on the host that was just reached over
+  https is asked over https; any other next link raises (the list must not look complete when it is not). `follows._prime` resolves a page's hosts
+  *before* `_adding`, `combine()` runs under `_adding`, and `_add` drops a twin that was merged away meanwhile.
+- **"All artists" keeps to half of a login site's day** (`gallery._Source.start_fill`: `spaced` + `login` + `net.scan_room`, like Refresh all): it
+  asks every account once, and 291 X follows are about 5800 files against X's 1500 a day -- the budget would be gone after ~75 accounts, X would rest
+  until tomorrow and syncs and single artists would be left with nothing. Past the share a source says so (orange chip) and shows only its snapshot;
+  an artist opened on its own is never held back. The better design for X would be its Following timeline as one feed (`HomeLatestTimeline`), mapped
+  to the cards by author -- not built.
+- **The activity bar writes what changes at every poll in place** (`data-dyn` text, bar width, speed, file) and rebuilds only when its structure
+  changes: comparing the whole markup still rebuilt it at every poll of a running download and swallowed the click on Cancel.
 - **An empty X list may be the right answer for the wrong account** (v0.40's trace: `Following` = ClearCache + cursors and no user anywhere, `HomeLatestTimeline`
   = cursors only). `gdl_run.py` asks `UserByRestId` for the login's own account and logs `account {"screen_name", "follows", "followers"}`; `x._who()` puts it
   into the warning ("the login is @name, and X says that account follows nobody: log in ... with the account that follows the artists"). Timeline entries are

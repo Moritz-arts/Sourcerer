@@ -151,13 +151,17 @@ def _store(key):
 
 def _flush():
     from . import db
+    if not _dirty:                               # (every spend() asks: nothing to write must not wait for a write that is on its way)
+        return
     with _flushing:
         while _dirty:
             key, text = _dirty.popitem()
             try:
                 db.set_setting(key, text)
-            except Exception as e:               # the state stays in memory and is written with the next change
+            except Exception as e:               # kept, and written with the next change: a rest of a day must not be forgotten
+                _dirty.setdefault(key, text)
                 log.warning("could not save %s: %s", key, e)
+                break
 
 
 def pause(url, seconds, why):
@@ -454,19 +458,19 @@ class _Polite:
                 # One at a time: the gap runs from the end of the last request,
                 # so a slow answer does not eat it.
                 at = (entry["end"] if self.login else entry["start"]) + pace * random.uniform(*JITTER)
-                pause = 0.0
+                reading_break = 0.0                  # (not "pause": that is the module's function to rest a site)
                 if self.login:
                     entry["count"] += 1
                     if entry["count"] >= entry["break"] and not self.first:
                         entry["count"], entry["break"] = 0, random.randint(*READ_EVERY)
-                        pause = random.uniform(*READ_BREAK)
+                        reading_break = random.uniform(*READ_BREAK)
                 now = time.monotonic()
-                entry["start"] = max(at + pause, now)
+                entry["start"] = max(at + reading_break, now)
             if at > now:
                 time.sleep(at - now)
             # The reading break is slept holding the lane's only slot: somebody who opens the artist meanwhile
             # (first) must not wait a minute for it. It ends as soon as one waits; the gap above stays.
-            end = time.monotonic() + pause
+            end = time.monotonic() + reading_break
             while time.monotonic() < end and not entry["first"]:
                 time.sleep(0.2)
             _stopped(self.url)                   # a pause may have begun meanwhile
@@ -682,12 +686,16 @@ def get_json_next(url, params=None, headers=None):
         resp = _get(url, params, headers=headers)
         found = (resp.links.get("next") or {}).get("url")
     here, there = urllib.parse.urlsplit(url), urllib.parse.urlsplit(found or "")
-    if found and not (there.scheme == "https" and there.netloc.lower() == here.netloc.lower()):
-        # A server behind a proxy that does not know it is https writes http:// here: the list would end after its
-        # first page, "read to its end", with no word about the rest.
-        log.warning("%s: the next page is at %s, which is not followed (another host or not https): the list may be cut short",
-                    here.netloc, there.scheme + "://" + there.netloc)
-    return resp.json(), (found if there.scheme == "https" and there.netloc.lower() == here.netloc.lower() else None)
+    same_host = there.netloc.lower() == here.netloc.lower()
+    if found and there.scheme == "http" and same_host and here.scheme == "https":
+        # A server behind a proxy that does not know it is https writes http:// here: the same host, which this request
+        # reached over https, is asked over https again -- the list would end after its first page otherwise.
+        found, there = "https" + found[4:], there._replace(scheme="https")
+    if found and not (there.scheme == "https" and same_host):
+        # Another host, or no https: the token must not go there, and a list that ends here is not read to its end.
+        raise RuntimeError("the next page of the list is at %s, which Sourcerer does not follow (another host or not https): "
+                           "the list is cut short" % (there.scheme + "://" + there.netloc))
+    return resp.json(), found
 
 
 def public_https(url):

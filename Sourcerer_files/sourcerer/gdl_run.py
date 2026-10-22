@@ -90,7 +90,7 @@ def install():
 
     def call(self, endpoint, params, *args, **kwargs):
         data = plain_call(self, endpoint, params, *args, **kwargs)
-        self._sourcerer_last = data
+        self._sourcerer_pages = getattr(self, "_sourcerer_pages", [])[-60:] + [data]          # every answer of this read, for users()
         try:
             name = endpoint.rsplit("/", 1)[-1]
             _say(name, _outline(data))
@@ -102,26 +102,37 @@ def install():
             pass
         return data
 
-    def users(self, endpoint, variables, path=None):
+    def users(self, *args, **kwargs):                            # (any signature a newer gallery-dl may have: only the recovery below needs the first two)
+        mark = len(getattr(self, "_sourcerer_pages", []))
         found = 0
-        for user in plain_users(self, endpoint, variables, path):
+        for user in plain_users(self, *args, **kwargs):
             found += 1
             yield user
         if found:
             return
-        # gallery-dl found none in the answer it was given: look for users anywhere in it, page after page
-        seen, data = set(), getattr(self, "_sourcerer_last", None)
-        for _ in range(PAGES):
-            got = list(_users_anywhere(data, seen)) if data else []
-            yield from got
-            cursor = _bottom_cursor(data) if data else None
-            if not got or not cursor or cursor.startswith(("-1|", "0|")):
-                break
-            variables["cursor"] = cursor
-            data = self._call(endpoint, {"variables": self._json_dumps(variables),
-                                         "features": self._json_dumps(self.features_pagination)})
-        if seen:
-            _say("users", "%d found outside the place gallery-dl looks" % len(seen))
+        # gallery-dl found none in the answers it was given: look for users anywhere in them -- every page it read, not
+        # only the last -- and go on by the bottom cursor of the last
+        try:
+            endpoint, variables = args[0], args[1]
+            seen, pages = set(), list(getattr(self, "_sourcerer_pages", []))[mark:]
+            for data in pages:
+                yield from _users_anywhere(data, seen)
+            data = pages[-1] if pages else None
+            for _ in range(PAGES):
+                cursor = _bottom_cursor(data) if data else None
+                if not cursor or cursor.startswith(("-1|", "0|")):
+                    break
+                variables["cursor"] = cursor
+                data = self._call(endpoint, {"variables": self._json_dumps(variables),
+                                             "features": self._json_dumps(self.features_pagination)})
+                got = list(_users_anywhere(data, seen))
+                yield from got
+                if not got:
+                    break
+            if seen:
+                _say("users", "%d found outside the place gallery-dl looks" % len(seen))
+        except Exception as e:                                   # a gallery-dl that changed: as if the recovery was not there
+            _say("users", "recovery failed: %s" % e)
 
     api._call, api._pagination_users = call, users
 

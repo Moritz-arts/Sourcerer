@@ -323,6 +323,8 @@ def _add(page, kind, public, twins=None, stats=None):
             have.add(key)
             name, site_kind = _name(f, url), sources.kind_of(url)
             twin = twins.find(name, {site_kind}, url, links) if twins else None
+            if twin and not con.execute("SELECT 1 FROM artists WHERE id = ?", (twin,)).fetchone():
+                twin = None                                 # merged away by combine() since this look began: the account gets a card of its own
             picture = f.get("avatar") if isinstance(f.get("avatar"), str) and f["avatar"].startswith("https://") else None
             if twin:                                        # the same artist on another site: one card
                 con.execute("INSERT INTO sources (artist_id, url, kind, links, alias) VALUES (?, ?, ?, ?, ?)",
@@ -350,6 +352,27 @@ def _add(page, kind, public, twins=None, stats=None):
 
 # ---- the lists ------------------------------------------------------------------------
 
+def _retry_soon(site, key):
+    """A costly list that did not come whole is looked at again after RETRY_HOURS, not at the next ten to fourteen hours."""
+    global _retry
+    hours = getattr(site, "FOLLOWS_HOURS", 0)
+    if hours:
+        _retry = True
+        db.set_setting("follows_at:" + key, str(time.time() - max(0, hours - RETRY_HOURS) * 3600))
+
+
+def _prime(page, kind, public):
+    """The hosts of a page resolved before the page is added: _add runs under _adding, and a slow resolver would hold every other
+    login's cards up (net.public_https asks the DNS)."""
+    for f in page:
+        raw = f.get("url") or ""
+        site = sources.site_for(raw)
+        if site and (site.KIND == kind or {kind, site.KIND} == {"mastodon", "misskey"}):
+            host = urllib.parse.urlsplit(raw).hostname or ""
+            if host not in public:
+                public[host] = net.public_https(raw)
+
+
 def _look(key):
     """One login's lists. Returns how many cards they made."""
     global _retry
@@ -367,6 +390,7 @@ def _look(key):
             done = "follows_read:%s:%s" % (key, name)
             for page in pages:
                 seen += len(page)
+                _prime(page, site.KIND, public)
                 with _adding:                        # (the lists of several logins are read side by side, the cards made one look at a time)
                     made, all_known = _add(page, site.KIND, public, twins, stats)
                 total += made
@@ -374,19 +398,17 @@ def _look(key):
                     early = True
                     break                    # read to its end before: the rest is known
             else:
-                db.set_setting(done, stamp)
+                if not fallback:                      # a list that was cut off is not "read to its end": its tail is read at the next look
+                    db.set_setting(done, stamp)
     except Exception as e:
         why = net.reason(e)
-        hours = getattr(site, "FOLLOWS_HOURS", 0)
-        if hours:                                     # a failed look of a costly list: tried again after RETRY_HOURS (start())
-            _retry = True
-            db.set_setting("follows_at:" + key, str(time.time() - max(0, hours - RETRY_HOURS) * 3600))
+        if not getattr(e, "final", False):            # (a list that is empty for good -- an account that follows nobody -- is not asked again within hours)
+            _retry_soon(site, key)                    # a failed look of a costly list: tried again after RETRY_HOURS (start())
         log.info("%s: the list of followed accounts stopped: %s", key, why)
         sync.event("warn", "%s: the list of followed accounts stopped (%s); the next look carries on" % (label, why))
     else:
         if fallback:                                  # a part of the list is no list: the full one is tried again soon, not after a day
-            _retry = True
-            db.set_setting("follows_at:" + key, str(time.time() - max(0, getattr(site, "FOLLOWS_HOURS", 0) - RETRY_HOURS) * 3600))
+            _retry_soon(site, key)
         elif seen:
             db.set_setting("follows_seen:" + key, str(seen))
         if not seen and key not in _told_empty:         # an empty list used to be silent, and "my follows are missing" left no trace
@@ -543,7 +565,7 @@ def look(only=None):
             t.start()
         for t in threads:
             t.join()
-    with _lock:
+    with _lock, _adding:                                  # (never between two pages of a look that is still adding cards)
         combine()
         rename_listed()
 

@@ -191,16 +191,21 @@ function problems() {
 var activityHtml = "";
 function renderActivity() {
   var s = S.sync || {}, cur = s.current, q = s.queue || [], html;
+  // What changes at every poll of a running download -- the text, the bar, the speed, the file -- is written into the bar in place
+  // (data-dyn): rebuilding the markup for it swallowed a click that began before the poll (the Cancel button).
+  var dyn = {};
   if (cur) {
     var a = artistById(cur.artist_id) || { name: cur.name };
     var scan = cur.phase === "scan", pct = cur.total ? 100 * cur.done / cur.total : 0;
+    dyn = { text: cur.mode === "refresh" || cur.mode === "scan" ? "Looking for new posts · " + cur.found + " found"
+                  : scan ? "Checking sources · " + cur.found + " new"
+                  : "Downloading " + cur.done + " / " + cur.total,
+            bar: pct, speed: cur.speed ? bytes(cur.speed) + "/s" : "", file: cur.file || "" };
     html = '<div class="state">' + avatarHtml(a, "xs") + "<b>" + esc(cur.name) + "</b>" +
-      '<span class="num">' + (cur.mode === "refresh" || cur.mode === "scan" ? "Looking for new posts · " + cur.found + " found"
-                              : scan ? "Checking sources · " + cur.found + " new"
-                              : "Downloading " + cur.done + " / " + cur.total) + "</span>" +
-      '<div class="bar' + (scan ? " indeterminate" : "") + '"><div style="width:' + pct + '%"></div></div>' +
-      (!scan && cur.speed ? '<span class="num">' + bytes(cur.speed) + "/s</span>" : "") +
-      (cur.file ? '<span class="file" title="' + esc(cur.file) + '">' + esc(cur.file) + "</span>" : "") + "</div>";
+      '<span class="num" data-dyn="text"></span>' +
+      '<div class="bar' + (scan ? " indeterminate" : "") + '"><div data-dyn="bar" style="width:0%"></div></div>' +
+      (!scan && cur.speed ? '<span class="num" data-dyn="speed"></span>' : "") +
+      (cur.file ? '<span class="file" data-dyn="file"></span>' : "") + "</div>";
     if (q.length) {
       html += '<span class="queue" title="Waiting: ' + esc(q.slice(0, 20).map(function (id) {
         return (artistById(id) || {}).name; }).join(", ") + (q.length > 20 ? ", … (" + q.length + " in all)" : "")) + '">' +
@@ -232,6 +237,12 @@ function renderActivity() {
     icon("list") + " Activity" + (n ? '<span class="count">' + n + "</span>" : "") + icon("chevron-up", "chev") + "</button>";
   // Only when the markup changed: it is drawn at every poll (0.7 s) and a click whose press and release straddle a rebuild is lost.
   if (html !== activityHtml) { activityHtml = html; $("activity").innerHTML = html; }
+  ["text", "speed", "file"].forEach(function (k) {
+    var el = $("activity").querySelector('[data-dyn="' + k + '"]');
+    if (el && el.textContent !== dyn[k]) { el.textContent = dyn[k]; if (k === "file") el.title = dyn[k]; }
+  });
+  var barEl = $("activity").querySelector('[data-dyn="bar"]');
+  if (barEl) barEl.style.width = (dyn.bar || 0) + "%";
   $("btn-sync-all").disabled = !S.artists.length;
   if (open) renderLog();
 }

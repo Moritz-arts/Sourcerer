@@ -193,6 +193,13 @@ class _Source:
         with self.lock:
             if self.done or self.closed or self.running():
                 return
+            if self.spaced and self.login and not net.scan_room(self.row["url"]):
+                # All artists asks every account once: hundreds of a login site's follows would use the whole day's requests of
+                # that site (X: 291 follows, about 5800 files against 1500) and leave nothing for syncs and single artists. It
+                # keeps to half, as Refresh all does; an artist opened on its own is not held back.
+                self.done = self.checked = True
+                self.error = "All artists has used its share of %s's requests today -- open the artist, or look again tomorrow" % self.label
+                return
             if self.serial:
                 with _lock:
                     if self.where in _serial:
