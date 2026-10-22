@@ -524,15 +524,24 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   `RateLimit-*`, X `x-rate-limit-*`) and a warning when under 5 % is left; Manage Accounts shows "N of M requests today". **Measured, guest
   token, 2026-10-22: X announces UserByScreenName 150 and UserMedia 500 per 15 minutes** -- far above the daily budget, so the budget is
   Sourcerer's caution against *account reputation* (nobody publishes a number for that), not against the rate limit. The values in `net.BUDGETS`
-  (X 600, Fanbox / Fantia 300, pixiv / Patreon 1500) are guesses; tune them by the tally. pixiv and Patreon count every request of the lane,
-  image downloads included, as before.
+  (X 600, Fanbox / Fantia 300, pixiv / Patreon 1500) are guesses; tune them by the tally. pixiv and Patreon count every request of their cookie
+  lane, which is their API hosts only: the cookie domains are `pixiv.net` and `patreon.com` (`accounts.SITES`), so downloads from `i.pximg.net` and
+  `patreonusercontent.com` carry no login and are not counted (v0.43's first text said they were -- wrong). **X's window, not a random hour** (v0.44):
+  gallery-dl stops X's listing by itself when `x-rate-limit-remaining` falls below six (`ratelimit: abort`, "Rate limit exceeded") -- X refused nothing --
+  so `x._run` rests X until the window the last answers announced reopens (`net.window_wait`, from `net.announce`; `gdl_run.py` prints the headers
+  and `_Watch.limit` / `_info` read them), plus 30-120 s; where no window is known (a challenge) it is the random hour or two. `x.profile()` counts one
+  request too (a profile picture per card every 7 days was X traffic the budget never saw).
 - **A 403 on a login is told by its answer** (`net._bot_page`, `_describe`, `_say_refusal`): an HTML page with a Cloudflare challenge's words
   (or, on the big login sites whose API only ever answers JSON, from behind Cloudflare at all) is a **bot check** -- the site rests `BOT_REST` (12-24 h),
   nothing is counted as a refused login; any other 403 is a refusal (three in 15 minutes rest the site 2-4 h) and its look is logged once per ten
   minutes ("answered 403 on /api/stream: text/html, server cloudflare, cf-ray, title ..."): kind of answer, server, title or JSON error code,
   never a value of the account. A forum's own 403 ("you may not view this") is HTML too, so the Server header alone does not make it a bot check
   there. Patreon's 403 on `/api/pledges` and `/api/stream` (v0.41) said "refused the login three times" and was probably Cloudflare; the new log
-  line says which.
+  line says which. **A guessed endpoint's 403 is no verdict on the login** (v0.44, `net.guess()`): Patreon's two follow-list reads (`/api/pledges`,
+  `/api/stream`) are written from the page's requests and were never run against a real login; their 403s counted as refused logins and the
+  third in 15 minutes paused Patreon for 2-4 h although the cookie was fine (the card said "Works") -- and logging in again lifted the pause
+  and the next follow read tripped it again. Inside `net.guess()` a 403 is not counted (it is still logged, and a Cloudflare block page is
+  still a bot check); a 401 still counts. The read's own note says what it could not read.
 - **The activity bar writes what changes at every poll in place** (`data-dyn` text, bar width, speed, file) and rebuilds only when its structure
   changes: comparing the whole markup still rebuilt it at every poll of a running download and swallowed the click on Cancel.
 - **An empty X list may be the right answer for the wrong account** (v0.40's trace: `Following` = ClearCache + cursors and no user anywhere, `HomeLatestTimeline`

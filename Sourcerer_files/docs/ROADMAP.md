@@ -434,6 +434,15 @@ add the one that replaced it.
 
 ## Next
 
+- [ ] **Your own gallery, without asking the sites for every opening** (the user, 2026-10-22: pictures already downloaded could replace the
+      online query, but not all 900 artists will be downloaded). Two sources fill one local timeline: (1) the **library** -- a downloaded
+      post needs no request at all, so All artists could show an artist's whole downloaded history from the `files` table; (2) for everybody
+      else a **metadata-only timeline** (post id, date, the site's picture addresses -- what the snapshots hold, no picture on disk) filled by
+      **one feed per login site** in the background, a few requests per round (X `HomeLatestTimeline`: 50 posts of everybody per request;
+      pixiv `follow_latest`; Patreon `/api/stream`; the Mastodon / Misskey home timeline), polled every 1-3 h within the day's budget.
+      The pictures themselves come from the CDNs (pbs.twimg.com, i.pximg.net: no cookie, no budget, as the thumbnails do now), so scrolling
+      costs the sites' login lanes nothing. First a diagnostic with the user's real login: does the feed show every media post of every
+      followed account (compare it with `UserMedia` / `profile/all` for ~20 artists), and how far back does it reach?
 - [ ] Limits, next (the research's order of effect): one **combined feed per login site** instead of a read per account (X
       `HomeLatestTimeline`, pixiv `ajax/follow_latest/illust`, Patreon `/api/stream`, the Mastodon / Misskey home timeline), each
       stopping at the first known post -- only after its completeness is measured against the per-account reads (nobody documents it;

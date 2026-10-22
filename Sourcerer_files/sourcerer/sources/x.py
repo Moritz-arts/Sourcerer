@@ -80,6 +80,14 @@ def _run(fn, *args):
                       "X locked the account -- unlock it at x.com in your browser")
             raise net.SlowDown("X locked the account; Sourcerer leaves X alone for a day or two") from e
         if e.slow:
+            # gallery-dl stops by itself when X's window is nearly used up (below six requests left: "Rate limit exceeded") --
+            # X refused nothing. The window says when it reopens (gdl_run.py hands over its headers); a random hour or two only
+            # where nothing is known (a challenge).
+            wait = net.window_wait("https://x.com") if "rate limit" in text else None
+            if wait is not None:
+                net.pause("https://x.com", wait + random.uniform(30, 120),
+                          "its rate-limit window is used up (gallery-dl stopped before X refused); it reopens then")
+                raise net.SlowDown("X's rate-limit window is used up; it reopens in %d minutes" % (wait // 60 + 1)) from e
             net.pause("https://x.com", random.uniform(1, 2) * 3600, "X asked Sourcerer to slow down")
             raise net.SlowDown("X asked Sourcerer to slow down; it rests for a while") from e
         if e.auth:
@@ -209,6 +217,8 @@ def profile(url):
         raise RuntimeError("X needs gallery-dl, which did not install: Settings > Repair")
     net._stopped("https://x.com")
     messages = _run(_gdl.info, "https://x.com/%s/info" % _name(url), "twitter", _options())
+    net.spend("https://x.com")                 # (a profile picture every week per card: one request the budget did not see)
+    net.note("https://x.com", "UserByScreenName")
     user = next((m[-1] for m in messages if m and m[0] == 2 and isinstance(m[-1], dict)), {})
     return {"name": user.get("nick") or user.get("name") or _name(url),
             "handle": "@" + (user.get("name") or _name(url)),
