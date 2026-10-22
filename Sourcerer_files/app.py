@@ -6,8 +6,8 @@ import sys
 # sources/_gdl.py) is Sourcerer.exe started with --gallery-dl. Before anything else is imported.
 if getattr(sys, "frozen", False) and sys.argv[1:2] == ["--gallery-dl"]:
     sys.argv = ["gallery-dl"] + sys.argv[2:]
-    import gallery_dl
-    sys.exit(gallery_dl.main())
+    from sourcerer.gdl_run import main      # plain gallery-dl, but for the reads of X's follows (SOURCERER_GDL_TRACE)
+    sys.exit(main())
 
 # The window probe of sourcerer/desktop.py: the exe is its own Python here too.
 if getattr(sys, "frozen", False) and sys.argv[1:2] == ["--window-check"]:

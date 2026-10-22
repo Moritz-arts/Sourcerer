@@ -840,6 +840,18 @@ def gallery_close():
 
 
 HWND = [None]            # the window's handle, read on the window's own thread (desktop._custom_frame)
+_USER32 = []
+
+
+def own_user32():
+    """user32 for Sourcerer's own calls, as a DLL object of its own. `ctypes.windll.user32` is one object for the whole process:
+    the argtypes set on its functions reach pywebview's calls too, and pywebview moves a window with SetWindowPos(..., None, None, ...)
+    for the width and height, which a c_int argtype refuses -- every drag of the window ended in an ArgumentError and the window
+    could not be moved (v0.37-v0.39)."""
+    if not _USER32:
+        import ctypes
+        _USER32.append(ctypes.WinDLL("user32"))
+    return _USER32[0]
 
 
 def keep_taskbar(window):
@@ -856,7 +868,7 @@ def keep_taskbar(window):
         class MONITORINFO(ctypes.Structure):
             _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT), ("rcWork", wintypes.RECT),
                         ("dwFlags", wintypes.DWORD)]
-        user32 = ctypes.windll.user32
+        user32 = own_user32()
         user32.MonitorFromWindow.argtypes = [wintypes.HWND, wintypes.DWORD]
         user32.MonitorFromWindow.restype = wintypes.HANDLE
         user32.GetMonitorInfoW.argtypes = [wintypes.HANDLE, ctypes.POINTER(MONITORINFO)]
