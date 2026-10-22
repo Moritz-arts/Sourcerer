@@ -140,6 +140,7 @@ COLUMNS = {
         "pending": "INTEGER NOT NULL DEFAULT 0",   # its newest posts a look found that are not in the library
         "pending_keys": "TEXT",            # JSON: the remote_keys of those (at most sync.PENDING_KEYS), so a download from Browse can tell
         "latest": "TEXT",                  # when its newest post was made (UTC, "YYYY-MM-DD HH:MM:SS"), from the last look at it
+        "looked_at": "TEXT",               # when it was last READ successfully (UTC): what a sweep's look gap counts from (sync._cooling)
     },
     "files": {
         "phash": "TEXT",                  # imaging fingerprint; NULL for video
@@ -192,6 +193,11 @@ def init():
         if not con.execute("SELECT 1 FROM settings WHERE key = 'speed_defaults_v2'").fetchone():
             con.execute("DELETE FROM settings WHERE key IN ('parallel', 'per_host', 'pace_ms', 'login_gap')")
             con.execute("INSERT INTO settings (key, value) VALUES ('speed_defaults_v2', '1')")
+        # A sweep leaves a source alone for a while after it was read (sync._cooling): the gap counts from looked_at, which only a successful
+        # read sets -- a look that failed or met a resting site is no reason to wait. What was read before this existed counts from last_checked.
+        if not con.execute("SELECT 1 FROM settings WHERE key = 'looked_at_v1'").fetchone():
+            con.execute("UPDATE sources SET looked_at = last_checked WHERE last_error IS NULL AND last_checked IS NOT NULL")
+            con.execute("INSERT INTO settings (key, value) VALUES ('looked_at_v1', '1')")
         # X, Fanbox and Fantia counted the files of a page against their day's budget until v0.43; they count the requests gallery-dl
         # really made now. What the old unit spent today, and the rest it ended ("today's 1500 requests are done"), is dropped once.
         if not con.execute("SELECT 1 FROM settings WHERE key = 'budget_units_v1'").fetchone():

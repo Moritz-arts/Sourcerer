@@ -95,6 +95,7 @@ def save(source_id, items, merge=True):
             con.execute("INSERT INTO snapshots (source_id, fetched, tail, data) VALUES (?, ?, ?, ?) "
                         "ON CONFLICT (source_id) DO UPDATE SET fetched = excluded.fetched, tail = excluded.tail, "
                         "data = excluded.data", (source_id, stamp(now), stamp(tail), blob))
+            con.execute("UPDATE sources SET looked_at = datetime('now') WHERE id = ?", (source_id,))      # (a sweep's look gap counts from here)
             if newest:       # "latest activity" in Browse's list: when each artist last posted
                 con.execute("UPDATE sources SET latest = ? WHERE id = ? AND (latest IS NULL OR latest < ?)",
                             (newest, source_id, newest))
