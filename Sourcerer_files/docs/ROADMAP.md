@@ -321,6 +321,13 @@ add the one that replaced it.
   login) and what it looked like is logged (`net._describe`), and **All artists no longer asks login sites at all** -- it shows the
   snapshots the looks saved (a sync, Refresh all, an artist opened on its own), and Refresh all (F5) reads the sites.
 
+- 2026-10-22 — **Look gaps: a sweep does not read a source again that it read lately.** The user's idea: an artist does not post every few
+  minutes, so there is no reason to check one every time. `sync._cooling` holds every sweep (the automatic sync, the scan at start and **Refresh
+  all**, which until now read all 291 X cards on every press) away from a source read within its gap: 12 / 24 / 72 h on X (6 on pixiv and
+  Patreon) for an active / normal / dormant artist (a post in the last 7 / 60 days / older), 1 / 6 / 24 h where limits are published; a card
+  asked for by name is never held back, and the log says how many were left alone. Together with v0.43 (All artists shows snapshots) this is the
+  first half of "read all artists without reaching a limit"; the second half is one feed per login site (below).
+
 ## Done
 
 - [x] Repository workshop: CLAUDE.md, docs, version workflow
@@ -446,9 +453,9 @@ add the one that replaced it.
 - [ ] Limits, next (the research's order of effect): one **combined feed per login site** instead of a read per account (X
       `HomeLatestTimeline`, pixiv `ajax/follow_latest/illust`, Patreon `/api/stream`, the Mastodon / Misskey home timeline), each
       stopping at the first known post -- only after its completeness is measured against the per-account reads (nobody documents it;
-      it needs a real login); **tiers** for the per-account safety read (active: every 2-3 days, normal: weekly, dormant: monthly) and
-      Refresh all in the order of the oldest snapshot (it follows the list's order now, so once the share is spent the first cards are
-      scanned every day and the last never); a **backfill quota** of real requests per day (X <= 150, pixiv <= 200, only after 24 h
+      it needs a real login); Refresh all in the order of the oldest read (it follows the list's order now, so once the
+      share is spent the first cards are scanned every day and the last never; the look gaps of v0.45 -- tiers by activity -- spare most
+      of the repeats, the feeds below the rest; a safety-net read per artist every 2-3 days / weekly / monthly stays to be tuned); a **backfill quota** of real requests per day (X <= 150, pixiv <= 200, only after 24 h
       without a complaint of that site); follow lists weekly (daily only the count, compared); back off by the announced window
       and `Retry-After`. The numbers in `net.BUDGETS` are to be tuned by the tally the logs now hold.
 - [ ] Follows of Patreon (memberships: the endpoint of the page "Memberships" is not documented and needs a real

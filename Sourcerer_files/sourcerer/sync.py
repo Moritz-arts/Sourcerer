@@ -50,9 +50,14 @@ MAX_PAGES = int(os.environ.get("SOURCERER_MAX_PAGES", "500"))
 AVATAR_DAYS = 7              # how often a profile picture is looked for again
 ACCOUNT_HOURS = (5, 9)       # how often the saved logins are checked, drawn anew each time
 CHECKED_HOURS = 12           # a login checked this recently is not asked again at a start
-# Automatic syncs come no closer than this to a site where an account can be
-# locked (a sync started by hand does not wait).
+# A sweep (the automatic sync, the scan at start, Refresh all) comes no closer than this to a site where an account can be
+# locked -- the shortest gap between two reads of one source; a card somebody asks for by name is not held back (_cooling).
 MIN_HOURS = {"x": 12, "pixiv": 6, "patreon": 6, "xenforo": 12, "fanbox": 6, "fantia": 6}
+# ... and the longer the artist has been quiet, the longer the gap: an artist rarely posts every few hours, and every read is a request a site
+# can count against the account. Hours for an active source (a post in the last COOL_DAYS[0] days), a normal one (COOL_DAYS[1]) and a dormant
+# one: a cookie login's site starts from MIN_HOURS, a site with published limits (a token, no login) from COOL_OPEN.
+COOL_DAYS = (7, 60)
+COOL_OPEN = (1, 6, 24)
 # Seconds before the next card asks a site where a cookie login can get banned (pixiv, X, Patreon, a forum) the last one
 # used -- Settings > Sync decides how careful. Token logins (Mastodon, Bluesky) are not spaced: the lane paces them.
 LOGIN_GAPS = {"careful": (15, 60), "normal": (10, 30), "fast": (3, 15)}
@@ -63,7 +68,8 @@ GIVE_UP = 3                  # syncs a file may fail before its source completes
 _lock = threading.Lock()
 _save = threading.Lock()     # deciding and saving happen one file at a time
 _queue = []                  # artist ids waiting
-_auto = set()                # of those, queued by the automatic sync
+_auto = set()                # of those, queued by a sweep (the automatic sync, the scan at start, Refresh all): the look gaps hold (_cooling)
+_cooled = collections.Counter()   # site -> sources a sweep left alone because they were read lately; said once when the sweep is done
 _starting = set()            # popped by a worker, not in _running yet: busy all the same (merge asks, _pick avoids its sites)
 _only = {}                   # artist id -> ids of the only sources a queued sync asks (Browse: download these)
 _modes = {}                  # artist id -> "refresh", "download" or "scan" for a queued job (none: the card's auto-download decides)
@@ -248,9 +254,9 @@ def enqueue(artist_ids=None, auto=False, only=None, mode=None, everyone=False, o
                 followed += 1
                 _followup[i] = None if (not only or (i in _followup and _followup[i] is None)) else \
                     (_followup.get(i) or set()) | set(only)
-        if auto:
+        if auto or artist_ids is None:       # a sweep -- Refresh all too: it is not a card somebody asked for by name
             _auto.update(added)
-        else:                              # somebody asked: not the careful automatic kind any more
+        else:                              # somebody asked: not the careful sweep kind any more
             _auto.difference_update(added if only else ids)     # (a restricted ask of a queued card changes nothing else)
         # Under the same lock a worker leaves in when it runs dry, so an artist queued in that
         # moment never waits for a worker that is gone.
@@ -371,19 +377,28 @@ def _spawn():
 def _work():
     me = threading.current_thread()
     while True:
+        cooled = {}
         with _lock:
             artist_id = _pick() if _queue else None
             if artist_id is None:
                 _workers.discard(me)
                 if not _workers and not _running:
                     _state["finished"] = _now()
-                return
-            _starting.add(artist_id)
-            auto = artist_id in _auto
-            only = _only.pop(artist_id, None)
-            mode = _modes.pop(artist_id, None)
-            _auto.discard(artist_id)
-            cancel = _cancels[artist_id] = threading.Event()
+                    cooled = dict(_cooled)
+                    _cooled.clear()
+            else:
+                _starting.add(artist_id)
+                auto = artist_id in _auto
+                only = _only.pop(artist_id, None)
+                mode = _modes.pop(artist_id, None)
+                _auto.discard(artist_id)
+                cancel = _cancels[artist_id] = threading.Event()
+        if artist_id is None:
+            if cooled:
+                event("info", "%d sources were left alone, read lately (%s) -- an artist posts rarely, so a sweep reads one again only after a few "
+                      "hours, days when it is quiet; a card asked for by name is always looked at" % (
+                          sum(cooled.values()), ", ".join("%s %d" % (net.name_of(k), n) for k, n in sorted(cooled.items(), key=lambda kv: -kv[1])[:5])))
+            return
         try:
             _sync_artist(artist_id, auto, only, mode)
         except Exception as e:                       # never leave a card stuck as running
@@ -751,12 +766,21 @@ def refresh_avatar(artist_id, force=False):
 
 # ---- one artist ---------------------------------------------------------------
 
-def _too_soon(src, site, auto):
-    """An automatic sync leaves a site where accounts get locked alone for MIN_HOURS."""
-    hours = MIN_HOURS.get(net.site_of(src["url"])) or MIN_HOURS.get(site.KIND)
-    if not auto or not hours or not src["last_checked"]:
+def _cooling(src, site, sweep, backlog=False):
+    """Whether a sweep leaves this source alone: it was read lately, by the gap its activity earns (MIN_HOURS / COOL_OPEN, longer the
+    longer the artist has been quiet: sources.latest). A card somebody asked for by name -- a click on Refresh or Download, a gallery
+    opened -- is never held back; a source with a backlog to download keeps the shortest gap; one never read (or whose last look failed)
+    has no gap at all."""
+    if not sweep or not src["looked_at"]:
         return False
-    return _hours_since(src["last_checked"].replace(" ", "T") + "+00:00") < hours
+    base = MIN_HOURS.get(net.site_of(src["url"])) or MIN_HOURS.get(site.KIND)
+    gaps = (base, max(24, base * 2), 72) if base else COOL_OPEN
+    if backlog or not src["latest"]:
+        hours = gaps[0] if backlog else gaps[1]                    # (a source that never showed a post date is a normal one)
+    else:
+        quiet = _hours_since(src["latest"].replace(" ", "T") + "+00:00") / 24
+        hours = gaps[0] if quiet <= COOL_DAYS[0] else gaps[1] if quiet <= COOL_DAYS[1] else gaps[2]
+    return _hours_since(src["looked_at"].replace(" ", "T") + "+00:00") < hours
 
 
 def _space_out(where, artist_id, focused=False):
@@ -837,7 +861,7 @@ def _sync_artist(artist_id, auto=False, only=None, mode=None):
         _focused.discard(artist_id)
 
     def look(src):
-        """One source looked at: what it found, or why not. None: left alone (cancelled, or too soon after the last sync)."""
+        """One source looked at: what it found, or why not. None: left alone (cancelled, or read lately: _cooling)."""
         if _cancelled(cur):
             return None
         site = sources.site_for(src["url"])
@@ -852,7 +876,9 @@ def _sync_artist(artist_id, auto=False, only=None, mode=None):
         if rest:                                  # not even one request: the site said stop
             error, level = "%s rests until %s: %s" % (site.LABEL, time.strftime(
                 "%H:%M", time.localtime(rest[0])), rest[1]), "warn"
-        elif _too_soon(src, site, auto):
+        elif _cooling(src, site, auto, download and not src["complete"]):
+            with _lock:
+                _cooled[where] += 1
             return None
         elif scanning and not net.scan_room(src["url"]):
             _scan_told(where, site.LABEL)             # a sweep has had its share of the day's requests here: the rest is for downloads
@@ -882,8 +908,10 @@ def _sync_artist(artist_id, auto=False, only=None, mode=None):
                 elif not isinstance(e, net.SlowDown):    # a pause says so itself, once
                     event("warn", "%s could not be reached: %s" % (site.LABEL, error), artist)
         with db.connect() as con:
-            con.execute("UPDATE sources SET last_checked = datetime('now'), last_error = ?, "
-                        "last_level = ? WHERE id = ?", (error, level, src["id"]))
+            # looked_at is what a sweep's look gap counts from: only a read that worked sets it (a look that failed, or met a resting site, is no reason to wait)
+            con.execute("UPDATE sources SET last_checked = datetime('now'), last_error = ?, last_level = ?, "
+                        "looked_at = CASE WHEN ? THEN datetime('now') ELSE looked_at END WHERE id = ?",
+                        (error, level, 1 if out["looked"] and not error else 0, src["id"]))
         return out
 
     # The card's sources are looked at side by side where they are on different sites -- each site has its own

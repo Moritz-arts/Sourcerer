@@ -514,6 +514,18 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   the chip is hollow with the tooltip "from the last look ... Refresh all (F5) reads it". **Refresh all is what asks the sites** (mode `scan`,
   half of the day: `net.scan_room`), and a finished sync opens the gallery again from the fresh snapshots. An artist opened on its own is read live as
   ever. The better design for X (its Following timeline as one feed, `HomeLatestTimeline`, mapped to the cards by author) is not built.
+- **A sweep leaves a source alone for a while after it was read** (v0.45, `sync._cooling`, `sources.looked_at`): the user's idea -- an artist rarely
+  posts every few hours, so a source read lately is not read again by a *sweep* (the automatic sync, the scan at start, **Refresh all** -- until v0.44
+  only the automatic ones kept `MIN_HOURS`, and F5 read all 291 X cards every time). The gap grows with how long the artist has been quiet
+  (`sources.latest`: active = a post in the last 7 days, normal = 60, dormant): a cookie login's site (`MIN_HOURS`: X 12 h, pixiv / Patreon / Fanbox /
+  Fantia 6 h, forums 12 h) 12 / 24 / 72 h (the shortest is `MIN_HOURS` itself, the others `max(24, 2 x it)` and 72 h), a site with published limits
+  (token or none) 1 / 6 / 24 h (`COOL_OPEN`); a source that never showed a post date is a normal one. **Never held back:** a card somebody asked
+  for by name (Refresh or Download on a card, a gallery opened: `enqueue([ids])` is not a sweep, `_auto` marks the sweep's cards), a source never read, and
+  the shortest gap only for a source with a backlog to download (a card with auto-download whose source is not `complete`). **`looked_at` is set only by a
+  read that worked** (`look()` without an error, and `snapshots.save`, so Browse's first page counts too): a look that failed, or met a resting site, is
+  no reason to wait; `db.init` fills it once from `last_checked` for looks without an error (`looked_at_v1`). A sweep says once, when it is done,
+  "N sources were left alone, read lately (X 120, Pixiv 40, ...)" (`_cooled`) -- "I pressed Refresh all and nothing happened" must be answerable
+  from the log; the per-card Refresh always reads.
 - **`BUDGETS` count real HTTP requests, and the tally says what they were** (v0.43, `net.note`, `net.usage`, `net.announce`, `_gdl._Watch`): until
   v0.42 X, Fanbox and Fantia counted the *files* of a page (~10 per request), so "today's 1500 requests are done" was about 150 real ones -- Sourcerer's
   own unit, not X's limit (`db.init` drops that day's old counts once, `budget_units_v1`). gallery-dl runs with `-v` for these listings
