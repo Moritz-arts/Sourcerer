@@ -22,8 +22,18 @@ SHOWN = ("type", "__typename", "entryId", "cursorType", "entryType", "itemType",
 PAGES = 40                       # pages of users the way round reads at most
 
 
+def _kind(entry):
+    return re.sub(r"[-_]?\d{4,}.*", "", str(entry.get("entryId")))[:40]            # "tweet-123..." -> "tweet", "cursor-top-17..." -> "cursor-top"
+
+
 def _outline(x, depth=0, key=""):
-    """The shape of an answer: keys, how many in a list and what its first has, the kind of every value."""
+    """The shape of an answer: keys, how many in a list and what its first has, the kind of every value.
+    A list of timeline entries is told by its kinds (what is in the timeline: tweets, users, only cursors), a list of
+    instructions by every one of them -- the first of four said nothing in v0.40."""
+    if isinstance(x, list) and x and all(isinstance(i, dict) and "entryId" in i for i in x):
+        return {"entries": [_kind(i) for i in x[:24]], "count": len(x)}
+    if isinstance(x, list) and key == "instructions" and all(isinstance(i, dict) for i in x):
+        return [_outline(i, depth + 1, key) for i in x[:8]]
     if isinstance(x, dict):
         if depth > 12:
             return "{%d}" % len(x)
@@ -82,7 +92,12 @@ def install():
         data = plain_call(self, endpoint, params, *args, **kwargs)
         self._sourcerer_last = data
         try:
-            _say(endpoint.rsplit("/", 1)[-1], _outline(data))
+            name = endpoint.rsplit("/", 1)[-1]
+            _say(name, _outline(data))
+            if name == "UserByRestId":                           # who the login is, and how many accounts X says it follows
+                user = data["data"]["user"]["result"]
+                _say("account", {"screen_name": user["core"]["screen_name"], "follows": user["legacy"]["friends_count"],
+                                 "followers": user["legacy"]["followers_count"]})
         except Exception:
             pass
         return data

@@ -1060,7 +1060,7 @@ function galSources(list) {
     var ready = !busy && !bad.length && of.every(function (s) { return s.checked || s.state === "done"; });
     var news = of.reduce(function (n, s) { return n + (s.new || 0); }, 0);
     var tip = bad.length ? label + ": " + bad[0].error : off ? "Show " + label
-      : busy ? label + ": asking the site…" : "Hide " + label + (G.all ? " (" + plural(of.length, "source") + ")" : "") +
+      : busy ? label + ": asking the site…" + (of.length > 1 ? " (" + of.filter(function (s) { return !s.loading; }).length + " of " + of.length + " accounts answered)" : "") : "Hide " + label + (G.all ? " (" + plural(of.length, "source") + ")" : "") +
         (news ? " · " + plural(news, "new post") : "");
     // A spinner while the site is asked, green when it answered, orange when it did not.
     var state = busy ? '<i class="spin"></i>' : '<i class="dot ' + (bad.length ? "warn" : ready ? "ok" : "blank") + '"></i>';
