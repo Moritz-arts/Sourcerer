@@ -178,11 +178,23 @@ def items(url, section, options, fields, lock=None, site=None, only=None):
         listing.close()
 
 
+_LIMIT = re.compile(r"\[sourcerer\]\[limit\] (\S+) (\d+) (\d+) (\S+)")
+
+
+def _limit_line(site, text):
+    """A line gdl_run.py printed for the limit X announced on an answer: net.announce keeps it (the window, and what is left of it)."""
+    hit = _LIMIT.search(text)
+    if hit:
+        try:
+            net.announce(site, {"x-rate-limit-limit": hit.group(2), "x-rate-limit-remaining": hit.group(3),
+                                "x-rate-limit-reset": hit.group(4)}, hit.group(1))
+        except Exception:
+            log.exception("reading the limit gallery-dl's log shows")
+
+
 class _Watch:
     """The requests a gallery-dl run makes, read from its -v log: each is counted against the site's budget and tallied
     (net.spend, net.note), and the limit X announces on its answers (gdl_run.py prints it) goes to net.announce."""
-    LIMIT = re.compile(r"\[sourcerer\]\[limit\] (\S+) (\d+) (\d+) (\S+)")
-
     def __init__(self, site, only=None):
         self.site, self.only, self.n = site, re.compile(only) if only else None, 0
 
@@ -196,15 +208,9 @@ class _Watch:
                 net.note(self.site, hit.group(1).rsplit("/", 1)[-1] or hit.group(1), int(hit.group(2)))
                 net.spend(self.site)
                 return
-            self.limit(text)
+            _limit_line(self.site, text)
         except Exception:
             log.exception("counting gallery-dl's requests")
-
-    def limit(self, text):
-        hit = self.LIMIT.search(text)
-        if hit:
-            net.announce(self.site, {"x-rate-limit-limit": hit.group(2), "x-rate-limit-remaining": hit.group(3),
-                                     "x-rate-limit-reset": hit.group(4)}, hit.group(1))
 
 
 def _items(url, section, options, fmt, watch=None):
@@ -311,9 +317,8 @@ def _info(url, section, options, timeout=120, partial=False, verbose=False):
         conf.unlink(missing_ok=True)
     lines = err.decode("utf-8", "replace").splitlines()
     if verbose and section == "twitter":          # the limits X announced on this read (gdl_run.py): where its window stands
-        watch = _Watch("https://x.com", "/i/api/")
         for line in lines:
-            watch.limit(line)
+            _limit_line("https://x.com", line)
     if proc.returncode:
         if verbose:
             log.info("gallery-dl %s stopped (exit %d): %s", section, proc.returncode, _digest([], lines))

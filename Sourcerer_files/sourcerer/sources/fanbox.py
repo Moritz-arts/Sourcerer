@@ -71,7 +71,8 @@ def following(key):
         seen = set()
         for endpoint, name in (("creator.listFollowing", "following"), ("plan.listSupporting", "supporting")):
             try:
-                body = net.get_json("https://api.fanbox.cc/" + endpoint, headers={"Origin": HOME}).get("body") or []
+                with net.guess(name == "supporting"):    # (the bonus list is a guess: a 403 on it is no verdict on the login)
+                    body = net.get_json("https://api.fanbox.cc/" + endpoint, headers={"Origin": HOME}).get("body") or []
             except Exception:
                 if name == "supporting":         # the second list is a bonus: its shape is the site's to change
                     break

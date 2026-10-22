@@ -529,8 +529,11 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   `patreonusercontent.com` carry no login and are not counted (v0.43's first text said they were -- wrong). **X's window, not a random hour** (v0.44):
   gallery-dl stops X's listing by itself when `x-rate-limit-remaining` falls below six (`ratelimit: abort`, "Rate limit exceeded") -- X refused nothing --
   so `x._run` rests X until the window the last answers announced reopens (`net.window_wait`, from `net.announce`; `gdl_run.py` prints the headers
-  and `_Watch.limit` / `_info` read them), plus 30-120 s; where no window is known (a challenge) it is the random hour or two. `x.profile()` counts one
-  request too (a profile picture per card every 7 days was X traffic the budget never saw).
+  and `_Watch.limit` / `_info` read them), plus 30-120 s; where no window is known (a challenge), or X stopped the same way less than two hours ago (`x.WINDOW_AGAIN`: the
+  pace is too much, and waiting it out and going on is what drains an account), it is the random hour or two. A reset header is believed only
+  as seconds or milliseconds of a finite time and a window of at most an hour (`net._as_time`, `MAX_WINDOW`): a skewed clock or another unit
+  would otherwise be saved as a pause of thousands of years. `x.profile()` counts one request too -- failed ones as well, and only with an X
+  login saved (a guest read is nobody's budget); a profile picture per card every 7 days was X traffic the budget never saw.
 - **A 403 on a login is told by its answer** (`net._bot_page`, `_describe`, `_say_refusal`): an HTML page with a Cloudflare challenge's words
   (or, on the big login sites whose API only ever answers JSON, from behind Cloudflare at all) is a **bot check** -- the site rests `BOT_REST` (12-24 h),
   nothing is counted as a refused login; any other 403 is a refusal (three in 15 minutes rest the site 2-4 h) and its look is logged once per ten
@@ -541,14 +544,17 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   `/api/stream`) are written from the page's requests and were never run against a real login; their 403s counted as refused logins and the
   third in 15 minutes paused Patreon for 2-4 h although the cookie was fine (the card said "Works") -- and logging in again lifted the pause
   and the next follow read tripped it again. Inside `net.guess()` a 403 is not counted (it is still logged, and a Cloudflare block page is
-  still a bot check); a 401 still counts. The read's own note says what it could not read.
+  still a bot check, but only by its own words -- inside it the Server header alone no longer makes one); a 401 still counts. The read's own
+  note says what it could not read. `net.guess()` works through a thread-local flag, not an argument (the reads go through helpers that know
+  nothing of it): **keep it around the one call**, as `patreon.following` and Fanbox's `plan.listSupporting` do, never around a block that
+  calls a helper which makes other requests.
 - **The activity bar writes what changes at every poll in place** (`data-dyn` text, bar width, speed, file) and rebuilds only when its structure
   changes: comparing the whole markup still rebuilt it at every poll of a running download and swallowed the click on Cancel.
 - **An empty X list may be the right answer for the wrong account** (v0.40's trace: `Following` = ClearCache + cursors and no user anywhere, `HomeLatestTimeline`
   = cursors only). `gdl_run.py` asks `UserByRestId` for the login's own account and logs `account {"screen_name", "follows", "followers"}`; `x._who()` puts it
   into the warning ("the login is @name, and X says that account follows nobody: log in ... with the account that follows the artists"). Timeline entries are
   traced by their kinds (`cursor-top`, `tweet`, `user`, `who-to-follow`), instructions all of them. The page's site chips say "N of M accounts answered" while
-  they spin: in All artists a login site's sources are asked one after the other (`CARD_GAP`), so a site with 400 accounts spins for a long time.
+  they spin: a login site's accounts are asked one after the other (`CARD_GAP` in All artists before v0.43; All artists no longer asks a login site, so a spinning chip there is a Bluesky, Mastodon, Misskey or booru account).
 - **A list that comes back empty without an error needs gallery-dl's own words** (X, v0.38: the log said "came back empty; the Following
   timeline showed no account" and nothing about why -- `_info` threw its stderr away on exit 0). `_gdl.info(..., verbose=True)` runs
   gallery-dl with `-v` and logs `gallery-dl twitter: messages {...}; requests: Following 200 1234, ...; it said: ...` (`_digest`: path's
@@ -931,9 +937,10 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   `POOL` daemon threads shared by all galleries, each source in its own polite
   lane; a site gallery-dl reads -- `SERIAL`: X, forums -- and every login's
   site is asked one source at a time, the one asked longest ago first, or the
-  first cards would starve the rest and sit in pool threads; "All artists" also
-  spaces a login site's next *card* (`CARD_GAP`, much shorter than sync's
-  `sync.next_card()`: somebody is looking), so its login sources trickle in; a fill that
+  first cards would starve the rest and sit in pool threads; "All artists" used to
+  space a login site's next *card* (`CARD_GAP`, much shorter than sync's
+  `sync.next_card()`: somebody is looking) -- since v0.43 its login sources are `offline`
+  (snapshots only) and never reach that code, which only an artist opened on its own could use (it has no `spaced`); a fill that
   was queued when its gallery closed or its site went off does not run): the first page leaves once
   something can be shown and `SLOW` seconds have gone for the rest, later pages
   wait `SLOW_LATER` -- a slow source (X through gallery-dl, a forum) comes with

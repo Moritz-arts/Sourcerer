@@ -100,8 +100,8 @@ BUDGETS = {"pixiv": 1500, "patreon": 1500, "x": 600, "fanbox": 300, "fantia": 30
 BUDGET = 3000
 BOT_REST = (12, 24)         # hours a site rests after it answered with a block page (not a challenge that passes)
 
-# A site is every host one company runs: a stop from pixiv's API stops its
-# image host too, and a day's budget counts them together.
+# A site is every host one company runs: a stop from pixiv's API stops its image host too (pause()). The day's budget counts only
+# the requests that carry the login -- the API hosts: the cookie domains (accounts.SITES) leave out the image hosts.
 _SITES = {"pixiv.net": "pixiv", "pximg.net": "pixiv", "patreon.com": "patreon",
           "patreonusercontent.com": "patreon", "x.com": "x", "twitter.com": "x", "twimg.com": "x",
           "bsky.app": "bluesky", "bsky.network": "bluesky", "bsky.social": "bluesky",
@@ -265,6 +265,7 @@ def scan_room(url):
 
 # ---- what was really asked, and what the sites say about their limits -------------------------------------
 
+MAX_WINDOW = 3600           # seconds: the longest rate-limit window believed (X's are 15 minutes)
 MAX_ENDPOINTS = 40          # kinds of request kept per site and day; the rest is counted together
 TALLY_EVERY = 50            # the tally is saved and said in the log every this many requests of a site
 _LIMIT_HEADERS = (("X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset"),         # Mastodon
@@ -354,13 +355,15 @@ def announce(url, headers, name=""):
 
 
 def _as_time(value):
-    """A reset header as Unix time: X gives seconds since the epoch, Mastodon a date. None when it is neither."""
+    """A reset header as Unix time: X gives seconds since the epoch (a value that large is milliseconds), Mastodon a date.
+    None when it is neither, or not a finite time."""
     try:
-        if str(value).strip().replace(".", "", 1).isdigit():
-            return float(value)
-        return datetime.datetime.fromisoformat(str(value).strip().replace("Z", "+00:00")).timestamp()
-    except (TypeError, ValueError):
+        text = str(value).strip()
+        when = float(text) if text.replace(".", "", 1).isdigit() else datetime.datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp()
+    except (TypeError, ValueError, OverflowError):
         return None
+    when = when / 1000 if when > 1e11 else when
+    return when if 0 < when < 4e9 else None
 
 
 def window_wait(url):
@@ -370,17 +373,17 @@ def window_wait(url):
     site, now = site_of(url), time.time()
     with _lock:
         waits = [reset - now for (s, _), (left, limit, reset, seen) in _windows.items()
-                 if s == site and left <= max(5, limit // 20) and now - seen < 1200 and reset > now]
-    return max(waits) if waits else None
+                 if s == site and left <= max(5, limit // 20) and now - seen < 1200 and 0 < reset - now <= MAX_WINDOW]
+    return max(waits) if waits else None             # (a window longer than X's quarter of an hour is not believed: a skewed clock, another unit)
 
 
 @contextlib.contextmanager
-def guess():
+def guess(on=True):
     """A request whose endpoint is a guess (written from a page's requests, never run against a real login: Patreon's follow
     lists): a 403 on it says nothing about the login and is not counted as a refused one -- three of them paused Patreon for hours
     although the cookie was fine. A 401, a bot check's page and a 429 are still what they are."""
     before = getattr(_local, "guess", False)
-    _local.guess = True
+    _local.guess = before or on
     try:
         yield
     finally:
@@ -433,6 +436,8 @@ def _bot_page(url, resp):
         return False
     if any(w in _sample(resp).lower() for w in _BLOCK_WORDS):
         return True
+    if getattr(_local, "guess", False):               # a guessed endpoint: only the page's own words, not the Server header
+        return False
     return site_of(url) in BUDGETS and ("cloudflare" in (resp.headers.get("Server") or "").lower() or bool(resp.headers.get("cf-ray")))
 
 
@@ -728,15 +733,8 @@ def _retry_after(resp):
         return int(resp.json()["errors"][0]["retry_after_seconds"])
     except Exception:
         pass
-    reset = (resp.headers.get("X-RateLimit-Reset") or "").strip()
-    if reset:
-        try:
-            when = float(reset) if reset.replace(".", "").isdigit() else \
-                datetime.datetime.fromisoformat(reset.replace("Z", "+00:00")).timestamp()
-            return max(0.0, when - time.time())
-        except ValueError:
-            pass
-    return None
+    when = _as_time(resp.headers.get("X-RateLimit-Reset"))
+    return max(0.0, when - time.time()) if when else None
 
 
 def _get(url, params=None, stream=False, headers=None, method="GET", data=None, json=None, tries=None,
