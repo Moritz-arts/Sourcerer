@@ -5,15 +5,19 @@ name=orig, the highest-bitrate video -- need no login and are downloaded by
 Sourcerer itself.
 
 X locks accounts that read too much too fast. So the listing is paced
-(sleep-request, a random gap), a rate limit ends the listing and X rests
-for an hour or two (waiting it out and going on is what drains an account),
-a locked account pauses X for a day or two instead of being worked around,
+(sleep-request, a random gap), a rate limit ends the listing (gallery-dl stops by
+itself when X's window is nearly used up, before X refuses anything) and X rests
+until that window reopens -- a quarter of an hour; a second stop within two hours
+means the pace is too much and X rests an hour or two (waiting it out and going on
+is what drains an account), a locked account pauses X for a day or two instead of
+being worked around,
 a first sync of a long-running account takes at most MAX_NEW files at a
 time, and the day's requests -- X's API calls, counted as gallery-dl makes them --
 count against net.BUDGETS["x"].
 """
 import logging
 import random
+import time
 
 import re
 
@@ -34,6 +38,8 @@ OPTIONS = {"sleep-request": "2.0-4.0", "ratelimit": "abort", "locked": "abort",
 # gap of 2-4 s each, somebody opening an artist waited ten seconds. A person scrolling x.com asks
 # as often, so an open gallery reads at about half that gap -- still random, never regular.
 OPEN_SLEEP = "1.0-2.0"
+WINDOW_AGAIN = 2 * 3600   # a second window-abort within this long rests X for an hour or two, not just until the window reopens
+_window_rest = [0.0]      # when X last rested until its window reopened
 FOLLOWS_HOURS = 23        # follows.py reads the list of followed accounts at most this often
 LOGIN = ("required", "X shows a profile's media only to logged-in accounts.")
 FIELDS = {"url": "{_url!j}", "tweet": "{tweet_id!j}", "num": "{num!j}", "key": "{filename!j}",
@@ -84,7 +90,8 @@ def _run(fn, *args):
             # X refused nothing. The window says when it reopens (gdl_run.py hands over its headers); a random hour or two only
             # where nothing is known (a challenge).
             wait = net.window_wait("https://x.com") if "rate limit" in text else None
-            if wait is not None:
+            if wait is not None and time.time() - _window_rest[0] > WINDOW_AGAIN:
+                _window_rest[0] = time.time()
                 net.pause("https://x.com", wait + random.uniform(30, 120),
                           "its rate-limit window is used up (gallery-dl stopped before X refused); it reopens then")
                 raise net.SlowDown("X's rate-limit window is used up; it reopens in %d minutes" % (wait // 60 + 1)) from e
@@ -216,9 +223,12 @@ def profile(url):
     if not _gdl.available():
         raise RuntimeError("X needs gallery-dl, which did not install: Settings > Repair")
     net._stopped("https://x.com")
-    messages = _run(_gdl.info, "https://x.com/%s/info" % _name(url), "twitter", _options())
-    net.spend("https://x.com")                 # (a profile picture every week per card: one request the budget did not see)
-    net.note("https://x.com", "UserByScreenName")
+    try:
+        messages = _run(_gdl.info, "https://x.com/%s/info" % _name(url), "twitter", _options())
+    finally:
+        if accounts.logged_in("x"):            # (a profile picture every week per card: a request the budget did not see -- failed ones too)
+            net.spend("https://x.com")
+            net.note("https://x.com", "UserByScreenName")
     user = next((m[-1] for m in messages if m and m[0] == 2 and isinstance(m[-1], dict)), {})
     return {"name": user.get("nick") or user.get("name") or _name(url),
             "handle": "@" + (user.get("name") or _name(url)),
