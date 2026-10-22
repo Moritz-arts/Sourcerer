@@ -222,7 +222,11 @@ stays with the diff.
 
 ## How a change reaches people
 
-1. Work on the branch you were told to use, push it, open a pull request.
+1. Work on a branch **named after the version it will become** -- `claude/v0.39-<short-topic>`: the number is the
+   current `Sourcerer_files/VERSION` plus one (a second branch open at the same time takes the one after), so the newest
+   branch is always the highest number (the user's rule, 2026-10-22: two branches with names of no order were confusing).
+   It holds whatever name a session hands out, and one branch per change -- never a second branch for the same commit.
+   Push it, open a pull request.
 2. The user merges it into `main`.
 3. The workflow raises the version, writes the changelog line, tags the commit
    (`v0.1`), and pushes commit and tag together. It does **not** publish a
