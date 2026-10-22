@@ -1276,6 +1276,8 @@ def _adopt(artist, src, media, folder, cur):
     with _save, db.connect() as con:
         if not known and con.execute("SELECT 1 FROM files WHERE path = ?", (path,)).fetchone():
             return False                                      # another worker took that file while this one hashed it
+        if known and not con.execute("SELECT 1 FROM archive WHERE remote_key = ?", (media.remote_key,)).fetchone():
+            return False                                      # ... or adopted it from the archive: one file, one row
         _record(con, artist, src, media, sha, path, phash, width, height, size)
         con.execute("DELETE FROM archive WHERE remote_key = ?", (media.remote_key,))
     with _lock:

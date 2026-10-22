@@ -258,7 +258,14 @@ def _info(url, section, options, timeout=120, partial=False, verbose=False):
         except subprocess.TimeoutExpired:
             # Left running it would go on asking the site with the account's cookies while the next listing starts.
             proc.kill()
-            proc.communicate()
+            try:
+                proc.communicate(timeout=5)
+            except subprocess.TimeoutExpired:         # the one-file build: kill() reaches the bootloader, its child keeps the pipes open
+                for pipe in (proc.stdout, proc.stderr):
+                    try:
+                        pipe.close()
+                    except OSError:
+                        pass
             raise Failed("gallery-dl took more than %d s; it was stopped" % timeout) from None
     finally:
         conf.unlink(missing_ok=True)
@@ -286,6 +293,7 @@ def _info(url, section, options, timeout=120, partial=False, verbose=False):
             slow = name == "ChallengeError" or "rate limit" in text.lower()      # ratelimit: abort ends with this
             if partial and i and not (auth or slow):
                 log.warning("gallery-dl stopped after %d messages: %s: %s", i, name, text)
+                LAST["cut"] = {"n": i, "error": name, "message": text}       # the list is not whole: x.following says so (_look must not call it read)
                 return messages[:i]
             raise Failed("%s: %s" % (name, text), auth=auth, slow=slow)
     return messages

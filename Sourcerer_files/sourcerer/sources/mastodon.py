@@ -187,7 +187,7 @@ def following(key):
             seen.add(url)
             found, url = net.get_json_next(url, params, headers=_auth(server))
             params = None                  # the Link header's address carries them
-            if len(seen) >= MAX_FOLLOW_PAGES:
+            if url and len(seen) >= MAX_FOLLOW_PAGES:
                 log.warning("%s: the list of followed accounts was cut at %d pages", server, MAX_FOLLOW_PAGES)
             yield [{"url": a["url"], "name": re.sub(r":[\w+-]+:", "", a.get("display_name") or "").strip() or a.get("username", ""),
                     "avatar": "" if (a.get("avatar_static") or "").endswith("/missing.png") else a.get("avatar_static") or "",
