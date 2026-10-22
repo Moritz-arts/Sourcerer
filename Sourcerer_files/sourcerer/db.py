@@ -175,6 +175,11 @@ def init():
         if not con.execute("SELECT 1 FROM settings WHERE key = 'follow_links_v1'").fetchone():
             con.execute("DELETE FROM settings WHERE key LIKE 'follows_read:%'")
             con.execute("INSERT INTO settings (key, value) VALUES ('follow_links_v1', '1')")
+        # The summary line of each look says where every followed account went (follows._look); the fediverse lists are read to
+        # their end once more, so the first line is a whole count -- the early stop at the first known page would hide the rest.
+        if not con.execute("SELECT 1 FROM settings WHERE key = 'follow_count_v1'").fetchone():
+            con.execute("DELETE FROM settings WHERE key LIKE 'follows_read:mastodon:%' OR key LIKE 'follows_read:misskey:%'")
+            con.execute("INSERT INTO settings (key, value) VALUES ('follow_count_v1', '1')")
         # A card is named by its @name now (follows.card_name); the display name a one-account card had stays with that
         # account (a card of several accounts does not say which of them the name was).
         if not con.execute("SELECT 1 FROM settings WHERE key = 'aliases_v1'").fetchone():
