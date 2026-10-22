@@ -5,6 +5,10 @@ automatically -- one line per change, newest first. A release is drafted by hand
 from the tag of whichever version is judged ready, and this is the text to paste
 into it.
 
+## v0.43 — 2026-10-22
+
+- Limits: requests are counted as made (X, Fanbox, Fantia from gallery-dl's log), a 403 is told by its answer, and All artists never asks a login site
+
 ## v0.42 — 2026-10-22
 
 - Review fixes: a cut follow list is not 'read', All artists keeps to half of a login site's day, and the activity bar no longer swallows the Cancel click
