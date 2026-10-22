@@ -5,6 +5,10 @@ automatically -- one line per change, newest first. A release is drafted by hand
 from the tag of whichever version is judged ready, and this is the text to paste
 into it.
 
+## v0.41 — 2026-10-22
+
+- X follows: the warning names the login's own account and how many accounts X says it follows; site chips say how many accounts answered
+
 ## v0.40 — 2026-10-22
 
 - The window can be moved again, and the X follows read says what X answers
