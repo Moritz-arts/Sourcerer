@@ -1157,6 +1157,8 @@ def get_accounts():
             host = booru.BOORUS.get(host, (0, 0, 0, 0, None))[4] or host       # paused under its API host
         rest = net.paused(host)
         a["rest"] = {"until": rest[0], "why": rest[1]} if rest else None
+        if a["key"] in net.BUDGETS:
+            a["usage"] = net.usage(a["key"])            # (a site's key is its name in net)
     boorus = [dict(b, **booru.login_help("booru:" + b["host"])) for b in booru.LOGIN_SITES]
     types = [{"type": t, "label": label, "kind": how, "many": t in ("mastodon", "misskey", "xenforo", "booru")}
              for t, label, how in accounts.TYPES]

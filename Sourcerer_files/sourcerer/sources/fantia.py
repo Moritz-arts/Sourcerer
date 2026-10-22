@@ -112,15 +112,14 @@ def pages(url):
     if not _gdl.available():
         raise RuntimeError("Fantia needs gallery-dl, which did not install: Settings > Repair")
     net._stopped(HOME)
-    listing = _gdl.items(normalize(url), "fantia", _options(), FIELDS)
+    # A logged-in read counts its requests against the day's budget (gallery-dl's log, _gdl.items(site=)); a visitor's is nobody's.
+    listing = _gdl.items(normalize(url), "fantia", _options(), FIELDS, site=HOME if accounts.logged_in("fantia") else None)
     while True:
         net._stopped(HOME)
         try:
             batch = _run(next, listing)
         except StopIteration:
             return
-        if accounts.logged_in("fantia"):
-            net.spend(HOME, len(batch))
         yield [Media(remote_key="fantia:%s:%s" % (f["post"], f["file"]), url=f["url"],
                      post_url=f.get("post_url") or "%s/posts/%s" % (HOME, f["post"]),
                      posted=f.get("date") or "", name="%s_%s" % (f["post"], f["file"]),

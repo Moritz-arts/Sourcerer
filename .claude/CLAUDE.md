@@ -414,8 +414,9 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   `FOLLOWS_HOURS`): v0.34's silent empty look for X stamped a day and v0.35's fallback never ran.
   **A listed card is in no automatic sweep**: `enqueue(None)` (the automatic sync, the scan at start) skips `listed = 1`, because a
   thousand pixiv follows read in the background are a thousand requests nobody asked for. **"All artists" (`gallery._Gallery`)
-  takes every card, listed ones too** (the user: "All artists" means all, and Patreon's five creators were missing in v0.36). The load is
-  kept down by its time window and by the polite lanes (a login site's next card waits `CARD_GAP`), not by leaving cards out. Only **Refresh all** reaches them (`everyone`, only when the
+  takes every card, listed ones too** (the user: "All artists" means all, and Patreon's five creators were missing in v0.36); the load is
+  kept down by its time window and, since v0.43, by never asking a login site's accounts at all (it shows their snapshots; see *All artists
+  never asks a login site*). Only **Refresh all** reaches them (`everyone`, only when the
   page asked for no mode) and it only *scans* them (the newest page per source; a scan is not free: pixiv 2 requests,
   X a page of 20 counted against `BUDGETS`), **and only while the site's day has used less than half of its budget**
   (`net.scan_room`, `SCAN_SHARE`): the other half is for the cards that download, Browse and single pictures. Past
@@ -505,11 +506,33 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   neither stamps it "read to its end" nor holds the next look back. A Mastodon `Link: rel=next` with `http://` on the host that was just reached over
   https is asked over https; any other next link raises (the list must not look complete when it is not). `follows._prime` resolves a page's hosts
   *before* `_adding`, `combine()` runs under `_adding`, and `_add` drops a twin that was merged away meanwhile.
-- **"All artists" keeps to half of a login site's day** (`gallery._Source.start_fill`: `spaced` + `login` + `net.scan_room`, like Refresh all): it
-  asks every account once, and 291 X follows are about 5800 files against X's 1500 a day -- the budget would be gone after ~75 accounts, X would rest
-  until tomorrow and syncs and single artists would be left with nothing. Past the share a source says so (orange chip) and shows only its snapshot;
-  an artist opened on its own is never held back. The better design for X would be its Following timeline as one feed (`HomeLatestTimeline`), mapped
-  to the cards by author -- not built.
+- **All artists never asks a login site** (v0.43; `gallery._Source.seed`, `offline`): the accounts of a cookie login (X, pixiv, Patreon, Fanbox,
+  Fantia, forums: `accounts.careful`) are shown from the snapshots the looks saved (a sync, Refresh all, an artist opened on its own) and never
+  asked there -- v0.38-v0.41 read every one live on each opening, 291 X follows spent X's whole day (the v0.42 gate that kept it to half was
+  only a patch: what a site can bear is unknown and the account is what gets locked). A snapshot of such a source is shown up to 30 days old
+  (`OFFLINE_AGE`; Patreon's thumbnail links expire: 7 days), a source without one shows nothing and its chip says "N accounts not looked at yet";
+  the chip is hollow with the tooltip "from the last look ... Refresh all (F5) reads it". **Refresh all is what asks the sites** (mode `scan`,
+  half of the day: `net.scan_room`), and a finished sync opens the gallery again from the fresh snapshots. An artist opened on its own is read live as
+  ever. The better design for X (its Following timeline as one feed, `HomeLatestTimeline`, mapped to the cards by author) is not built.
+- **`BUDGETS` count real HTTP requests, and the tally says what they were** (v0.43, `net.note`, `net.usage`, `net.announce`, `_gdl._Watch`): until
+  v0.42 X, Fanbox and Fantia counted the *files* of a page (~10 per request), so "today's 1500 requests are done" was about 150 real ones -- Sourcerer's
+  own unit, not X's limit (`db.init` drops that day's old counts once, `budget_units_v1`). gallery-dl runs with `-v` for these listings
+  (`_gdl.items(site=, only=)`; `gdl_run.py` in mode `limits`) and every request line of its log is counted (X: `/i/api/` only, not the scripts it loads
+  for the request signature); if no request line shows up at all (its log format changed) a page counts as one. `net._get` tallies every request of a
+  login or token lane. **The log** (`sourcerer.log`) has "requests today on X: 150 of 600 allowed (UserMedia 90, UserByScreenName 55, ...)" every
+  50 requests, "<host> says it allows N requests per window" the first time a site announces its limit (Mastodon `X-RateLimit-*`, Bluesky
+  `RateLimit-*`, X `x-rate-limit-*`) and a warning when under 5 % is left; Manage Accounts shows "N of M requests today". **Measured, guest
+  token, 2026-10-22: X announces UserByScreenName 150 and UserMedia 500 per 15 minutes** -- far above the daily budget, so the budget is
+  Sourcerer's caution against *account reputation* (nobody publishes a number for that), not against the rate limit. The values in `net.BUDGETS`
+  (X 600, Fanbox / Fantia 300, pixiv / Patreon 1500) are guesses; tune them by the tally. pixiv and Patreon count every request of the lane,
+  image downloads included, as before.
+- **A 403 on a login is told by its answer** (`net._bot_page`, `_describe`, `_say_refusal`): an HTML page with a Cloudflare challenge's words
+  (or, on the big login sites whose API only ever answers JSON, from behind Cloudflare at all) is a **bot check** -- the site rests `BOT_REST` (12-24 h),
+  nothing is counted as a refused login; any other 403 is a refusal (three in 15 minutes rest the site 2-4 h) and its look is logged once per ten
+  minutes ("answered 403 on /api/stream: text/html, server cloudflare, cf-ray, title ..."): kind of answer, server, title or JSON error code,
+  never a value of the account. A forum's own 403 ("you may not view this") is HTML too, so the Server header alone does not make it a bot check
+  there. Patreon's 403 on `/api/pledges` and `/api/stream` (v0.41) said "refused the login three times" and was probably Cloudflare; the new log
+  line says which.
 - **The activity bar writes what changes at every poll in place** (`data-dyn` text, bar width, speed, file) and rebuilds only when its structure
   changes: comparing the whole markup still rebuilt it at every poll of a running download and swallowed the click on Cancel.
 - **An empty X list may be the right answer for the wrong account** (v0.40's trace: `Following` = ClearCache + cursors and no user anywhere, `HomeLatestTimeline`
@@ -709,8 +732,8 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   everything; `gallery.WINDOWS`, only All artists -- one artist is read as far as the page scrolls). Sources give their posts newest first,
   so once the last post a source has waiting is older than the window (`_Source.enough`) it is not paged any deeper, and one whose next post
   is older (`beyond`) hands out nothing; `more()` then says `older`, and the page ends the grid with *Load older posts* (`galEnd`,
-  `/api/gallery/older`: the window moves back by its own length). The first page of every source is still asked once, so the number of
-  accounts is the cost that remains; the window spares the deep paging. An undated post never ends a window.
+  `/api/gallery/older`: the window moves back by its own length). The first page of every source that is not on a login site is still asked once, so the number of
+  accounts is the cost that remains; the window spares the deep paging (a login site is never asked there: see *All artists never asks a login site*). An undated post never ends a window.
 - **A site is told by its own name and icon** (`sources.site_name`, `sources.MANY`): Mastodon, Misskey, XenForo and the boorus are software many
   sites run, so "Mastodon" said nothing -- the gallery's chips and tiles, Browse's Source groups and the viewer name the server, the forum's
   host or the booru (`describe()` gives `site` and `host` beside `label`, which stays the software for logins and the card dialog; the

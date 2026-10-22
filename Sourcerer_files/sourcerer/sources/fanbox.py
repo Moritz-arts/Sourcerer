@@ -7,7 +7,7 @@ downloaded by Sourcerer itself through net.py. A post's cover is left out (a cut
 embedded videos of other sites (YouTube...) are no files of Fanbox's.
 
 A login is what gets banned: the listing is paced like X's (a random gap, a rate limit ends it and the site
-rests), and the day's files count against net.BUDGETS["fanbox"].
+rests), and the day's requests (counted from gallery-dl's log) count against net.BUDGETS["fanbox"].
 """
 import random
 import re
@@ -126,14 +126,13 @@ def pages(url):
         raise LoginRequired("Fanbox shows its posts only to a logged-in account")
     creator = _creator(url)
     net._stopped(HOME)
-    listing = _gdl.items(normalize(url), "fanbox", _options(), FIELDS)
+    listing = _gdl.items(normalize(url), "fanbox", _options(), FIELDS, site=HOME)       # (its requests count against the day's budget)
     while True:
         net._stopped(HOME)                 # spent or refused meanwhile: gallery-dl cannot see a pause
         try:
             batch = _run(next, listing)
         except StopIteration:
             return
-        net.spend(HOME, len(batch))
         found = [f for f in batch if f.get("url") and not f.get("cover") and "fanbox" in f["url"]]
         yield [Media(remote_key="fanbox:%s:%s" % (f["post"], f.get("file") or "n%s" % f["num"]), url=f["url"],
                      post_url="%s/@%s/posts/%s" % (HOME, f.get("user") or creator, f["post"]),

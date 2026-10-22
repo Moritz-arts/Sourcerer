@@ -64,6 +64,7 @@ SLOW_LATER = 0.8             # ... and every later page: the sources are mid-way
 FAST = 0.3                   # ... when snapshots show the first page at once
 SEED_PAGES = 3               # pages a seeded source reads looking for a post its snapshot has, before it gives up on it
 SEED_AGE = 7 * 86400         # a snapshot older than this is not shown (its links may have expired: Patreon's thumbnails)
+OFFLINE_AGE = 30 * 86400     # ... except in All artists on a login site, which is nothing BUT snapshots (see _Source.offline): its links stay good
 AHEAD = 24                   # a source with fewer pictures waiting than this is asked for its next page already
 POOL = 6                     # listings running at once, all galleries together
 SERIAL = ("x", "xenforo", "fanbox", "fantia")    # sites gallery-dl reads: one source at a time (_gdl._busy would turn the rest away)
@@ -158,6 +159,7 @@ class _Source:
         self.future = None
         self.closed = False
         self.since = None                     # All artists with a time window: nothing older is handed out (see _Gallery.since)
+        self.offline = False                  # All artists on a login site: shown from the snapshot, never asked (see seed)
 
     def beyond(self):
         """The next post waiting is older than the window: this source has nothing more to show inside it."""
@@ -176,9 +178,16 @@ class _Source:
         return not self.done and not self.checked
 
     def seed(self):
-        """The newest posts of the last look, ready to show before any request."""
+        """The newest posts of the last look, ready to show before any request.
+
+        All artists never asks a login site (X, pixiv, Patreon, Fanbox, Fantia, forums): it showed hundreds of accounts to the site on every
+        opening, and X's whole day went on it (291 follows) -- what the sites can bear is not known (no limit is published) and the account
+        is what gets locked. The posts come from what the looks saved (a sync, Refresh all, an artist opened on its own); Refresh all (F5)
+        is what asks the sites, within its share of the day (net.scan_room), and the gallery opens again from the new snapshots."""
+        if self.spaced and self.login and self.site:
+            self.offline = self.done = self.checked = True
         snap = snapshots.load(self.row["id"]) if self.site else None
-        if not snap or time.time() - snap.tail > SEED_AGE:
+        if not snap or time.time() - snap.tail > (OFFLINE_AGE if self.offline and self.kind != "patreon" else SEED_AGE):
             return
         for m in snap.items:
             when = _when(m.posted)
@@ -192,13 +201,6 @@ class _Source:
         source of a site gallery-dl reads is being listed (it would be turned away as busy)."""
         with self.lock:
             if self.done or self.closed or self.running():
-                return
-            if self.spaced and self.login and not net.scan_room(self.row["url"]):
-                # All artists asks every account once: hundreds of a login site's follows would use the whole day's requests of
-                # that site (X: 291 follows, about 5800 files against 1500) and leave nothing for syncs and single artists. It
-                # keeps to half, as Refresh all does; an artist opened on its own is not held back.
-                self.done = self.checked = True
-                self.error = "All artists has used its share of %s's requests today -- open the artist, or look again tomorrow" % self.label
                 return
             if self.serial:
                 with _lock:
@@ -376,7 +378,7 @@ class _Gallery:
     def state(self):
         return [{"id": s.row["id"], "label": s.label, "kind": s.kind, "host": s.host, "url": s.row["url"],
                  "artist_id": s.artist["id"], "artist": s.artist["name"],
-                 "loading": s.loading(), "checked": s.checked, "cached": s.seeded, "new": s.new,
+                 "loading": s.loading(), "checked": s.checked, "cached": s.seeded, "offline": s.offline, "new": s.new,
                  # Items still waiting are more to show, whatever a later page did (a prefetch that failed).
                  "state": "more" if s.buffer else "error" if s.error else "done" if s.done else "more",
                  "error": s.error} for s in self.sources]
