@@ -11,6 +11,7 @@ a locked account pauses X for a day or two instead of being worked around,
 a first sync of a long-running account takes at most MAX_NEW files at a
 time, and the day's files count against net.BUDGETS["x"].
 """
+import logging
 import random
 
 import re
@@ -18,6 +19,7 @@ import re
 from . import _gdl
 from .. import accounts, net
 
+log = logging.getLogger(__name__)
 KIND = "x"
 LABEL = "X"
 MAX_NEW = 400
@@ -136,7 +138,12 @@ def following(key):
     page shows after the login) are taken instead: only those that posted media lately, but never nothing, and the
     note says why the full list is missing."""
     from . import LoginRequired
-    twid = accounts.jar("x").get("twid") or ""
+    jar = accounts.jar("x")
+    # Names only, never a value: an `auth_token` or `ct0` that is missing makes gallery-dl read as a guest, which shows no list.
+    given = accounts.jar("x", fresh=True)
+    log.info("X follows: the saved login has the cookies %s; gallery-dl gets %s%s", ", ".join(sorted(jar)) or "none",
+             ", ".join(sorted(given)) or "none", ("; left out as expired: " + ", ".join(sorted(set(jar) - set(given)))) if set(jar) - set(given) else "")
+    twid = jar.get("twid") or ""
     me = re.sub(r"\D", "", twid.rpartition("%3D")[2] or twid.rpartition("=")[2])
     if not _gdl.available():
         raise RuntimeError("X's list needs gallery-dl, which did not install: Settings > Repair")
@@ -144,7 +151,7 @@ def following(key):
     net._stopped("https://x.com")
     if me:
         try:
-            messages = _run(_gdl.info, "https://x.com/id:%s/following" % me, "twitter", _options(), FOLLOW_TIMEOUT, True)
+            messages = _run(_gdl.info, "https://x.com/id:%s/following" % me, "twitter", _options(), FOLLOW_TIMEOUT, True, True)
             net.spend("https://x.com", max(1, len(messages) // 50))
             out = _followed(messages)
             problem = "" if out else "X's list of followed accounts came back empty"
@@ -158,7 +165,7 @@ def following(key):
     if not out:
         try:
             net._stopped("https://x.com")
-            messages = _run(_gdl.info, "https://x.com/home", "twitter", dict(_options(), **{"file-range": "1-%d" % HOME_FILES}), FOLLOW_TIMEOUT)
+            messages = _run(_gdl.info, "https://x.com/home", "twitter", dict(_options(), **{"file-range": "1-%d" % HOME_FILES}), FOLLOW_TIMEOUT, False, True)
             net.spend("https://x.com", max(1, len(messages) // 50))
             out = _authors(messages, me)
         except (net.SlowDown, LoginRequired):
