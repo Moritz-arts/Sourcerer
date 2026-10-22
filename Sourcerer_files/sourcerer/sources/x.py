@@ -130,6 +130,18 @@ def _authors(messages, me):
     return out
 
 
+def _who():
+    """Whose list it was, from the read that just ended (gdl_run.py asks X for the login's own account): an empty list of an account
+    that follows nobody is no fault of Sourcerer's -- it is the wrong account."""
+    who = _gdl.LAST.get("account") or {}
+    if not who.get("screen_name"):
+        return ""
+    n = who.get("follows")
+    if n == 0:
+        return " -- the login is @%s, and X says that account follows nobody: log in under Manage Accounts with the account that follows the artists" % who["screen_name"]
+    return " -- the login is @%s, X says it follows %s account%s, but sent none" % (who["screen_name"], n, "" if n == 1 else "s")
+
+
 def following(key):
     """(list name, pages[, note]) of the accounts the login follows: [{"url", "name", "avatar"}], newest follow first.
     The whole list is gallery-dl's `/id:<number>/following` (the number is the login's own `twid` cookie), printed at the
@@ -140,6 +152,7 @@ def following(key):
     from . import LoginRequired
     jar = accounts.jar("x")
     # Names only, never a value: an `auth_token` or `ct0` that is missing makes gallery-dl read as a guest, which shows no list.
+    _gdl.LAST.pop("account", None)                       # whose list this read is: set by the read itself, never by an earlier one
     given = accounts.jar("x", fresh=True)
     log.info("X follows: the saved login has the cookies %s; gallery-dl gets %s%s", ", ".join(sorted(jar)) or "none",
              ", ".join(sorted(given)) or "none", ("; left out as expired: " + ", ".join(sorted(set(jar) - set(given)))) if set(jar) - set(given) else "")
@@ -154,7 +167,7 @@ def following(key):
             messages = _run(_gdl.info, "https://x.com/id:%s/following" % me, "twitter", _options(), FOLLOW_TIMEOUT, True, True)
             net.spend("https://x.com", max(1, len(messages) // 50))
             out = _followed(messages)
-            problem = "" if out else "X's list of followed accounts came back empty"
+            problem = "" if out else "X's list of followed accounts came back empty" + _who()
         except (net.SlowDown, LoginRequired):
             raise
         except Exception as e:

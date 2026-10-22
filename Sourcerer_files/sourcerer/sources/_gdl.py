@@ -226,6 +226,7 @@ def info(url, section, options, timeout=120, partial=False, verbose=False):
         lock.release()
 
 
+LAST = {}                       # what the last verbose read learned: {"account": {"screen_name", "follows", "followers"}} (gdl_run.py)
 _HTTP = re.compile(r'"(?:GET|POST) (/[^ ?"]*)[^"]*" (\d{3}) (\S+)')
 
 
@@ -269,6 +270,13 @@ def _info(url, section, options, timeout=120, partial=False, verbose=False):
     messages = json.loads(out.decode("utf-8") or "[]")
     if verbose:
         log.info("gallery-dl %s: %s", section, _digest(messages, lines))
+        for line in lines:
+            hit = re.search(r"\[sourcerer\]\[trace\] account (\{.*\})", line)
+            if hit:
+                try:
+                    LAST["account"] = json.loads(hit.group(1))
+                except ValueError:
+                    pass
     # -j reports an error as a message [-1, {"error": ..., "message": ...}] and exits 0.
     for i, m in enumerate(messages):
         if m and m[0] == -1:

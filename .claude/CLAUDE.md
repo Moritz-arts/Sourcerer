@@ -499,6 +499,11 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   follows `sourcerer/gdl_run.py` is gallery-dl's entry point (`SOURCERER_GDL_TRACE`): it writes the shape of X's answers to stderr
   (`[sourcerer][trace] Following {...}`, keys and kinds only), and reads users wherever X put them, page by page by the bottom cursor, when gallery-dl
   found none. The one-file build dispatches `--gallery-dl` through it (app.py); the plain run stays `python -m gallery_dl`.
+- **An empty X list may be the right answer for the wrong account** (v0.40's trace: `Following` = ClearCache + cursors and no user anywhere, `HomeLatestTimeline`
+  = cursors only). `gdl_run.py` asks `UserByRestId` for the login's own account and logs `account {"screen_name", "follows", "followers"}`; `x._who()` puts it
+  into the warning ("the login is @name, and X says that account follows nobody: log in ... with the account that follows the artists"). Timeline entries are
+  traced by their kinds (`cursor-top`, `tweet`, `user`, `who-to-follow`), instructions all of them. The page's site chips say "N of M accounts answered" while
+  they spin: in All artists a login site's sources are asked one after the other (`CARD_GAP`), so a site with 400 accounts spins for a long time.
 - **A list that comes back empty without an error needs gallery-dl's own words** (X, v0.38: the log said "came back empty; the Following
   timeline showed no account" and nothing about why -- `_info` threw its stderr away on exit 0). `_gdl.info(..., verbose=True)` runs
   gallery-dl with `-v` and logs `gallery-dl twitter: messages {...}; requests: Following 200 1234, ...; it said: ...` (`_digest`: path's
