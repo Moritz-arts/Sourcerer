@@ -143,7 +143,7 @@ def _custom_frame(window):
     try:
         import ctypes
         from ctypes import wintypes
-        user32 = ctypes.windll.user32
+        user32 = server.own_user32()          # not ctypes.windll.user32: its argtypes would break pywebview's own SetWindowPos (a window move)
         user32.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
         user32.GetWindowLongW.restype = ctypes.c_long
         user32.SetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_long]

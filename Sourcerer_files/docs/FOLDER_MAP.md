@@ -22,6 +22,7 @@ Sourcerer/                        <- what Sourcerer.zip unpacks to; move it free
     │   ├─ net.py                 HTTP (requests, TLS 1.3 first): JSON, downloads, per-site
     │   │                           limits, a login's slow lane, site pauses, daily budgets
     │   ├─ imaging.py             fingerprints, sizes, small copies made in memory (Pillow)
+    │   ├─ gdl_run.py             gallery-dl's entry point; for X's follows it also traces X's answers (standalone: imports nothing of ours)
     │   ├─ sources/               one module per site
     │   │   ├─ __init__.py        Media, site_for, normalize, describe, profile
     │   │   ├─ mastodon.py        Mastodon / fediverse, its API; login per server (OAuth)

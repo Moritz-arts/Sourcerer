@@ -18,6 +18,7 @@ import importlib.util
 import json
 import logging
 import os
+import pathlib
 import re
 import subprocess
 import sys
@@ -111,19 +112,21 @@ def _config(section, options):
     return path
 
 
-def _command(conf, args, url):
+def _command(conf, args, url, trace=False):
     # The exe has no "python -m": app.py runs gallery-dl when started with --gallery-dl.
     run = [sys.executable, "--gallery-dl"] if config.FROZEN else [_python(), "-m", "gallery_dl"]
+    if trace and not config.FROZEN:                      # gdl_run.py: gallery-dl, and what X's answers look like (see there)
+        run = [_python(), str(pathlib.Path(__file__).resolve().parent.parent / "gdl_run.py")]
     return run + ["--config-ignore", "-c", str(conf),
             "--cache-file", str(CACHE), "--no-input"] + args + [url]
 
 
-def _start(cmd):
+def _start(cmd, trace=False):
     # In the one-file build gallery-dl is the program itself again; it shares the parent's unpacked
     # folder unless told otherwise, so it must not be told otherwise (see updater.INDEPENDENT).
     env = {k: v for k, v in os.environ.items() if k != "PYINSTALLER_RESET_ENVIRONMENT"}
     kwargs = {"stdout": subprocess.PIPE, "stderr": subprocess.PIPE, "stdin": subprocess.DEVNULL,
-              "cwd": str(DIR), "env": dict(env, PYTHONIOENCODING="utf-8")}
+              "cwd": str(DIR), "env": dict(env, PYTHONIOENCODING="utf-8", **({"SOURCERER_GDL_TRACE": "1"} if trace else {}))}
     if os.name == "nt":
         kwargs["creationflags"] = 0x08000000           # CREATE_NO_WINDOW
     return subprocess.Popen(cmd, **kwargs)
@@ -235,8 +238,10 @@ def _digest(messages, lines):
         hit = _HTTP.search(line)
         if hit:
             requests.append("%s %s %s" % (hit.group(1).rsplit("/", 1)[-1] or hit.group(1), hit.group(2), hit.group(3)))
-        elif "][warning]" in line or "][error]" in line:
-            text = re.sub(r"^\[[\w.-]+\]\[\w+\]\s*", "", line)[:200]
+        elif "][warning]" in line or "][error]" in line or "API error" in line or "[sourcerer][trace]" in line:
+            # (gallery-dl says an API error of X only at debug level, and keeps going with what it got: an answer
+            # of HTTP 200 with errors in it ended as an empty list)
+            text = re.sub(r"^\[[\w.-]+\]\[\w+\]\s*", "", line)[:3600 if "[sourcerer][trace]" in line else 200]
             if text not in said:
                 said.append(text)
     return "messages %s; requests: %s; it said: %s" % (dict(kinds) or "none", ", ".join(requests[-12:]) or "none",
@@ -246,7 +251,7 @@ def _digest(messages, lines):
 def _info(url, section, options, timeout=120, partial=False, verbose=False):
     conf = _config(section, options)
     try:
-        proc = _start(_command(conf, ["-j"] + (["-v"] if verbose else []), url))
+        proc = _start(_command(conf, ["-j"] + (["-v"] if verbose else []), url, verbose), verbose)
         try:
             out, err = proc.communicate(timeout=timeout)
         except subprocess.TimeoutExpired:

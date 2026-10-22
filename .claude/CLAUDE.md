@@ -488,6 +488,17 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   up and stats only other sources' phash candidates; `sync._adopt` globs and hashes **outside** the global `_save` lock. `net._store`
   only marks state dirty, `_flush()` writes it outside `net._lock` (every request takes it). `accounts.load` caches the file text by
   mtime. `/api/state` leaves out `pending_keys`.
+- **Never set `argtypes` on `ctypes.windll.user32`'s functions: it is one object for the whole process.** `desktop._custom_frame` did, on
+  `SetWindowPos`, and pywebview's own window move calls `SetWindowPos(..., None, None, ...)` for the width and height -- a `c_int` argtype
+  refuses `None`, so every drag of the window threw `ctypes.ArgumentError: argument 5` (2752 tracebacks in one `console.log`) and **the window
+  could not be moved** (v0.37-v0.39, found in the user's console.log: `on_script_notify` -> `window.move` -> `SetWindowPos`). Sourcerer's own
+  calls use `server.own_user32()` (a `WinDLL` of its own). A traceback that repeats thousands of times in `console.log` is a bug the user lives with.
+- **gallery-dl says an X API error only at debug level, and goes on with what it got** (`twitter._call`: an answer with HTTP 200 and `errors` is
+  returned as data, and `_pagination_users` ends quietly on the KeyError of a timeline that is not there). v0.39's log showed `Following 200`,
+  `HomeLatestTimeline 200`, no messages and "it said: nothing" -- the `API error` lines are debug, so `_digest` keeps them now. For the reads of X's
+  follows `sourcerer/gdl_run.py` is gallery-dl's entry point (`SOURCERER_GDL_TRACE`): it writes the shape of X's answers to stderr
+  (`[sourcerer][trace] Following {...}`, keys and kinds only), and reads users wherever X put them, page by page by the bottom cursor, when gallery-dl
+  found none. The one-file build dispatches `--gallery-dl` through it (app.py); the plain run stays `python -m gallery_dl`.
 - **A list that comes back empty without an error needs gallery-dl's own words** (X, v0.38: the log said "came back empty; the Following
   timeline showed no account" and nothing about why -- `_info` threw its stderr away on exit 0). `_gdl.info(..., verbose=True)` runs
   gallery-dl with `-v` and logs `gallery-dl twitter: messages {...}; requests: Following 200 1234, ...; it said: ...` (`_digest`: path's
