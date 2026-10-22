@@ -5,6 +5,10 @@ automatically -- one line per change, newest first. A release is drafted by hand
 from the tag of whichever version is judged ready, and this is the text to paste
 into it.
 
+## v0.40 — 2026-10-22
+
+- The window can be moved again, and the X follows read says what X answers
+
 ## v0.39 — 2026-10-22
 
 - Follows: every look logs where each followed account went, and a refused next-page link or a cut list is a warning
