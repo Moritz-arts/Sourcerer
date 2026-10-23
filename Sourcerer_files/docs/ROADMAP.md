@@ -438,6 +438,9 @@ add the one that replaced it.
 - [x] Merge dialog: likely twins (same name but for emoji / marks / case, shared account name) listed at
       the top, several cards ticked and merged with one button, no extra confirmation; Browse can be
       ordered by source (logo and line per site)
+- [x] Merge sources (v0.48): a button beside *Add artist* finds the cards that look like one artist over all of them (a profile or a
+      bio names the other account, the same name or account name) and merges the ticked ones; bios are read for the accounts they
+      name (`sources.mentions`) but only ever suggest -- the automatic combining never uses them
 - [x] Three views (v0.47): **Artists** (one long list of big cards with each artist's newest four pictures, from the snapshots --
       no site is asked; a click opens the artist in Gallery), **Gallery** (the Browse of before) and **Recommended** (a placeholder)
 

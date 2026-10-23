@@ -311,12 +311,15 @@ def _add(page, kind, public, twins=None, stats=None):
             key = url.lower()
             headers = f.get("avatar_headers")
             links = [u for u in (f.get("links") or []) if isinstance(u, str)]
+            mentions = [u for u in (f.get("mentions") or []) if isinstance(u, str)]
             if not con.execute("INSERT OR IGNORE INTO followed (url, avatar, headers) VALUES (?, ?, ?)",
                                (key, f.get("avatar") or "", json.dumps(headers) if headers else "")).rowcount:
                 known += 1
                 stats["known"] += 1
                 if links:                                   # a card made before profiles' links were kept: it learns them here
                     con.execute("UPDATE sources SET links = ? WHERE lower(url) = ? AND links IS NULL", (json.dumps(links), key))
+                if mentions:
+                    con.execute("UPDATE sources SET mentions = ? WHERE lower(url) = ? AND mentions IS NULL", (json.dumps(mentions), key))
                 continue
             if key in have:
                 stats["has a card"] += 1
@@ -328,8 +331,8 @@ def _add(page, kind, public, twins=None, stats=None):
                 twin = None                                 # merged away by combine() since this look began: the account gets a card of its own
             picture = f.get("avatar") if isinstance(f.get("avatar"), str) and f["avatar"].startswith("https://") else None
             if twin:                                        # the same artist on another site: one card
-                con.execute("INSERT INTO sources (artist_id, url, kind, links, alias) VALUES (?, ?, ?, ?, ?)",
-                            (twin, url, site_kind, json.dumps(links) if links else None, name))
+                con.execute("INSERT INTO sources (artist_id, url, kind, links, mentions, alias) VALUES (?, ?, ?, ?, ?, ?)",
+                            (twin, url, site_kind, json.dumps(links) if links else None, json.dumps(mentions) if mentions else None, name))
                 if picture:
                     con.execute("UPDATE artists SET avatar_url = ?, avatar_headers = ? WHERE id = ? AND avatar_url IS NULL",
                                 (picture, json.dumps(headers) if headers else None, twin))
@@ -339,8 +342,8 @@ def _add(page, kind, public, twins=None, stats=None):
                 continue
             artist_id = con.execute("INSERT INTO artists (name, listed, avatar_url, avatar_headers) VALUES (?, 1, ?, ?)",
                                     (_unique(card_name([url], name), url, taken), picture, json.dumps(headers) if headers and picture else None)).lastrowid
-            con.execute("INSERT INTO sources (artist_id, url, kind, links, alias) VALUES (?, ?, ?, ?, ?)",
-                        (artist_id, url, site_kind, json.dumps(links) if links else None, name))
+            con.execute("INSERT INTO sources (artist_id, url, kind, links, mentions, alias) VALUES (?, ?, ?, ?, ?, ?)",
+                        (artist_id, url, site_kind, json.dumps(links) if links else None, json.dumps(mentions) if mentions else None, name))
             if twins:
                 twins.register(artist_id, name, True)
                 twins.attach(artist_id, site_kind, url, links, name)

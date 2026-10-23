@@ -110,6 +110,21 @@ def _picture(url):
     return "" if not url or "default_profile" in url else url.replace("_normal.", "_400x400.")
 
 
+def _mentions(*users):
+    """The accounts a bio names: its text and the addresses X expanded from the short links in it (and in the website field)."""
+    from . import bio_links
+    texts = []
+    for u in users:
+        if not isinstance(u, dict):
+            continue
+        bio = u.get("profile_bio") if isinstance(u.get("profile_bio"), dict) else {}
+        texts += [u.get("description"), bio.get("description")]
+        ent = u.get("entities") if isinstance(u.get("entities"), dict) else {}
+        for part in (ent.get("description"), ent.get("url")):
+            texts += [x.get("expanded_url") for x in (part or {}).get("urls") or [] if isinstance(x, dict)] if isinstance(part, dict) else []
+    return bio_links(texts)
+
+
 def _followed(messages):
     """The accounts of gallery-dl's list of followed users (messages of type 6, one user each)."""
     out = []
@@ -125,7 +140,8 @@ def _followed(messages):
         out.append({"url": "https://x.com/%s" % name,
                     "name": core.get("name") or legacy.get("name") or user.get("nick") or name,
                     "avatar": _picture((user.get("avatar") or {}).get("image_url") or legacy.get("profile_image_url_https") or
-                                       user.get("profile_image") or "")})
+                                       user.get("profile_image") or ""),
+                    "mentions": _mentions(user, legacy)})
     return out
 
 
@@ -234,7 +250,8 @@ def profile(url):
             "handle": "@" + (user.get("name") or _name(url)),
             # The default egg is no picture of the artist.
             "avatar": "" if "default_profile" in (user.get("profile_image") or "") else
-                      user.get("profile_image") or ""}
+                      user.get("profile_image") or "",
+            "mentions": _mentions(user)}
 
 
 def pages(url):

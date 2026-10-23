@@ -105,6 +105,7 @@ MAX_FOLLOW_PAGES = 500   # 12 000 follows
 
 def following(key):
     """(list name, pages) of the artists the login follows -- the public list and the private one."""
+    from . import bio_links
     me = (accounts.jar("pixiv").get("PHPSESSID") or "").split("_", 1)[0]    # a member's session id starts with the user id
     if not me.isdigit():
         return
@@ -116,7 +117,8 @@ def following(key):
             body = _ajax("user/%s/following" % me, {"offset": n * FOLLOWING, "limit": FOLLOWING, "rest": rest,
                                                     "tag": "", "acceptingRequests": 0})
             yield [{"url": "https://www.pixiv.net/users/%s" % u["userId"], "name": u.get("userName") or "",
-                    "avatar": u.get("profileImageUrl") or "", "avatar_headers": REFERER}
+                    "avatar": u.get("profileImageUrl") or "", "avatar_headers": REFERER,
+                    "mentions": bio_links(u.get("userComment"))}
                    for u in body.get("users") or []]
             if (n + 1) * FOLLOWING >= (body.get("total") or 0):
                 return
@@ -127,13 +129,14 @@ def following(key):
 def profile(url):
     uid = _uid(url)
     user = _ajax("user/%s" % uid, {"full": 1})
-    from . import profile_links
+    from . import bio_links, profile_links
     # `social` is what the artist declared (a twitter address, mostly): the surest sign of who else they are. Not the
     # comment, which names friends as often as the artist.
     return {"name": user.get("name") or uid, "handle": "pixiv.net/users/%s" % uid,
             "avatar": user.get("imageBig") or user.get("image") or "",
             "avatar_headers": REFERER,
-            "links": profile_links(user.get("social"), user.get("webpage"))}
+            "links": profile_links(user.get("social"), user.get("webpage")),
+            "mentions": bio_links(user.get("comment"))}
 
 
 def pages(url, known=frozenset()):

@@ -136,6 +136,7 @@ COLUMNS = {
         "last_level": "TEXT",
         "walked": "TEXT",                 # when a sync last went through all of it
         "links": "TEXT",                  # JSON: the accounts its own profile names (sources.profile_links): who is the same artist
+        "mentions": "TEXT",               # JSON: the accounts its bio names (sources.bio_links): only a suggestion that two cards are one artist
         "alias": "TEXT",                  # the name the site shows for the account: a card is named by its @name, this still finds it
         "pending": "INTEGER NOT NULL DEFAULT 0",   # its newest posts a look found that are not in the library
         "pending_keys": "TEXT",            # JSON: the remote_keys of those (at most sync.PENDING_KEYS), so a download from Browse can tell
@@ -177,6 +178,10 @@ def init():
         if not con.execute("SELECT 1 FROM settings WHERE key = 'follow_links_v1'").fetchone():
             con.execute("DELETE FROM settings WHERE key LIKE 'follows_read:%'")
             con.execute("INSERT INTO settings (key, value) VALUES ('follow_links_v1', '1')")
+        # What bios name (sources.mentions) comes with the lists too.
+        if not con.execute("SELECT 1 FROM settings WHERE key = 'follow_mentions_v1'").fetchone():
+            con.execute("DELETE FROM settings WHERE key LIKE 'follows_read:%'")
+            con.execute("INSERT INTO settings (key, value) VALUES ('follow_mentions_v1', '1')")
         # The summary line of each look says where every followed account went (follows._look); the fediverse lists are read to
         # their end once more, so the first line is a whole count -- the early stop at the first known page would hide the rest.
         if not con.execute("SELECT 1 FROM settings WHERE key = 'follow_count_v1'").fetchone():
