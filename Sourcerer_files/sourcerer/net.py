@@ -685,15 +685,25 @@ def waiting():
 
 
 @contextlib.contextmanager
-def interactive():
+def interactive(alone=False):
     """Requests made while somebody waits for the answer (a download asked for in the
     gallery): ahead of those that can wait in a site's lane, and without the reading break
-    a login lane takes now and then. The gaps between requests stay: they are the site's."""
+    a login lane takes now and then. The gaps between requests stay: they are the site's.
+    alone: the listing is the only source of the gallery, so nobody sets the times of its posts
+    against another source's (see sole())."""
     _local.interactive = getattr(_local, "interactive", 0) + 1
+    _local.sole = getattr(_local, "sole", 0) + bool(alone)
     try:
         yield
     finally:
         _local.interactive -= 1
+        _local.sole -= bool(alone)
+
+
+def sole():
+    """True inside interactive(alone=True): the posts of this listing are only ever ordered among themselves, which their
+    own order does -- a time that costs a request per post (a forum's) is not worth asking for."""
+    return bool(getattr(_local, "sole", 0))
 
 
 @contextlib.contextmanager

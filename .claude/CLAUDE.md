@@ -725,7 +725,7 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   its buffer when the live page brings dates (`_Source._redate`: the sort key was fixed at the seed, from a snapshot without them); and a forum snapshot
   with an undated post is never `fresh` (`seed`), or the live page that brings the dates would not be asked for an hour. A forum whose pages say nothing keeps
   `posted=""` as before. **Checked against made-up pages, not a real forum** -- the tile markup (`itemList-item js-inlineModContainer`, a `<time datetime>` inside)
-  is gallery-dl's marker plus a guess; the viewer's `info()` still gives the date of a picture that has none. **Everything else the forum knows of a picture** (description, who, when, size, views) is asked when the viewer opens it
+  is gallery-dl's marker plus a guess; the viewer's `info()` still gives the date of a picture that has none. **Speed of a forum's gallery** (v0.55): while somebody waits (`net.waiting()`) gallery-dl's gap between the pages is `OPEN_SLEEP` 1.0-2.0 s instead of 2.0-5.0 (X's way); **when the forum is the gallery's only source (`net.sole()`, `interactive(alone=True)`, set in `_Gallery` for a card with one readable source -- every card a follow list makes) no date is asked for at all** -- the first page used to wait for up to seven page requests, and the forum's own order is the order (`_Source.last`); the viewer asks the exact time when a picture opens. With other sources the asks stay, but **every exact time read is an anchor for the whole forum** (`_clock`, setting `xenforo_clock:<host>`, thinned at `MAX_CLOCK`, never an estimate): the media ids run on for the whole forum, so another member's batch is placed between anchors already known and asks only where no two anchors within `CLOSE` bracket an end. Not measured against a real forum (made-up clock: asks fall as anchors accumulate; a linear fake clock needs hundreds before the two-day rule is met). **Everything else the forum knows of a picture** (description, who, when, size, views) is asked when the viewer opens it
   (`xenforo.info`, `/api/gallery/info`, one request through the forum's lane, kept per gallery; a site gets this by having an `info(media)`;
   the date it finds is put on the item): gallery-dl's `metadata` would ask for every picture of a listing page.
 - **A Misskey looks like a Mastodon in the address** (`https://misskey.io/@user`) **and answers nothing a
@@ -868,8 +868,11 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   **Latest activity** is `activityKey`: the newest post a look saw (`sources.latest`, set by
   `snapshots.save` from the posts' dates), else the last download or look; a card with nothing known goes
   last -- its `created` is the day it was imported, and as a sort key it put every imported follow first.
-  *Source* groups under the site's mark, name, a line and a count; an artist stands once,
-  under its master source, else its first readable one, no source last. **Images is the number *posted*, not what
+  *Source* groups under the site's mark, name, a line and a count; **an artist stands in every group whose site it has an account on**
+  (v0.55, `siteSources`: Avocado on X, pixiv and Mastodon is in three groups, one entry per site name -- two accounts on one server stand once; a
+  card with no readable source stands once, where its main account is; no source last). A group's count is its entries; **"All artists" is still
+  the number of artists**, `S.brOrderIds` (Refresh all's order) holds each artist once, and the open artist is marked in one group only (`S.brAt`, the
+  group clicked last, `data-site` on the items; Up/Down step through the entries as shown). **Images is the number *posted*, not what
   is downloaded** (`totalOf`, per source `srcTotal`): the most of what the library has of the source (`files_all`: every file it listed, a
   duplicate that was not kept too), what the last look found waiting (`pending`), what the newest posts ever showed (`sources.seen`, set by
   `snapshots.save`: any card that was opened or scanned has a number) and what **the site itself says** (`sources.posted`: pixiv's list of

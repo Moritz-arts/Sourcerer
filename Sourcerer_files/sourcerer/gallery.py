@@ -163,6 +163,7 @@ class _Source:
         self.closed = False
         self.since = None                     # All artists with a time window: nothing older is handed out (see _Gallery.since)
         self.offline = False                  # All artists on a login site: shown from the snapshot, never asked (see seed)
+        self.alone = False                    # the gallery's only source: its posts are never ordered against another's (net.sole)
 
     def beyond(self):
         """The next post waiting is older than the window: this source has nothing more to show inside it."""
@@ -232,7 +233,7 @@ class _Source:
             if self.spaced:
                 self.fill()
             else:
-                with net.interactive():
+                with net.interactive(alone=self.alone):
                     self.fill()
         finally:
             if self.serial and self.login and self.spaced:
@@ -364,6 +365,7 @@ class _Gallery:
                         if r["artist_id"] in artists and sources.site_for(r["url"])]
         for s in self.sources:
             s.spaced = self.all
+            s.alone = len(self.sources) == 1
             s.since = self.since
             s.seed()
 
