@@ -5,6 +5,10 @@ automatically -- one line per change, newest first. A release is drafted by hand
 from the tag of whichever version is judged ready, and this is the text to paste
 into it.
 
+## v0.50 — 2026-10-23
+
+- Gallery: a snapshot younger than 5 minutes (an hour on a cookie login's site) stands in for the live check when an artist is opened
+
 ## v0.49 — 2026-10-23
 
 - Settings: the user's own values are the base settings (24 parallel downloads, 32 per site, 0.1 s, fast gap between artists, no scan at start)
