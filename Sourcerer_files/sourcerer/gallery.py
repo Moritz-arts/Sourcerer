@@ -561,13 +561,19 @@ def status(gallery_id):
             "loading": any(s.loading() for s in g.sources)}
 
 
+# What an address may end in without being a file's name: a script or a page ("index.php", "image.php", a forum's route) -- every XenForo
+# picture was "index.php" in the grid.
+NOT_FILES = {"php", "php3", "php5", "phtml", "html", "htm", "shtml", "asp", "aspx", "jsp", "cgi", "pl", "py", "do", "action"}
+
+
 def _fname(m):
     """The file's name on the site, as far as the listing knows it: the site's own (Media.filename), else the last
-    part of the address when that looks like a file, else the post's short id (pixiv: 12345_p0)."""
+    part of the address when that looks like a file, else the post's name (a forum's: the title the uploader gave it, which
+    is their file name; pixiv's: 12345_p0)."""
     if m.filename:
         return m.filename
     tail = urllib.parse.unquote(urllib.parse.urlparse(m.url or "").path.rsplit("/", 1)[-1])
-    return tail if re.fullmatch(r".{1,200}\.[A-Za-z0-9]{2,5}", tail) else (m.name or "")
+    return tail if re.fullmatch(r".{1,200}\.[A-Za-z0-9]{2,5}", tail) and tail.rsplit(".", 1)[1].lower() not in NOT_FILES else (m.name or "")
 
 
 def saved_changes(gallery_id):
