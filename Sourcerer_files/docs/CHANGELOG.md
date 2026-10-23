@@ -5,6 +5,10 @@ automatically -- one line per change, newest first. A release is drafted by hand
 from the tag of whichever version is judged ready, and this is the text to paste
 into it.
 
+## v0.52 — 2026-10-23
+
+- XenForo: pictures are dated from the picture's own page where the list shows no time, and no page footer's time is taken for a picture's; Merge sources: Not the same is red, the card's buttons sit in two columns
+
 ## v0.51 — 2026-10-23
 
 - Merge sources: every card is merged on its own button, one pair at a time -- no ticks, no merging of many at once
