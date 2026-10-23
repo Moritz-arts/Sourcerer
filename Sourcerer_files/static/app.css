@@ -435,6 +435,10 @@ button.linky:hover:not(:disabled) { background: none; color: var(--text-primary)
 .mk-name { font-size: 10px; color: var(--text-muted); }
 .merge-acts { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 4px; flex: none; max-width: 240px; }
 .merge-top .br-name { flex: 0 1 auto; }
+.merge-row .keep.primary { max-width: 210px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.merge-row div.br-item { cursor: default; }
+.merge-row div.br-item:hover { background: transparent; }
+.merge-row.on div.br-item:hover { background: var(--bg-accent); }
 .apart-note { margin: 0; }
 .apart-note:empty { display: none; }
 .twins-back { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 40; display: flex; align-items: center; gap: 6px;

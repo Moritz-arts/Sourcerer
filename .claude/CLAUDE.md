@@ -631,12 +631,13 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   for "inside", and a pair with a weak sign (evidence 1) was never a candidate -- "I have the same artist three times and Sourcerer found two" was
   `tinyshoyac` (evidence 3: names a letter or two apart, a minimum of 6 letters; 2: a name inside another, 5 letters or 3 CJK characters).
   Pairs that share a one-account-per-artist site (`ONE_PER_SITE`: Bluesky, X, pixiv, Patreon, Fanbox, Fantia) were never offered; they are now,
-  **unticked and with the warning** ("Both have a pixiv account, which is usually two people": a main and a second account of one artist look
+  **with the warning** ("Both have a pixiv account, which is usually two people": a main and a second account of one artist look
   exactly so), after everything else. The groups are connected pairs of evidence 2 and up.
   Each card has **Open**: the dialog closes, the artist opens in Gallery (`twinsOpen`, `avOpen`), and a button at the bottom (`#twins-back`)
-  or *Merge sources* itself brings the same list back (`C.parked`, `resumeTwins`: ticks and keepers stay, merged cards drop out). The card that stays is the user's own, then the one with most downloads
-  (`stayOrder`); a member is ticked beforehand from evidence 4 (`TICKED_FROM`), the rest is only offered. The button merges one card
-  after the other (`/merge`), goes on when one fails (a card that syncs) and says how many did not merge.
+  or *Merge sources* itself brings the same list back (`C.parked`, `resumeTwins`: keepers stay, merged cards drop out). The card that stays is the user's own, then the one with most downloads
+  (`stayOrder`), or the one marked with *Keep this one*. **Every card is merged on its own button, "Merge into «keeper»", one pair at a time**
+  (`twinsMerge`: one `/merge` call, then the list goes on without it; the user's rule, 2026-10-23: "so no mistake can happen") -- there are no
+  ticks and no button that merges many (v0.48-v0.50 had both), a card that syncs says so and stays. A new button in this dialog must never act on more than the one card it sits on.
 - **Logins are made in "Manage your accounts" (`#dlg-accounts`) and nowhere
   else**: one row per login that exists (saved, or being made in a window), one
   under the other (never side by side): dot and name, the fields in the middle,

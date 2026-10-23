@@ -537,12 +537,13 @@ function siteMarks(a) {
   return out;
 }
 // One card in a merge list: tick, picture, name with the sites it is on, the reason under it, and the buttons at the right.
-function mergeRow(a, on, why, acts) {
-  return '<div class="merge-row' + (on ? " on" : "") + '"><button type="button" class="br-item" data-id="' + a.id + '" aria-pressed="' + on + '">' +
-    '<span class="tick">' + (on ? icon("tick") : "") + "</span>" + avatarHtml(a) +
+function mergeRow(a, on, why, acts, plain) {
+  return '<div class="merge-row' + (on ? " on" : "") + '">' +
+    (plain ? '<div class="br-item">' : '<button type="button" class="br-item" data-id="' + a.id + '" aria-pressed="' + on + '">' +
+      '<span class="tick">' + (on ? icon("tick") : "") + "</span>") + avatarHtml(a) +
     '<span class="merge-text"><span class="merge-top"><span class="br-name" title="' + esc(a.name) + '">' + esc(a.name) + "</span>" +
     '<span class="merge-sites">' + siteMarks(a) + "</span></span>" + (why ? '<small class="why">' + esc(why) + "</small>" : "") + "</span>" +
-    '<span class="br-n">' + (a.sources.filter(function (s) { return s.supported; }).length || "") + "</span></button>" +
+    '<span class="br-n">' + (a.sources.filter(function (s) { return s.supported; }).length || "") + (plain ? "</span></div>" : "</span></button>") +
     (acts ? '<span class="merge-acts">' + acts + "</span>" : "") + "</div>";
 }
 
@@ -638,14 +639,14 @@ $("merge-go").addEventListener("click", function () {
 
 // ---- merge sources: every likely twin at once --------------------------------------------
 // The same evidence as above, over all cards: groups of cards that look like one artist, each with the card that stays, the ones that
-// go into it and the reason for each. Evidence of 4 and up (a profile or a bio names the other account, the same name or account
-// name) is ticked beforehand, weaker evidence is only offered, and nothing happens before the button. Two cards with an account on
-// the same site (two pixiv accounts are more likely two people, whatever their names say) are offered too -- unticked, with that
-// said -- because a main and a second account of one artist look exactly so. *Open* shows an artist in Sourcerer to compare with
-// your own eyes (the dialog waits behind a button), *Not the same* is kept for good.
+// go into it and the reason for each. **Every card is merged on its own button, one pair at a time** (the user's rule, 2026-10-23: "so no
+// mistake can happen") -- no ticks, no button that merges many, nothing happens by itself. Two cards with an account on the same
+// site (two pixiv accounts are more likely two people, whatever their names say) are offered too, with that said, because a main and
+// a second account of one artist look exactly so. *Open* shows an artist in Sourcerer to compare with your own eyes (the dialog waits
+// behind a button), *Not the same* is kept for good.
 var ONE_PER_SITE = ["bluesky", "x", "pixiv", "patreon", "fanbox", "fantia"];
 var KIND_NAMES = { bluesky: "Bluesky", x: "X", pixiv: "pixiv", patreon: "Patreon", fanbox: "Fanbox", fantia: "Fantia" };
-var TICKED_FROM = 4, MAX_SHARERS = 8;
+var MAX_SHARERS = 8;
 var C = { groups: [], parked: false };
 function oneKinds(a) { return a.sources.map(function (s) { return s.kind; }).filter(function (k) { return ONE_PER_SITE.indexOf(k) >= 0; }); }
 // Who stays: a card the user made over one that came with a list, then the one with most downloads, auto-download, most accounts.
@@ -713,7 +714,7 @@ function findTwins() {
       var mine = es.filter(function (e) { return ps[e.i].a === a || ps[e.j].a === a; })
         .sort(function (x, y) { return (x.warn ? 1 : 0) - (y.warn ? 1 : 0) || y.s - x.s; })[0];
       var other = ps[ps[mine.i].a === a ? mine.j : mine.i].a;
-      return { id: a.id, s: mine.s, on: !mine.warn && mine.s >= TICKED_FROM, warn: mine.warn,
+      return { id: a.id, s: mine.s, warn: mine.warn,
         why: mine.why + (other === keep ? "" : " (to " + quote(other.name) + ")") +
           (mine.warn ? ". Both have a " + KIND_NAMES[mine.warn] + " account, which is usually two people" : "") };
     }).sort(function (x, y) { return y.s - x.s; });
@@ -726,7 +727,7 @@ function openTwins() {
   renderTwins();
   $("dlg-twins").showModal();
 }
-// Back from comparing an artist: what was merged or deleted meanwhile is gone from the groups, the ticks stay.
+// Back from comparing an artist: what was merged or deleted meanwhile is gone from the groups, the keepers stay.
 function resumeTwins() {
   C.parked = false;
   C.groups = C.groups.filter(function (g) {
@@ -743,30 +744,46 @@ function twinsOpen(id) {
   avOpen(id);
 }
 function renderTwins() {
-  var box = $("twins-list"), top = box.scrollTop, n = 0, groups = 0;
+  var box = $("twins-list"), top = box.scrollTop, cards = 0;
   var open = function (a) { return '<button type="button" class="keep" data-open="' + a.id + '" title="Look at this artist in Sourcerer, then come back here">Open</button>'; };
   box.innerHTML = C.groups.map(function (g, gi) {
-    var stay = artistById(g.keep), ticked = g.members.filter(function (m) { return m.on; }).length;
-    n += ticked; groups += ticked ? 1 : 0;
-    return '<div class="twin" data-g="' + gi + '">' + mergeRow(stay, true, "", open(stay) + '<span class="keeps">Stays</span>') +
+    var stay = artistById(g.keep);
+    cards += g.members.length;
+    return '<div class="twin" data-g="' + gi + '">' + mergeRow(stay, true, "", open(stay) + '<span class="keeps">Stays</span>', true) +
       g.members.map(function (m) {
         var a = artistById(m.id);
-        return mergeRow(a, m.on, m.why, open(a) + '<button type="button" class="keep" data-keep="' + a.id + '">Keep this one</button>' +
-          '<button type="button" class="keep" data-apart="' + a.id + '" title="Do not offer this card with these again">Not the same</button>');
+        return mergeRow(a, false, m.why, open(a) + '<button type="button" class="keep" data-keep="' + a.id + '" title="This card stays, the other one goes into it">Keep this one</button>' +
+          '<button type="button" class="keep" data-apart="' + a.id + '" title="Do not offer this card with these again">Not the same</button>' +
+          '<button type="button" class="keep primary" data-merge="' + a.id + '" title="' + esc(a.name + " goes into " + stay.name + " and is gone; " + stay.name + " stays") + '">Merge into ' + esc(stay.name) + "</button>", true);
       }).join("") + "</div>";
   }).join("") || '<p class="hint">No cards that look like one artist.</p>';
   box.scrollTop = top;
   apartNote("twins-apart");
-  $("twins-go").disabled = !n;
-  $("twins-go").textContent = n ? "Merge " + plural(n, "card") : "Merge";
-  $("twins-sum").textContent = C.groups.length ? (n ? plural(n, "card") + " into " + plural(groups, "artist") + " · " : "") + plural(C.groups.length, "group") + " found" : "";
+  $("twins-sum").textContent = C.groups.length ? plural(C.groups.length, "group") + " · " + plural(cards, "card") + " to look at" : "";
+}
+// One card into the one that stays -- a single /merge call, then the list goes on without it. (A card that syncs says so and stays.)
+function twinsMerge(g, id) {
+  var keep = artistById(g.keep), gone = artistById(id);
+  if (!keep || !gone || C.busy) return;
+  C.busy = true;
+  api("POST", "/api/artists/" + id + "/merge", { into: g.keep }).then(function () {
+    [id, g.keep, 0].forEach(galDrop);
+    if (G && !G.all && G.key === id) browseClose();
+    if (G && G.all) G.stale = true;
+    if (S.brArtist === id) S.brArtist = g.keep;
+    g.members = g.members.filter(function (m) { return m.id !== id; });
+    if (!g.members.length) C.groups.splice(C.groups.indexOf(g), 1);
+    lastKey = "";
+    return load().then(function () { toast(gone.name + " is part of " + keep.name + " now."); });
+  }).catch(fail).then(function () { C.busy = false; renderTwins(); });
 }
 $("twins-list").addEventListener("click", function (e) {
-  var g = e.target.closest("[data-g]"), k = e.target.closest("[data-keep]"), b = e.target.closest("[data-id]"),
+  var g = e.target.closest("[data-g]"), k = e.target.closest("[data-keep]"), mg = e.target.closest("[data-merge]"),
       o = e.target.closest("[data-open]"), no = e.target.closest("[data-apart]");
   if (!g) return;
   g = C.groups[+g.dataset.g];
   if (o) { twinsOpen(+o.dataset.open); return; }
+  if (mg) { twinsMerge(g, +mg.dataset.merge); return; }
   if (no) {                                          // this card is not one of these: kept for good, and out of the group
     var id = +no.dataset.apart, was = artistById(id), others = [g.keep].concat(g.members.map(function (x) { return x.id; })).filter(function (x) { return x !== id; });
     markApart(others.map(function (x) { return [id, x]; })).then(function () {
@@ -780,42 +797,14 @@ $("twins-list").addEventListener("click", function (e) {
   if (k) {                                           // another card stays: the old keeper takes its place among those that go
     var kid = +k.dataset.keep, prev = g.keep, m = g.members.filter(function (x) { return x.id === kid; })[0];
     if (!m) return;
-    g.members[g.members.indexOf(m)] = { id: prev, s: m.s, on: true, warn: m.warn, why: m.why };
+    g.members[g.members.indexOf(m)] = { id: prev, s: m.s, warn: m.warn, why: m.why };
     g.keep = kid;
-  } else if (b) {
-    var m2 = g.members.filter(function (x) { return x.id === +b.dataset.id; })[0];
-    if (!m2) return;
-    m2.on = !m2.on;
   } else return;
   renderTwins();
 });
 $("twins-apart").addEventListener("click", function (e) {
   if (!e.target.closest("[data-apart-clear]")) return;
   forgetApart().then(function () { C.groups = findTwins(); renderTwins(); }).catch(fail);
-});
-$("twins-go").addEventListener("click", function () {
-  var jobs = [], done = [], into = {}, failed = [];
-  C.groups.forEach(function (g) { g.members.forEach(function (m) { if (m.on) jobs.push([m.id, g.keep]); }); });
-  if (!jobs.length) return;
-  $("twins-go").disabled = true;
-  jobs.reduce(function (p, j) {                      // one after the other; a card that is syncing says so and the rest goes on
-    return p.then(function () {
-      return api("POST", "/api/artists/" + j[0] + "/merge", { into: j[1] }).then(function () { done.push(j[0]); into[j[0]] = j[1]; },
-        function (err) { failed.push((artistById(j[0]) || {}).name + ": " + (err.message || err)); });
-    });
-  }, Promise.resolve()).then(function () {
-    done.concat(done.map(function (id) { return into[id]; }), 0).forEach(galDrop);
-    if (G && !G.all && (done.indexOf(G.key) >= 0)) browseClose();
-    if (G && G.all) G.stale = true;
-    if (into[S.brArtist]) S.brArtist = into[S.brArtist];
-    lastKey = "";
-    return load();
-  }).then(function () {
-    C.parked = false;
-    $("dlg-twins").close();
-    if (done.length) toast(plural(done.length, "card") + " merged.");
-    if (failed.length) toast(plural(failed.length, "card") + " not merged -- " + failed[0], true);
-  });
 });
 $("dlg-twins").addEventListener("close", function () { $("twins-back").classList.toggle("hidden", !C.parked); });
 $("twins-back-go").addEventListener("click", function () { $("twins-back").classList.add("hidden"); resumeTwins(); });

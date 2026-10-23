@@ -340,6 +340,8 @@ add the one that replaced it.
   opened on its own asked every source for its first page each time, although the snapshot showed at once -- a logged-in request on X, pixiv and
   Patreon. v0.50: a snapshot younger than 5 minutes (an hour on a cookie login's site) is not checked at the opening; the site is asked when the
   snapshot's posts run out, or by Refresh (`gallery.FRESH`, `FRESH_LOGIN`). The numbers are first guesses to tune by the request tally in the log.
+- 2026-10-23 — **Merge sources merges one pair at a time.** The user: each pair on its own button instead of all at once, "so no mistake can
+  happen". The ticks and the button that merged every ticked card are gone; each card has *Merge into «keeper»* (`twinsMerge`).
 
 ## Done
 
