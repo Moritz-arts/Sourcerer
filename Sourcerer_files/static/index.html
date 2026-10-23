@@ -351,7 +351,7 @@
   </div>
 </dialog>
 
-<!-- Merge sources: the cards that look like one artist, found over all of them; the ticked ones go into the card that stays. -->
+<!-- Merge sources: the cards that look like one artist, found over all of them; each is merged on its own button into the card that stays. -->
 <dialog id="dlg-twins" class="dlg">
   <div class="dlg-head">
     <span>Merge sources</span><span class="grow"></span>
@@ -359,16 +359,16 @@
   </div>
   <div class="dlg-body">
     <p class="hint">Cards that look like one artist, each with the reason under its name: a profile or a bio names the other account, the
-      same name or account name, names a letter or two apart. Ticked cards become one card with the one marked Stays; untick what is not the
-      same artist. <b>Open</b> shows an artist in Sourcerer so you can compare with your own eyes (a button brings you back here),
-      <b>Not the same</b> is remembered and never offered again. Two cards with an account on the same site are usually two people: they
-      are offered unticked, with a warning. Nothing merges before the button.</p>
+      same name or account name, names a letter or two apart. <b>Merge into&hellip;</b> puts that one card into the one marked Stays --
+      one pair at a time, nothing merges by itself; <b>Keep this one</b> changes which card stays. <b>Open</b> shows an artist in Sourcerer so you
+      can compare with your own eyes (a button brings you back here), <b>Not the same</b> is remembered and never offered again. Two cards with an
+      account on the same site are usually two people: they are offered with a warning.</p>
     <div id="twins-list" class="merge-list twins"></div>
     <p id="twins-apart" class="hint apart-note"></p>
   </div>
   <div class="dlg-foot">
     <span id="twins-sum" class="hint grow"></span>
-    <button type="button" id="twins-go" class="primary" disabled>Merge</button>
+    <button type="button" data-close>Close</button>
   </div>
 </dialog>
 
