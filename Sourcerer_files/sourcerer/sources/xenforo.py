@@ -12,8 +12,10 @@ Many forums sit behind a bot check that lets only browsers through. The
 login window is one: its cookies -- Cloudflare's pass among them -- and its
 User-Agent go along with every request to the forum (accounts.py).
 """
+import datetime
 import html
 import json
+import logging
 import random
 import re
 import urllib.parse
@@ -23,6 +25,7 @@ import requests
 from . import _gdl
 from .. import accounts, config, net
 
+log = logging.getLogger(__name__)
 KIND = "xenforo"
 LABEL = "XenForo"
 # What a XenForo link points at, below the forum's base (which may be a folder): the base, the route's
@@ -163,7 +166,11 @@ def info(media):
     """What the forum knows of one picture -- its title, description, who and when, size, views -- from the picture's own page: one
     request, asked when the viewer opens it (a listing page holds a title only; gallery-dl's `metadata` would ask for every
     picture of it). {} when the page says nothing."""
-    text, _final = net.get_text(media.post_url)
+    return _page_info(media.post_url)
+
+
+def _page_info(post_url):
+    text, _final = net.get_text(post_url)
     schema = _jsonld(text)
     main = schema.get("mainEntity") or schema
 
@@ -183,6 +190,90 @@ def info(media):
            "size": main.get("contentSize") or "", "width": number(main.get("width")), "height": number(main.get("height"))}
     out.update(stats)
     return {k: v for k, v in out.items() if v not in ("", 0, None)}
+
+
+# The dates of a forum's pictures, by (host, id): the tile's own, the picture's page, or an estimate between two of those.
+_dated = {}
+MAX_DATED = 20000
+
+
+def _post(f):
+    return f["url"].rsplit("/full", 1)[0] + "/" if "/full" in f["url"] else f["url"]
+
+
+def _epoch(text):
+    try:
+        return datetime.datetime.fromisoformat(_when(text).replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
+ASKS = 7                  # pages a batch of twenty may cost for its dates: the ends, then the middle of the widest gap
+CLOSE = 2 * 86400         # a gap between two known times this narrow (seconds) is not asked into: the id between them is good enough
+
+
+def _fill_dates(host, batch):
+    """Dates for the pictures of a batch whose tile showed none (the list page of many forums shows no time at all). A picture's page has
+    the exact time -- one request each, which a gallery of hundreds cannot ask for. A forum numbers its media as it goes, so the id is a
+    clock that only runs forward: the time of the batch's lowest and highest id is read from their own pages, then of the middle one of the
+    widest gap between two known times, until the gaps are under two days or ASKS pages were read; the pictures between are placed by their
+    id, which cannot be wrong by more than the gap they sit in. Done only where somebody waits (an artist's gallery: net.waiting) and never
+    for a sync; whatever is known is kept (_dated) and the next listing asks for nothing it knows. Any trouble -- the forum rests, wants a
+    login, says no time -- leaves the pictures as they are (undated, or estimated from what was read)."""
+    rows = []
+    for f in batch:
+        try:
+            n = int(f.get("id"))
+        except (TypeError, ValueError):
+            continue
+        when = _when(f.get("date"))
+        if when:
+            f["date"] = _dated[(host, n)] = when
+        elif (host, n) in _dated:
+            f["date"] = _dated[(host, n)]
+        else:
+            rows.append((n, f))
+    if not rows or not net.waiting():
+        return
+    rows.sort(key=lambda r: r[0])
+    anchors, asked = {}, [0]
+
+    def ask(n, f):
+        try:
+            when = _when(_page_info(_post(f)).get("posted"))
+        except Exception as e:
+            log.info("%s: no date for picture %s: %s", host, n, net.reason(e))
+            return False
+        asked[0] += 1
+        if not when or _epoch(when) is None:
+            return False
+        f["date"] = _dated[(host, n)] = when
+        anchors[n] = _epoch(when)
+        return True
+
+    for n, f in (rows[:1] + rows[-1:] if len(rows) > 1 else rows):
+        if not ask(n, f):
+            return
+    while asked[0] < ASKS:
+        ns = sorted(anchors)
+        gaps = [(abs(anchors[b] - anchors[a]), a, b) for a, b in zip(ns, ns[1:])
+                if any(a < n < b and not f.get("date") for n, f in rows)]
+        if not gaps or max(gaps)[0] <= CLOSE:
+            break
+        _, a, b = max(gaps)
+        between = [(n, f) for n, f in rows if a < n < b and not f.get("date")]
+        if not ask(*between[len(between) // 2]):
+            break
+    ns = sorted(anchors)
+    for n, f in rows:
+        if f.get("date") or not ns:
+            continue
+        lo = max((a for a in ns if a < n), default=ns[0])
+        hi = min((b for b in ns if b > n), default=ns[-1])
+        t = anchors[lo] + (anchors[hi] - anchors[lo]) * (n - lo) / (hi - lo) if hi != lo else anchors[lo]
+        f["date"] = _dated[(host, n)] = datetime.datetime.fromtimestamp(t, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+    if len(_dated) > MAX_DATED:
+        _dated.clear()
 
 
 def _title(f):
@@ -224,12 +315,14 @@ def pages(url):
             if e.auth or status == "403":
                 raise LoginRequired("this forum shows it to members only") from e
             raise
+        batch = [f for f in batch if f.get("id") and f.get("url")]
+        _fill_dates(host, batch)
         yield [Media(remote_key="xenforo:%s:%s" % (host, f["id"]), url=f["url"],
-                     post_url=f["url"].rsplit("/full", 1)[0] + "/" if "/full" in f["url"] else f["url"],
+                     post_url=_post(f),
                      # the title is the file name's last resort and what a tile says (the forum's own name for the file
                      # comes with the download, and wins)
                      posted=_when(f.get("date")), name=_title(f),
                      # The forum shows its files to members only: the gallery fetches
                      # them through Sourcerer, with the login, and makes its own small copy.
                      large=f["url"], preview_headers={})
-               for f in batch if f.get("id") and f.get("url")]
+               for f in batch]

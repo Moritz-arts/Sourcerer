@@ -347,6 +347,10 @@ add the one that replaced it.
   (the extension put back), and the forum's pictures have a date from the time their tile shows on the list page (gdl_run.py, mode `xenforo`), so
   they sort among the other sources' posts instead of alternating with them. Not seen on a real forum: if a forum's tiles show no time, its pictures
   stay undated and the viewer fills the date in when one is opened.
+- 2026-10-23 — **XenForo dates, second try; Merge sources buttons.** The user (v0.51): the forum pictures' dates still did not sort -- the 12th among the
+  23rd. Cause: the page's footer time was taken for the last tile of every page. v0.52 reads a tile's own time only, dates the rest from the
+  picture's page where somebody waits (ends of a batch and the widest gaps, the rest by id) and keeps dates through snapshots and a seeded gallery.
+  *Not the same* is red, and a card's four buttons sit in two columns (Open / Keep this one, Not the same / Merge into).
 
 ## Done
 

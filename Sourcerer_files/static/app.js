@@ -753,7 +753,7 @@ function renderTwins() {
       g.members.map(function (m) {
         var a = artistById(m.id);
         return mergeRow(a, false, m.why, open(a) + '<button type="button" class="keep" data-keep="' + a.id + '" title="This card stays, the other one goes into it">Keep this one</button>' +
-          '<button type="button" class="keep" data-apart="' + a.id + '" title="Do not offer this card with these again">Not the same</button>' +
+          '<button type="button" class="keep no" data-apart="' + a.id + '" title="Do not offer this card with these again">Not the same</button>' +
           '<button type="button" class="keep primary" data-merge="' + a.id + '" title="' + esc(a.name + " goes into " + stay.name + " and is gone; " + stay.name + " stays") + '">Merge into ' + esc(stay.name) + "</button>", true);
       }).join("") + "</div>";
   }).join("") || '<p class="hint">No cards that look like one artist.</p>';

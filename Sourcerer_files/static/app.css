@@ -435,7 +435,12 @@ button.linky:hover:not(:disabled) { background: none; color: var(--text-primary)
 .mk-name { font-size: 10px; color: var(--text-muted); }
 .merge-acts { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 4px; flex: none; max-width: 240px; }
 .merge-top .br-name { flex: 0 1 auto; }
-.merge-row .keep.primary { max-width: 210px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Merge sources: the buttons of a card in two columns, so "Open" sits over "Not the same" and "Stays" / "Keep this one" over "Merge into" -- the
+   keeper has the first row only. "Not the same" is red. */
+.twin .merge-acts { display: grid; grid-template-columns: 88px 150px; gap: 4px; max-width: none; justify-content: end; align-items: center; }
+.twin .merge-acts .keep, .twin .merge-acts .keeps { text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.twin .keep.no { background: var(--dot-bad); color: #fff; border-color: transparent; }
+.twin .keep.no:hover:not(:disabled) { background: var(--dot-bad); filter: brightness(1.1); }
 .merge-row div.br-item { cursor: default; }
 .merge-row div.br-item:hover { background: transparent; }
 .merge-row.on div.br-item:hover { background: var(--bg-accent); }
