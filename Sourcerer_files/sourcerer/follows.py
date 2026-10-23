@@ -280,7 +280,7 @@ class _Twins:
 
 def _add(page, kind, public, twins=None, stats=None):
     """Cards for the accounts of a page not seen before; one that has a twin on another site joins its card
-    instead. Returns (cards made, page was all known).
+    instead. Returns (cards made, cards a follow joined to, page was all known).
     public: host -> whether it is a public one, kept for the whole look. twins: _Twins of the look.
     stats: a Counter that says where every account of the page went (_look logs it: "158 follows, 106 cards" must be explainable)."""
     stats = collections.Counter() if stats is None else stats
@@ -303,7 +303,7 @@ def _add(page, kind, public, twins=None, stats=None):
                 stats["not public: " + host] += 1
         else:                                               # a Pixelfed, a Lemmy, a bridged account: nothing Sourcerer reads
             stats["other site: " + (urllib.parse.urlsplit(raw).hostname or raw[:40] or "no address")] += 1
-    made, known = [], len(page) - len(mine) - blocked
+    made, joined, known = [], [], len(page) - len(mine) - blocked
     with db.connect() as con:
         have = {r[0].lower() for r in con.execute("SELECT url FROM sources")}
         taken = {sync.safe_name(r[0]).lower() for r in con.execute("SELECT name FROM artists")}
@@ -338,6 +338,7 @@ def _add(page, kind, public, twins=None, stats=None):
                                 (picture, json.dumps(headers) if headers else None, twin))
                 twins.attach(twin, site_kind, url, links, name)
                 twins.attached += 1
+                joined.append(twin)
                 stats["joined an artist"] += 1
                 continue
             artist_id = con.execute("INSERT INTO artists (name, listed, avatar_url, avatar_headers) VALUES (?, 1, ?, ?)",
@@ -351,7 +352,7 @@ def _add(page, kind, public, twins=None, stats=None):
             stats["new card"] += 1
     if made or (twins and twins.attached):
         _touch()
-    return len(made), bool(page) and known == len(page)
+    return made, joined, bool(page) and known == len(page)
 
 
 # ---- the lists ------------------------------------------------------------------------
@@ -384,6 +385,7 @@ def _look(key):
     db.set_setting("follows_seen:" + key, "0")        # until a look has read accounts, the next start looks again (look())
     site, label, total, public, twins, seen = _site(key), accounts.label(key), 0, {}, _Twins(), 0
     fallback, early, stats = False, False, collections.Counter()
+    asked = []                                         # cards this look made or joined: they get their first look (below)
     # A list read to its end by *this* login (a new login is another account, maybe) may stop early.
     stamp = accounts.saved(key) or "-"
     try:
@@ -396,8 +398,9 @@ def _look(key):
                 seen += len(page)
                 _prime(page, site.KIND, public)
                 with _adding:                        # (the lists of several logins are read side by side, the cards made one look at a time)
-                    made, all_known = _add(page, site.KIND, public, twins, stats)
-                total += made
+                    made, joined, all_known = _add(page, site.KIND, public, twins, stats)
+                total += len(made)
+                asked += made + joined
                 if all_known and db.get_setting(done, "") == stamp:
                     early = True
                     break                    # read to its end before: the rest is known
@@ -436,6 +439,18 @@ def _look(key):
         sync.event("info", "%s: %d followed account%s added to the list%s" % (
             label, total + twins.attached, "" if total + twins.attached == 1 else "s",
             " (%d joined an artist they are the same as)" % twins.attached if twins.attached else ""))
+    if asked:
+        # A card made from a login's follows is in nobody's sweep: Sync all and the automatic sync leave
+        # cards only listed alone, so a card somebody follows stays empty until somebody notices it is
+        # empty. Ask for the cards this look made, and the ones a follow joined to an existing card (its
+        # new account needs a look too): the newest pages, no download -- a follow list can be a hundred
+        # names a day, and the pictures come when they are asked for. A card with auto-download on does
+        # download, as it always did. auto=True: Sourcerer asked, so the cards stay cards nobody has
+        # touched (Manage Accounts does not change what a card is).
+        queued = sync.enqueue(asked, auto=True)
+        if queued:
+            sync.event("info", "%s: %d card%s put into the queue for their first look" % (
+                label, queued, "" if queued == 1 else "s"))
     return total
 
 
