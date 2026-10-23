@@ -443,11 +443,11 @@ def _look(key):
         # A card made from a login's follows is in nobody's sweep: Sync all and the automatic sync leave
         # cards only listed alone, so a card somebody follows stays empty until somebody notices it is
         # empty. Ask for the cards this look made, and the ones a follow joined to an existing card (its
-        # new account needs a look too): the newest pages, no download -- a follow list can be a hundred
-        # names a day, and the pictures come when they are asked for. A card with auto-download on does
-        # download, as it always did. auto=True: Sourcerer asked, so the cards stay cards nobody has
-        # touched (Manage Accounts does not change what a card is).
-        queued = sync.enqueue(asked, auto=True)
+        # new account needs a look too): a scan -- the newest page of each source, kept as its snapshot, which is
+        # what the Artists view and Browse show -- and nothing more: a follow list can be hundreds of accounts on a
+        # login (a refresh reads four pages of each), and a scan keeps to its share of the site's day (net.scan_room).
+        # auto=True: Sourcerer asked, so the cards stay cards nobody has touched (Manage Accounts does not change what a card is).
+        queued = sync.enqueue(asked, auto=True, mode="scan")
         if queued:
             sync.event("info", "%s: %d card%s put into the queue for their first look" % (
                 label, queued, "" if queued == 1 else "s"))

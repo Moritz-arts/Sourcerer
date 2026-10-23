@@ -199,14 +199,15 @@ def enqueue(artist_ids=None, auto=False, only=None, mode=None, everyone=False, o
         # Cards only listed (made from a login's follows) are in nobody's sweep: a follow list can be a
         # thousand accounts, and reading every one of them every day is not what a follow list asks for.
         # Asking for one -- by name -- takes it into the routine. A card that has never been read is the
-        # exception: an empty card is not what somebody followed an account for, and it is read once --
-        # afterwards the old rule holds over it again.
+        # exception: an empty card is not what somebody followed an account for, and it is scanned once (the newest
+        # page of each source, within the site's share of the day) -- afterwards the old rule holds over it again.
         rows = con.execute(
-            "SELECT id, auto_download FROM artists" +
+            "SELECT id, auto_download, listed FROM artists" +
             ("" if artist_ids is not None or everyone else
              " WHERE (listed = 0 AND auto_download = 1) OR (listed = 1 AND last_sync IS NULL)") +
             " ORDER BY COALESCE(last_sync, ''), RANDOM()").fetchall()
         ids, downloads = [r[0] for r in rows], {r[0] for r in rows if r[1]}
+        unread = {r[0] for r in rows if r[2]} if artist_ids is None and not everyone else set()   # (listed and never read: a sweep only scans it)
         if artist_ids is not None and not auto:
             con.executemany("UPDATE artists SET listed = 0 WHERE id = ?", [(i,) for i in artist_ids])
     if artist_ids is not None:
@@ -230,7 +231,7 @@ def enqueue(artist_ids=None, auto=False, only=None, mode=None, everyone=False, o
                 _only.pop(i, None)
             if mode:
                 _modes[i] = mode
-            elif everyone and artist_ids is None and i not in downloads:
+            elif (everyone and artist_ids is None and i not in downloads) or i in unread:
                 _modes[i] = "scan"                 # a card that does not download is only looked at
             else:
                 _modes.pop(i, None)
