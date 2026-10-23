@@ -93,7 +93,7 @@ def _unique(name, url, taken):
 
 
 def name_key(name):
-    """A name without what is no letter or digit, in one case and width: "👹 青林檎テル" is "青林檎テル".
+    """A name without what is no letter or digit, in one case and width: "👹 Artist" is "Artist".
     (The page's `nameKey` in app.js does the same for its suggestions: keep them alike.)"""
     return "".join(ch for ch in unicodedata.normalize("NFKC", name or "").casefold() if ch.isalnum())
 
@@ -112,7 +112,7 @@ _NOT_NAMES = {"index", "user", "users", "profile", "profiles", "members", "membe
 
 
 def handle_text(url):
-    """The account's own name in its address, as written: "Mewnet" for mastodon.social/@Mewnet, x.com/Mewnet,
+    """The account's own name in its address, as written: "Artist" for mastodon.social/@Artist, x.com/Artist,
     bsky.app/profile/mewnet.bsky.social and mewnet.fanbox.cc -- what a display name ("Mew") is not. "" where the address
     names no account (pixiv's number, a booru's search, a forum routed through `index.php?media/users/name.12`, Patreon's
     `/user?u=1`, a Bluesky DID). `card_name` names the card by it."""
@@ -139,7 +139,7 @@ def handle_key(url):
 
 
 def stem_of(url):
-    """(the account name without the digits at its end, whether it had none) -- @Blackmoon, @blackmoon_77 and
+    """(the account name without the digits at its end, whether it had none) -- @Artist, @artist_77 and
     @BlackMoon1985 are one artist's accounts when the number is only whatever was free on each site. None when too
     little is left (`STEM_MIN`)."""
     key = name_key(handle_text(url))
@@ -150,7 +150,7 @@ def stem_of(url):
 def card_name(urls, display=""):
     """What a card is called: the artist's @name -- the account name of its first account on a site that has one (HANDLE_KINDS
     in that order), else `display`, the name the site shows. Where several accounts agree on a name but for the digits at its
-    end (@Blackmoon, @blackmoon_77), the name without them: the one the artist is known by."""
+    end (@Artist, @artist_77), the name without them: the one the artist is known by."""
     ranked = sorted(urls, key=lambda u: HANDLE_KINDS.index(sources.kind_of(u)) if sources.kind_of(u) in HANDLE_KINDS else 99)
     found = [h for h in (handle_text(u) for u in ranked) if h]
     if not found:
@@ -235,7 +235,7 @@ class _Twins:
 
     def by_stem(self, url, name, kinds, skip=(), below=None):
         """The listed cards an account joins by its name without the digits -- the weakest evidence there is, so only
-        where it is not likely two people: one of the two names is the plain one (@blackmoon and @blackmoon_77: the
+        where it is not likely two people: one of the two names is the plain one (@artist and @artist_77: the
         number is what was free on the other site) or the display names say the same too; never a card the user made
         (an automatic join cannot be undone); and only when exactly one card fits."""
         stem = stem_of(url or "")
