@@ -201,9 +201,10 @@ class _Source:
         self.seeded = True
         # A look of minutes ago is as good as asking again. The site is asked only when the posts of the snapshot run out (fill starts
         # from its first page then, and what the artist posted meanwhile is counted as new); Refresh on the artist reads it at once.
-        # (A forum's snapshot made before its pictures had dates is not: the live page brings them, and sorting needs them.)
+        # (A forum's snapshot made before its pictures had dates is not: the live page brings them, and sorting needs them -- unless the forum is
+        # the gallery's only source: nothing is sorted against it, and every opening would otherwise ask the forum again.)
         if not self.offline and time.time() - snap.fetched < (FRESH_LOGIN if self.login else FRESH) \
-                and not (self.kind == "xenforo" and any(not m.posted for m in snap.items)):
+                and not (self.kind == "xenforo" and not self.alone and any(not m.posted for m in snap.items)):
             self.fresh = self.checked = True
 
     def start_fill(self):

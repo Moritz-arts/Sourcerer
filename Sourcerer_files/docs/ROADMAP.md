@@ -71,7 +71,7 @@ look gaps for sources read lately, rate-limit windows respected, three artists o
 **Downloads and updates** — Setup.exe and portable zip, .dmg for both Mac types, AppImage and tar.gz, built and started by CI before they are attached;
 in-app update for the Python version and the installed Windows copy; *Actions › Publish* merges and releases.
 
-**Brand (v0.55)** — new logo, icons for every system, README banner, accent colour.
+**Brand (v0.55, v0.57)** — new logo, icons for every system, README banner, accent colour; a bigger mark in the header and on the start pages.
 
 ## Next
 
