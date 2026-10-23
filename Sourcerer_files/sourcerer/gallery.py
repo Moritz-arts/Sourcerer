@@ -62,6 +62,8 @@ PAGE = 60                    # items a page asks for at a time
 SLOW = 2.5                   # seconds the first page waits for a source that is not ready, once something can be shown
 SLOW_LATER = 0.8             # ... and every later page: the sources are mid-way, a slow one must not hold the rest up
 FAST = 0.3                   # ... when snapshots show the first page at once
+FRESH = 5 * 60               # a snapshot younger than this stands in for a source's first live page: opening an artist again within minutes asks no site
+FRESH_LOGIN = 60 * 60        # ... an hour on a cookie login's site (X, pixiv, Patreon, Fanbox, Fantia, forums), where every request is the account's
 SEED_PAGES = 3               # pages a seeded source reads looking for a post its snapshot has, before it gives up on it
 SEED_AGE = 7 * 86400         # a snapshot older than this is not shown (its links may have expired: Patreon's thumbnails)
 OFFLINE_AGE = 30 * 86400     # ... except in All artists on a login site, which is nothing BUT snapshots (see _Source.offline): its links stay good
@@ -146,7 +148,8 @@ class _Source:
         self.seeded, self.known = False, set()                        # shown from the snapshot already
         self.met = False                      # the live pages have reached a post the snapshot has
         self.live = {}                        # remote_key -> the site's own copy of a post the snapshot showed
-        self.checked = False                  # the site has been asked for its first page
+        self.checked = False                  # the site has been asked for its first page (or the snapshot is fresh: see seed)
+        self.fresh = False                    # shown from a snapshot young enough (FRESH) that the site is not asked until the snapshot's end
         self.pages = 0
         self.new = 0                          # posts the check found that the snapshot did not have
         self.listing = None
@@ -195,6 +198,10 @@ class _Source:
             self.buffer.append((self.last, m))
         self.known = {m.remote_key for m in snap.items}
         self.seeded = True
+        # A look of minutes ago is as good as asking again. The site is asked only when the posts of the snapshot run out (fill starts
+        # from its first page then, and what the artist posted meanwhile is counted as new); Refresh on the artist reads it at once.
+        if not self.offline and time.time() - snap.fetched < (FRESH_LOGIN if self.login else FRESH):
+            self.fresh = self.checked = True
 
     def start_fill(self):
         """The next page, asked for in the background -- not twice at once, and not while another
@@ -235,6 +242,7 @@ class _Source:
 
     def fill(self):
         """One more page from the site -- one request, or none while it rests."""
+        self.fresh = False
         rest = net.paused(self.row["url"])
         if rest:
             self.done, self.error = True, "rests until %s" % time.strftime("%H:%M", time.localtime(rest[0]))
@@ -356,7 +364,8 @@ class _Gallery:
     def start_checks(self):
         """Ask the sources that have not been asked for their first page: the ones that showed a
         snapshot, so the page knows they are up to date (and what is new), and any that could not
-        start before (their site's lane was busy, or another card was asked lately)."""
+        start before (their site's lane was busy, or another card was asked lately). Not the ones
+        whose snapshot is fresh (`checked` from the start)."""
         for s in sorted(self.sources, key=lambda s: s.asked_at):
             if not s.checked and not s.done:
                 s.start_fill()
@@ -378,7 +387,7 @@ class _Gallery:
     def state(self):
         return [{"id": s.row["id"], "label": s.label, "kind": s.kind, "host": s.host, "url": s.row["url"],
                  "artist_id": s.artist["id"], "artist": s.artist["name"],
-                 "loading": s.loading(), "checked": s.checked, "cached": s.seeded, "offline": s.offline, "new": s.new,
+                 "loading": s.loading(), "checked": s.checked, "cached": s.seeded, "offline": s.offline, "fresh": s.fresh, "new": s.new,
                  # Items still waiting are more to show, whatever a later page did (a prefetch that failed).
                  "state": "more" if s.buffer else "error" if s.error else "done" if s.done else "more",
                  "error": s.error} for s in self.sources]
@@ -429,7 +438,7 @@ class _Gallery:
         self._library([(self.items[n][0].artist["id"], self.items[n][1].remote_key) for n in out])
         self._kick()
         for s in sorted(self.sources, key=lambda s: s.asked_at):     # the next page before it is needed
-            if not s.done and len(s.buffer) < AHEAD and not s.enough():
+            if not s.done and len(s.buffer) < AHEAD and not s.enough() and not (s.fresh and s.buffer):     # (a fresh snapshot is shown to its end first)
                 s.start_fill()
         self.start_checks()                          # a seeded source whose turn had not come yet
         return [self.item(n) for n in out]

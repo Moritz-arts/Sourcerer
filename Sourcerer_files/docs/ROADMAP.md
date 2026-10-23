@@ -336,6 +336,10 @@ add the one that replaced it.
   larger picture, name and site marks; Browse's numbers gain **Source (Logo)** and *Images* counts what was posted (the site's own count where an
   answer carries it free, else what the looks saw), not only what is downloaded. The user's settings are the defaults now (24 parallel downloads,
   32 per site, 0.1 s, fast gap between artists, no scan at start). Open: a short age limit on a gallery's live check (below).
+- 2026-10-23 — **A fresh snapshot stands in for the gallery's live check.** The user said yes to the one gap the cache report named: an artist
+  opened on its own asked every source for its first page each time, although the snapshot showed at once -- a logged-in request on X, pixiv and
+  Patreon. v0.50: a snapshot younger than 5 minutes (an hour on a cookie login's site) is not checked at the opening; the site is asked when the
+  snapshot's posts run out, or by Refresh (`gallery.FRESH`, `FRESH_LOGIN`). The numbers are first guesses to tune by the request tally in the log.
 
 ## Done
 
@@ -501,7 +505,4 @@ add the one that replaced it.
 - [ ] Gallery: a filter by date.
 - [ ] Browse: a background timeline that refreshes the snapshots of cards nobody has opened would make "All artists" complete
       without a Refresh all (a login site is never read live there since v0.43; an account with no snapshot shows nothing).
-- [ ] Gallery: an artist opened on its own asks every source for its first page each time (the snapshot shows at once, the check runs anyway, and
-      it is a logged-in request on X / pixiv / Patreon). A snapshot younger than a few minutes (open APIs) or an hour (cookie logins) could stand in for
-      that check -- `_Source.start_checks` has no age test yet; scrolling past the snapshot still needs the live listing.
 - [ ] Browse: select several pictures and download them together.
