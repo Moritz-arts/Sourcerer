@@ -5,6 +5,11 @@ automatically -- one line per change, newest first. A release is drafted by hand
 from the tag of whichever version is judged ready, and this is the text to paste
 into it.
 
+## v0.51 — 2026-10-23
+
+- Merge sources: every card is merged on its own button, one pair at a time -- no ticks, no merging of many at once
+- XenForo: the gallery names a picture by its title instead of "index.php" and dates it from its tile on the list page, so a forum's pictures sort among the other sources'
+
 ## v0.50 — 2026-10-23
 
 - Gallery: a snapshot younger than 5 minutes (an hour on a cookie login's site) stands in for the live check when an artist is opened
