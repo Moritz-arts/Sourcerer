@@ -190,16 +190,21 @@ def enqueue(artist_ids=None, auto=False, only=None, mode=None, everyone=False, o
     how many were added. only: the ids of the
     sources to ask -- the rest of the card is left alone this time (Browse: download what
     the filter shows). mode: "download" to download, "refresh" to only look; none lets the
-    card's auto-download decide (a sync that downloads what it finds, or not).
+    card's auto-download decide (a sync that downloads what it finds, or not). A card made from a
+    login's follows that has never been read at all is in a sweep too, once.
 
     The longest unsynced first, in a random order among equals: not the same
     cards in the same order every day."""
     with db.connect() as con:
-        # Cards only listed (made from a login's follows) are in nobody's sweep: Sync all and the
-        # automatic sync leave them alone. Asking for one -- by name -- takes it into the routine.
+        # Cards only listed (made from a login's follows) are in nobody's sweep: a follow list can be a
+        # thousand accounts, and reading every one of them every day is not what a follow list asks for.
+        # Asking for one -- by name -- takes it into the routine. A card that has never been read is the
+        # exception: an empty card is not what somebody followed an account for, and it is read once --
+        # afterwards the old rule holds over it again.
         rows = con.execute(
             "SELECT id, auto_download FROM artists" +
-            ("" if artist_ids is not None or everyone else " WHERE listed = 0 AND auto_download = 1") +
+            ("" if artist_ids is not None or everyone else
+             " WHERE (listed = 0 AND auto_download = 1) OR (listed = 1 AND last_sync IS NULL)") +
             " ORDER BY COALESCE(last_sync, ''), RANDOM()").fetchall()
         ids, downloads = [r[0] for r in rows], {r[0] for r in rows if r[1]}
         if artist_ids is not None and not auto:
