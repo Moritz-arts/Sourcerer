@@ -438,6 +438,8 @@ add the one that replaced it.
 - [x] Merge dialog: likely twins (same name but for emoji / marks / case, shared account name) listed at
       the top, several cards ticked and merged with one button, no extra confirmation; Browse can be
       ordered by source (logo and line per site)
+- [x] Three views (v0.47): **Artists** (one long list of big cards with each artist's newest four pictures, from the snapshots --
+      no site is asked; a click opens the artist in Gallery), **Gallery** (the Browse of before) and **Recommended** (a placeholder)
 
 ## Next
 
@@ -450,6 +452,9 @@ add the one that replaced it.
       The pictures themselves come from the CDNs (pbs.twimg.com, i.pximg.net: no cookie, no budget, as the thumbnails do now), so scrolling
       costs the sites' login lanes nothing. First a diagnostic with the user's real login: does the feed show every media post of every
       followed account (compare it with `UserMedia` / `profile/all` for ~20 artists), and how far back does it reach?
+- [ ] **Recommended** (the user, 2026-10-23: pull the recommended artists from every login): X's who-to-follow, Bluesky's
+      `getSuggestions`, Mastodon's suggestions (`/api/v2/suggestions`), pixiv's recommended users, Fanbox / Patreon where they have one --
+      one list per login site, each a card to follow, to make a card of, or to dismiss. Needs a real login to see what each site answers.
 - [ ] Limits, next (the research's order of effect): one **combined feed per login site** instead of a read per account (X
       `HomeLatestTimeline`, pixiv `ajax/follow_latest/illust`, Patreon `/api/stream`, the Mastodon / Misskey home timeline), each
       stopping at the first known post -- only after its completeness is measured against the per-account reads (nobody documents it;

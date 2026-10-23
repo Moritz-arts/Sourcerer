@@ -157,7 +157,7 @@ function activityKey(a) {
 function renderAll() {
   $("empty").classList.toggle("hidden", S.artists.length > 0);
   $("browse").classList.toggle("blank", !S.artists.length);
-  renderBrowseList(); renderBrowseHead(); renderActivity();
+  renderBrowseList(); renderBrowseHead(); renderActivity(); renderArtists();
 }
 
 // The star: the artist stands among the favorites (first in the list when it is ordered so).
@@ -326,7 +326,7 @@ function load() {
     }
     if (G && G.artist) { G.artist = artistById(G.artist.id) || G.artist; $("gal-title").textContent = G.artist.name; }
     renderAll();
-    if (!G) browseOpen(S.brArtist);
+    if (!G && S.view === "gallery") browseOpen(S.brArtist);      // (the other views open it when they are asked to)
     showUpdate();
     showAccounts();
   });
@@ -624,20 +624,24 @@ document.addEventListener("keydown", function (e) {
       S.brSelect = false; G.sel.clear(); selPaint();
     }
     if (!dialog && t === $("br-search")) { t.value = ""; t.blur(); renderBrowseList(); }
+    if (!dialog && t === $("av-search")) { t.value = ""; t.blur(); renderArtists(); }
     return;                                   // an open dialog closes itself
   }
   if (!dialog && ctrl && (k === "+" || k === "=")) { e.preventDefault(); return galSize(+$("gal-size").value + 20); }
   if (!dialog && ctrl && k === "-") { e.preventDefault(); return galSize(+$("gal-size").value - 20); }
   if (!dialog && ctrl && k === "0") { e.preventDefault(); return galSize(DEFAULT_GAL); }
   if (dialog) return;
-  if (ctrl && low === "a" && !typing && G && $("gal-view").classList.contains("hidden")) { e.preventDefault(); return selAll(); }
+  if (ctrl && low === "a" && !typing && G && S.view === "gallery" && $("gal-view").classList.contains("hidden")) { e.preventDefault(); return selAll(); }
   if ((ctrl && low === "n") || (!ctrl && !e.altKey && !typing && low === "n")) { e.preventDefault(); return openCard(null); }
-  if ((ctrl && low === "f") || (k === "/" && !typing)) { e.preventDefault(); $("br-search").focus(); return $("br-search").select(); }
+  if ((ctrl && low === "f") || (k === "/" && !typing)) {
+    var box = $(S.view === "artists" ? "av-search" : "br-search");
+    e.preventDefault(); box.focus(); return box.select();
+  }
   if (k === "F5" || (ctrl && low === "r")) { e.preventDefault(); return sync(null); }
   if (ctrl && k === ",") { e.preventDefault(); return openSettings(); }
   if (ctrl && low === "l") { e.preventDefault(); return toggleLog(); }
 
-  if (typing || ctrl || e.altKey || t.type === "range" || !$("gal-view").classList.contains("hidden")) return;   // (a picture open: its own keys)
+  if (typing || ctrl || e.altKey || t.type === "range" || S.view !== "gallery" || !$("gal-view").classList.contains("hidden")) return;   // (a picture open: its own keys; the other views have none of the artist's)
   if (/^(Arrow(Up|Down)|Home|End)$/.test(k)) { e.preventDefault(); return pickArtist(k); }
   var a = artistById(S.brArtist);
   if (!a) return;
@@ -2672,7 +2676,182 @@ $("promo-go").addEventListener("click", function () {
   api("POST", "/api/open-url", { url: "https://github.com/Moritz-arts/TrackImage" }).catch(fail);
 });
 
+// ---- the three views: Artists | Gallery | Recommended ---------------------------------------------------------------------------
+// Gallery is Browse as it was. Artists is every card as a wide row with its newest pictures (from the snapshots the looks saved and
+// the library: no site is asked); a click opens the artist in the gallery. Recommended is not built yet: a page that says so.
+
+var VIEW_KEY = "sourcerer.view", AV_SORT = "sourcerer.artists.sort";
+S.view = "gallery"; S.avSort = "activity";
+try {
+  var v0 = localStorage.getItem(VIEW_KEY), a0 = localStorage.getItem(AV_SORT);
+  if (/^(artists|gallery|recommended)$/.test(v0)) S.view = v0;
+  if (/^(activity|name|favorites)$/.test(a0)) S.avSort = a0;
+} catch (e) {}
+$("av-sort").value = S.avSort;
+
+// Which of the three is shown (no more than that: the start sets it before anything is loaded).
+function showView(v) {
+  if (!/^(artists|gallery|recommended)$/.test(v)) v = "gallery";
+  S.view = v;
+  document.querySelectorAll("#views button").forEach(function (b) {
+    var on = b.dataset.view === v;
+    b.classList.toggle("selected", on); b.setAttribute("aria-selected", on ? "true" : "false");
+  });
+  $("artists-view").classList.toggle("hidden", v !== "artists");
+  $("recommended-view").classList.toggle("hidden", v !== "recommended");
+  $("browse").classList.toggle("hidden", v !== "gallery");
+  return v;
+}
+function setView(v) {
+  v = showView(v);
+  try { localStorage.setItem(VIEW_KEY, v); } catch (e) {}
+  closeMenu();
+  if (v === "artists") renderArtists();
+  else if (v === "recommended") renderRecommended();
+  else if (G) requestAnimationFrame(galLayout);          // (laid out for a width of nothing while it was hidden)
+  else if (S.artists.length || S.brArtist === 0) browseOpen(S.brArtist);
+}
+$("views").addEventListener("click", function (e) {
+  var b = e.target.closest("[data-view]");
+  if (b) setView(b.dataset.view);
+});
+
+function renderRecommended() {
+  var on = (S.fields || []).filter(function (f) { return f.logged_in; }).map(function (f) { return f.label; });
+  $("rec-sites").textContent = on.length ? "Logged in now: " + on.join(", ") + "." : "No site is logged in yet (Manage Accounts).";
+}
+
+// One card per artist, wide, with the artist's four newest pictures. The list is built again only when what it shows changed
+// (its order, the names, the marks); the numbers beside a name are written in place, and a picture once asked for stays.
+var avKey = "", avPics = {}, avWant = new Set(), avTimer = 0, AV_AT_ONCE = 4, AV_BATCH = 24;
+var avQueue = [], avFlight = new Set();
+var avNear = new IntersectionObserver(function (entries) {
+  entries.forEach(function (e) {
+    if (!e.isIntersecting) return;
+    avNear.unobserve(e.target);
+    var id = +e.target.dataset.id;
+    if (!avPics[id]) { avWant.add(id); avPics[id] = "asking"; }
+  });
+  if (avWant.size && !avTimer) avTimer = setTimeout(avAsk, 60);
+}, { root: $("av-list"), rootMargin: "700px" });
+
+function avOrder() {
+  var q = $("av-search").value.trim().toLowerCase();
+  return S.artists.filter(function (a) { return !q || nameHit(a, q); }).sort(function (x, y) {
+    if (S.avSort === "favorites" && !x.favorite !== !y.favorite) return x.favorite ? -1 : 1;
+    if (S.avSort !== "name") { var tx = activityKey(x), ty = activityKey(y); if (tx !== ty) return !tx ? 1 : !ty ? -1 : tx < ty ? 1 : -1; }
+    return x.name.localeCompare(y.name);
+  });
+}
+function avMeta(a) {
+  var seen = {}, marks = "";
+  a.sources.forEach(function (s) {
+    var k = s.site || s.label;
+    if (seen[k]) return;
+    seen[k] = 1;
+    marks += siteLogo(k, s.kind, s.host) || "<span>" + esc(k) + "</span>";
+  });
+  var n = totalOf(a);
+  return marks + (n ? "<span>" + n + (cutOff(a) ? "+" : "") + " images</span>" : "") +
+    (a.auto_download ? '<span class="cloud" title="Auto-download on">' + icon("cloud-down") + "</span>" : "") +
+    (a.favorite ? '<svg class="ic star" role="img" aria-label="Favorite"><use href="#i-star"/></svg>' : "");
+}
+function avCard(a) {
+  return '<article class="av-card" tabindex="0" role="button" data-id="' + a.id + '" aria-label="' + esc(a.name) + '">' +
+    '<div class="av-who">' + avatarHtml(a, "lg") + '<div class="av-text"><div class="av-name" title="' + esc(a.name) + '">' + esc(a.name) +
+    '</div><div class="av-meta">' + avMeta(a) + "</div></div></div>" +
+    '<div class="av-pics"><span class="av-pic"></span><span class="av-pic"></span><span class="av-pic"></span><span class="av-pic"></span></div></article>';
+}
+function renderArtists() {
+  if (S.view !== "artists") return;
+  var list = avOrder();
+  $("av-count").textContent = plural(list.length, "artist");
+  var key = S.avSort + "|" + list.map(function (a) { return a.id + ":" + a.name + ":" + (a.avatar_checked || "") + ":" + a.sources.length; }).join(",");
+  if (key !== avKey) {
+    avKey = key;
+    avNear.disconnect(); avQueue = []; avFlight.clear();
+    $("av-list").innerHTML = list.length ? list.map(avCard).join("")
+      : '<div class="av-empty">' + (S.artists.length ? "No artist matches." : "No artists yet: log in under Manage Accounts, or add one.") + "</div>";
+    $("av-list").querySelectorAll(".av-card").forEach(function (c) {
+      avNear.observe(c);
+      var id = +c.dataset.id;
+      if (avPics[id] && avPics[id] !== "asking") avFill(c, avPics[id]);
+    });
+    return;
+  }
+  list.forEach(function (a) {                                    // the numbers and marks, in place
+    var c = $("av-list").querySelector('.av-card[data-id="' + a.id + '"] .av-meta');
+    var html = avMeta(a);
+    if (c && c.innerHTML !== html) c.innerHTML = html;
+  });
+}
+function avAsk() {
+  avTimer = 0;
+  var ids = Array.from(avWant).slice(0, AV_BATCH);
+  ids.forEach(function (id) { avWant.delete(id); });
+  if (!ids.length) return;
+  api("GET", "/api/overview?ids=" + ids.join(",")).then(function (d) {
+    ids.forEach(function (id) {
+      avPics[id] = d[id] || [];
+      var c = $("av-list").querySelector('.av-card[data-id="' + id + '"]');
+      if (c) avFill(c, avPics[id]);
+    });
+  }).catch(function () { ids.forEach(function (id) { delete avPics[id]; }); });
+  if (avWant.size) avTimer = setTimeout(avAsk, 60);
+}
+function avFill(card, items) {
+  var box = card.querySelector(".av-pics"), tiles = "";
+  for (var i = 0; i < 4; i++) {
+    var it = items[i];
+    tiles += it ? '<span class="av-pic" title="' + esc(it.date ? it.date.slice(0, 10) : "") + '"><img alt="" referrerpolicy="no-referrer" data-lazy="' + esc(it.thumb) + '"></span>'
+      : '<span class="av-pic none">' + (!i ? "Nothing looked at yet: Refresh all (F5)" : "") + "</span>";
+  }
+  box.innerHTML = tiles;
+  box.querySelectorAll("img[data-lazy]").forEach(function (img) { avQueue.push(img); });
+  avPump();
+}
+// Pictures Sourcerer fetches wait in a site's polite lane and the browser opens six connections to Sourcerer: AV_AT_ONCE at a time.
+function avPump() {
+  while (avFlight.size < AV_AT_ONCE && avQueue.length) {
+    var img = avQueue.shift();
+    if (!img.isConnected || img.hasAttribute("src")) continue;
+    avFlight.add(img);
+    img.addEventListener("load", avDone); img.addEventListener("error", avDone);
+    img.src = img.dataset.lazy;
+  }
+}
+function avDone(e) {
+  e.target.removeEventListener("load", avDone); e.target.removeEventListener("error", avDone);
+  if (avFlight.delete(e.target)) avPump();
+}
+function avOpen(id) {
+  if (!artistById(id)) return;
+  setView("gallery");
+  browseOpen(id);
+}
+$("av-search").addEventListener("input", renderArtists);
+$("av-sort").addEventListener("change", function () {
+  S.avSort = /^(activity|name|favorites)$/.test(this.value) ? this.value : "activity";
+  try { localStorage.setItem(AV_SORT, S.avSort); } catch (e) {}
+  renderArtists();
+});
+$("av-list").addEventListener("click", function (e) {
+  var c = e.target.closest(".av-card");
+  if (c) avOpen(+c.dataset.id);
+});
+$("av-list").addEventListener("keydown", function (e) {
+  var c = e.target.closest(".av-card");
+  if (c && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); avOpen(+c.dataset.id); }
+});
+$("av-list").addEventListener("contextmenu", function (e) {
+  var c = e.target.closest(".av-card"), a = c && artistById(+c.dataset.id);
+  if (!a) return;
+  e.preventDefault();
+  openMenu(a, e.clientX, e.clientY);
+});
+
 function start() {
+  showView(S.view);
   load().then(function () {
     poll();
     checkUpdate(false);        // once per start: a dot on the settings button when there is one

@@ -72,6 +72,12 @@
   <header class="toolbar" id="toolbar">
     <img class="logo" src="/static/logo.svg" alt="">
     <span class="brand">Sourcerer</span><span id="version" class="muted small"></span>
+    <!-- The three views: every artist at a glance, the gallery (Browse), and the artists the sites recommend. -->
+    <div class="seg views" id="views" role="tablist" aria-label="Views">
+      <button type="button" role="tab" data-view="artists" title="Every artist you follow, with the newest pictures">Artists</button>
+      <button type="button" role="tab" data-view="gallery" title="The pictures: all artists, or one">Gallery</button>
+      <button type="button" role="tab" data-view="recommended" title="Artists your sites recommend (coming)">Recommended</button>
+    </div>
     <span class="grow"></span>
     <button id="btn-sync-all" title="Refresh every artist, one after the other down the list: look for new posts online; artists with auto-download also download what they find (F5)"><svg class="ic"><use href="#i-refresh"/></svg> Refresh all</button>
     <button id="btn-accounts" title="Log in to your sites and keep the logins working"><svg class="ic"><use href="#i-key"/></svg> Manage Accounts<span id="acc-count" class="count hidden"></span></button>
@@ -84,6 +90,34 @@
       <button type="button" class="wc close" id="win-close" aria-label="Close" title="Close"><svg class="ic"><use href="#i-x"/></svg></button>
     </span>
   </header>
+
+  <!-- Artists: every card as a wide row with the newest pictures; a click opens the artist in the gallery. -->
+  <section id="artists-view" class="artists-view hidden" aria-label="Artists">
+    <div class="av-head">
+      <div class="searchbox">
+        <svg class="ic"><use href="#i-search"/></svg>
+        <input id="av-search" type="text" placeholder="Search artists" autocomplete="off">
+      </div>
+      <select id="av-sort" aria-label="Order of the artists" title="Order of the artists">
+        <option value="activity">Latest activity</option>
+        <option value="name">Alphabetic</option>
+        <option value="favorites">Favorites first</option>
+      </select>
+      <span id="av-count" class="muted small"></span>
+    </div>
+    <div id="av-list" class="av-list"></div>
+  </section>
+
+  <!-- Recommended: what the sites suggest -- not built yet. -->
+  <section id="recommended-view" class="recommended-view hidden" aria-label="Recommended">
+    <div class="rec-box">
+      <img class="logo-hero" src="/static/logo.svg" alt="">
+      <h2>Recommended is coming</h2>
+      <p>Sourcerer will ask every site you are logged in to for the artists it recommends to you -- who to follow on X, the suggestions of Bluesky
+         and Mastodon, pixiv's recommended users -- and show them here: follow one, make a card of it, or dismiss it.</p>
+      <p class="muted small" id="rec-sites"></p>
+    </div>
+  </section>
 
   <!-- Browse: the artists on the left, their posts from every source on the right. -->
   <section id="browse" class="browse">

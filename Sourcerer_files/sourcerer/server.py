@@ -810,6 +810,30 @@ def gallery_picture(gallery_id, number, size):
     return resp
 
 
+@app.get("/api/overview")
+def overview():
+    """The Artists view: the newest posts of the cards asked for (?ids=1,2,3), from the snapshots and the library -- no site is asked."""
+    _own_page()
+    ids = [int(i) for i in re.findall(r"\d+", request.args.get("ids", ""))][:60]
+    return jsonify(gallery.overview(ids))
+
+
+@app.get("/api/snap/<int:source_id>/thumb")
+def snap_thumb(source_id):
+    """One post of a snapshot, small: the Artists view's pictures. The page names it by its remote key, never by an address."""
+    _own_page()
+    try:
+        ctype, data = gallery.snapshot_picture(source_id, request.args.get("k", ""))
+    except KeyError:
+        abort(404)
+    except Exception as e:
+        log.info("snapshot picture: %s", net.reason(e))
+        abort(502)
+    resp = app.response_class(data, mimetype=ctype)
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
 @app.get("/api/gallery/file/<int:file_id>")
 def gallery_file(file_id):
     """A downloaded file, whole, for the gallery's large view."""

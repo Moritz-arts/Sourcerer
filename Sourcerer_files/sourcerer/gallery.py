@@ -780,6 +780,111 @@ def _from_memory(media, ctype, data):
     return dataclasses.replace(media, fetch=fetch)
 
 
+# ---- the Artists view: the newest posts of a card, from what the looks saved ----------------------------------------------------
+
+OVERVIEW = 4                 # pictures an artist shows in the Artists view
+SNAP_MEMORY = 40 << 20       # bytes of those small pictures kept in memory (never on disk)
+_snap = collections.OrderedDict()       # (source id, remote key) -> (content type, bytes)
+_snapped = [0]
+_snap_flight = {}
+
+
+def overview(artist_ids):
+    """{artist id: [{"thumb", "post", "date"}]}: the newest OVERVIEW posts of each card across all its sources, from the snapshots
+    the looks saved (nothing is asked of any site here), a picture of the library where the post is downloaded already, and --
+    for an artist the looks never saw -- what the library has. A snapshot is not shown past the age its links keep good (the
+    same as All artists: OFFLINE_AGE, Patreon's thumbnails SEED_AGE)."""
+    ids = [int(i) for i in artist_ids][:60]
+    out = {i: [] for i in ids}
+    if not ids:
+        return out
+    with db.connect() as con:
+        rows = con.execute("SELECT id, artist_id, url FROM sources WHERE artist_id IN (%s) ORDER BY id" % ",".join("?" * len(ids)), ids).fetchall()
+        for artist_id in ids:
+            found = []                                       # (when, source id, Media)
+            for r in rows:
+                if r["artist_id"] != artist_id:
+                    continue
+                site = sources.site_for(r["url"])
+                snap = snapshots.load(r["id"]) if site else None
+                if not snap or time.time() - snap.tail > (SEED_AGE if site.KIND == "patreon" else OFFLINE_AGE):
+                    continue
+                found += [(_when(m.posted), r["id"], m) for m in snap.items if m.thumb or m.large or m.url]
+            found.sort(key=lambda t: t[0] if t[0] is not None else float("-inf"), reverse=True)
+            top, seen = [], set()
+            for when, sid, m in found:
+                if m.remote_key in seen:
+                    continue
+                seen.add(m.remote_key)
+                top.append((sid, m))
+                if len(top) == OVERVIEW:
+                    break
+            have = {}
+            if top:                                          # posts the library has: its own picture, no request at all
+                marks = ",".join("?" * len(top))
+                for f in con.execute("SELECT id, remote_key, path FROM files WHERE artist_id = ? AND path IS NOT NULL AND remote_key IN (%s)" % marks,
+                                     [artist_id] + [m.remote_key for _, m in top]):
+                    if f["path"] and os.path.isfile(f["path"]):
+                        have[f["remote_key"]] = f["id"]
+            items = [{"thumb": "/api/thumb/%d?s=480" % have[m.remote_key] if m.remote_key in have else
+                      "/api/snap/%d/thumb?k=%s" % (sid, urllib.parse.quote(m.remote_key, safe="")),
+                      "post": m.post_url or "", "date": m.posted or ""} for sid, m in top]
+            if len(items) < OVERVIEW:                        # a card the looks never saw: what it has downloaded
+                keys = {m.remote_key for _, m in top}
+                for f in con.execute("SELECT id, remote_key, posted, post_url, path FROM files WHERE artist_id = ? AND path IS NOT NULL "
+                                     "ORDER BY posted DESC, id DESC LIMIT ?", (artist_id, OVERVIEW * 3)):
+                    if len(items) == OVERVIEW:
+                        break
+                    if f["remote_key"] in keys or not f["path"] or not os.path.isfile(f["path"]):
+                        continue
+                    keys.add(f["remote_key"])
+                    items.append({"thumb": "/api/thumb/%d?s=480" % f["id"], "post": f["post_url"] or "", "date": f["posted"] or ""})
+            out[artist_id] = items
+    return out
+
+
+def snapshot_picture(source_id, key):
+    """(content type, bytes) of one post of a snapshot, small, for the Artists view -- fetched the way the gallery does (the headers
+    its site wants, no login to a picture host) and kept in memory only. The page names the post by its remote_key, never by an
+    address: any page could otherwise make Sourcerer fetch what it likes."""
+    ck = (source_id, key)
+    while True:
+        with _lock:
+            hit = _snap.get(ck)
+            if hit:
+                _snap.move_to_end(ck)
+                return hit
+            flight = _snap_flight.get(ck)
+            if flight is None:
+                _snap_flight[ck] = threading.Event()
+                break
+        flight.wait(60)
+    try:
+        snap = snapshots.load(source_id)
+        m = next((x for x in snap.items if x.remote_key == key), None) if snap else None
+        if m is None:
+            raise KeyError(key)
+        url = m.thumb or m.large or m.url
+        try:
+            ctype, data = net.fetch_picture(url, headers=m.preview_headers or None)
+        except (requests.ConnectionError, requests.Timeout):
+            time.sleep(0.8)
+            ctype, data = net.fetch_picture(url, headers=m.preview_headers or None)
+        if ctype.startswith("image/") and (not m.thumb or _gif(m)):
+            ctype, data = "image/jpeg", imaging.preview(io.BytesIO(data), 480)      # (an original, or a GIF: a small still)
+        elif not ctype.startswith("image/"):
+            raise RuntimeError("no still picture for this post")
+        with _lock:
+            _snap[ck] = (ctype, data)
+            _snapped[0] += len(data)
+            while _snapped[0] > SNAP_MEMORY and len(_snap) > 1:
+                _snapped[0] -= len(_snap.popitem(last=False)[1][1])
+        return ctype, data
+    finally:
+        with _lock:
+            _snap_flight.pop(ck).set()
+
+
 def _reaper():
     while True:
         time.sleep(60)
