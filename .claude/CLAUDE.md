@@ -546,6 +546,20 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   as seconds or milliseconds of a finite time and a window of at most an hour (`net._as_time`, `MAX_WINDOW`): a skewed clock or another unit
   would otherwise be saved as a pause of thousands of years. `x.profile()` counts one request too -- failed ones as well, and only with an X
   login saved (a guest read is nobody's budget); a profile picture per card every 7 days was X traffic the budget never saw.
+- **A `None` must never go into `gallery._cache`** (v0.46; found in the user's log of 2026-10-20..22): `picture()` asks a site's `animation(m)` for the
+  large view of every item, and pixiv's answers `None` for a work that is no ugoira -- `_once` handed that to `_kept`, which stored it and then
+  tripped on `len(data[1])`. Every pixiv still logged "animation of ...: 'NoneType' object is not subscriptable", and the entry stayed in the
+  cache: the next time the cache was full `popitem` met it ("gallery picture: 'NoneType'...", pictures missing), `_forget` met it on closing
+  (500 on `/api/gallery/close`, "gallery reaper" in the log: the reaped gallery stayed). `_kept` ignores an empty answer, `_forget` and the eviction
+  skip one, an animation that failed or does not exist is asked for once per open gallery (`_no_animation`), and a ugoira whose `ugoira_meta`
+  has no frame list says so ("pixiv: no frame list for this animation").
+- **A Mastodon account's id is asked for once** (v0.46, `mastodon._remembered`, setting `mastodon_ids`): a look used to be `accounts/lookup`
+  plus `accounts/<id>/statuses` -- half of the requests to a server were lookups of ids that never change (2026-10-23: 125 lookups, 122
+  statuses in six minutes against Mastodon's 300 per five). A remembered id that answers 404 (the account moved) is forgotten and looked up
+  once more. **A token or login lane waits for a window the site announced nearly used up** (`_get`: `window_wait`, at most `MAX_WINDOW_WAIT`
+  = 10 minutes): Mastodon's `X-RateLimit-*` and Bluesky's `RateLimit-*` come with every answer, and at one request a second Sourcerer ran at the
+  limit itself. (Patreon's 403 on `/api/current_user`, `{"errors": [{"code_name": "Forbidden"}]}` from behind Cloudflare, lasted from 2026-10-22
+  06:04 to the next morning and was gone on 2026-10-23 02:38 without a new login: a refusal for a while, not an expired login.)
 - **A 403 on a login is told by its answer** (`net._bot_page`, `_describe`, `_say_refusal`): an HTML page with a Cloudflare challenge's words
   (or, on the big login sites whose API only ever answers JSON, from behind Cloudflare at all) is a **bot check** -- the site rests `BOT_REST` (12-24 h),
   nothing is counted as a refused login; any other 403 is a refusal (three in 15 minutes rest the site 2-4 h) and its look is logged once per ten

@@ -207,6 +207,8 @@ def animation(media):
     from PIL import Image
     wid = media.remote_key.split(":", 1)[1].split("_")[0]
     meta = _ajax("illust/%s/ugoira_meta" % wid)
+    if not meta or not meta.get("frames"):                  # (the v0.43 log: pixiv answered without a frame list)
+        raise RuntimeError("pixiv: no frame list for this animation")
     data = net.fetch_bytes(meta.get("originalSrc") or meta["src"], limit=128 << 20, headers=REFERER)
     frames, delays = [], []
     with zipfile.ZipFile(io.BytesIO(data)) as zf:
