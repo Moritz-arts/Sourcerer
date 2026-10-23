@@ -5,6 +5,14 @@ automatically -- one line per change, newest first. A release is drafted by hand
 from the tag of whichever version is judged ready, and this is the text to paste
 into it.
 
+## v0.55 — 2026-10-23
+
+- Browse: in Source order an artist is listed under every site it has an account on; the count of All artists stays the number of artists
+- XenForo: a forum's gallery is faster -- a shorter gap between pages while somebody waits, no date requests when the forum is the gallery's only source, and every exact time read dates the whole forum
+- All artists: the site chips are updated in place instead of rebuilt at every poll; a forum's pictures are dated only when the forum does not list newest first by id
+- Corporate identity v9: new logo, filled small logo, favicon, app icons (.ico, .icns, .png), README banner, brand accent colour, window icon
+- The window icon goes to pywebview only on Linux (Qt and GTK): on Windows a PNG made the restarted Sourcerer die right after it started
+
 ## v0.54 — 2026-10-23
 
 - XenForo: the members a login follows become cards with their profile pictures; a card whose picture a missing login hid is looked for again within hours
