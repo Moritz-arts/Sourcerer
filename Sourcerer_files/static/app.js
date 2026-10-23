@@ -886,11 +886,12 @@ $("empty-add").addEventListener("click", function () { openCard(null); });
 // after the last key, so holding a key down does not open a gallery per artist it passes.
 var pickTimer = 0;
 function pickArtist(key) {
-  var ids = $$("#br-list .br-item").map(function (b) { return +b.dataset.id; });
+  var items = $$("#br-list .br-item[data-id]"), ids = items.map(function (b) { return +b.dataset.id; });
   if (!ids.length) return;
-  var i = ids.indexOf(S.brArtist);
-  var next = { ArrowUp: i - 1, ArrowDown: i + 1, Home: 0, End: ids.length - 1 }[key];
-  S.brArtist = ids[Math.max(0, Math.min(ids.length - 1, next))];
+  var i = items.indexOf($("br-list").querySelector(".br-item.selected"));          // (an artist can stand in several groups: the marked one is where we are)
+  if (i < 0) i = ids.indexOf(S.brArtist);
+  var next = Math.max(0, Math.min(ids.length - 1, { ArrowUp: i - 1, ArrowDown: i + 1, Home: 0, End: ids.length - 1 }[key]));
+  S.brArtist = ids[next]; S.brAt = items[next].dataset.site || "";
   renderBrowseList();
   var el = $("br-list").querySelector(".br-item.selected");
   if (el) el.scrollIntoView({ block: "nearest" });
@@ -1006,7 +1007,7 @@ var BR_FIT = "sourcerer.browse.fit", BR_SIZE = "sourcerer.browse.size", BR_FOLDE
 var BR_SORT = "sourcerer.browse.sort", BR_COUNT = "sourcerer.browse.count", BR_LAST = "sourcerer.browse.last";
 function brOrder(v) { return v === "logo" ? "source" : /^(activity|favorites|source)$/.test(v) ? v : "name"; }      // ("logo" was Source's twin; the numbers are the second choice's)
 function brNumber(v) { return v === "files" ? "images" : /^(images|downloads|percent|logos)$/.test(v) ? v : "sources"; }
-S.brArtist = 0; S.brFit = "square"; S.brSort = "name"; S.brCount = "sources";
+S.brArtist = 0; S.brAt = ""; S.brFit = "square"; S.brSort = "name"; S.brCount = "sources";
 try {
   S.brSort = brOrder(localStorage.getItem(BR_SORT));
   S.brCount = brNumber(localStorage.getItem(BR_COUNT));   // ("files" was the images; "auto" is gone: the cloud is always shown)
@@ -1062,6 +1063,13 @@ function siteOf(a) {
   var s = siteSrc(a);
   return s ? s.site || s.label : "";
 }
+// The sites an artist has an account on, one source for each (Source order lists the artist under every one of them: Avocado on X, pixiv and
+// Mastodon stands in three groups). A card with no readable source stands once, where its main account is.
+function siteSources(a) {
+  var from = supportedOf(a), seen = {};
+  if (!from.length) from = [siteSrc(a)];
+  return from.filter(function (s) { var k = s ? s.site || s.label : ""; return seen[k] ? false : (seen[k] = true); });
+}
 // The numbers an artist has: the images posted (per source: what the library has of it, a duplicate not kept included, and what the
 // last look found waiting -- at least what the newest posts showed, and what the site itself says where its answer carries it:
 // pixiv's works, X's media), the ones downloaded, and their share. A source that was never walked to its end has more behind
@@ -1094,18 +1102,28 @@ function allText() {
   return S.artists.length || "";
 }
 function renderBrowseList() {
-  var q = $("br-search").value.trim().toLowerCase(), bySite = S.brSort === "source", sites = {};
+  var q = $("br-search").value.trim().toLowerCase(), bySite = S.brSort === "source", sites = {}, srcOf = {};
   var byStar = S.brSort === "favorites", stars = 0;
-  var list = S.artists.filter(function (a) { return !q || nameHit(a, q); })
-    .sort(function (x, y) {
-      if (byStar && !x.favorite !== !y.favorite) return x.favorite ? -1 : 1;
-      if (S.brSort === "activity") { var tx = activityKey(x), ty = activityKey(y); if (tx !== ty) return !tx ? 1 : !ty ? -1 : tx < ty ? 1 : -1; }
-      if (bySite) { var sx = siteOf(x), sy = siteOf(y); if (sx !== sy) return !sx ? 1 : !sy ? -1 : sx.localeCompare(sy); }
-      return x.name.localeCompare(y.name);
-    });
-  S.brOrderIds = list.map(function (a) { return a.id; });                  // what Refresh all follows
-  if (bySite) list.forEach(function (a) { var k = siteOf(a); sites[k] = (sites[k] || 0) + 1; });
-  if (byStar) list.forEach(function (a) { if (a.favorite) stars++; });
+  var found = S.artists.filter(function (a) { return !q || nameHit(a, q); });
+  // Source order: one entry per site an artist is on, so the artist stands in each group; every other order has one entry per artist.
+  var list = bySite ? [].concat.apply([], found.map(function (a) {
+    return siteSources(a).map(function (s) { return { a: a, site: s ? s.site || s.label : "", src: s || {} }; });
+  })) : found.map(function (a) { return { a: a }; });
+  list.sort(function (ex, ey) {
+    var x = ex.a, y = ey.a;
+    if (byStar && !x.favorite !== !y.favorite) return x.favorite ? -1 : 1;
+    if (S.brSort === "activity") { var tx = activityKey(x), ty = activityKey(y); if (tx !== ty) return !tx ? 1 : !ty ? -1 : tx < ty ? 1 : -1; }
+    if (bySite && ex.site !== ey.site) return !ex.site ? 1 : !ey.site ? -1 : ex.site.localeCompare(ey.site);
+    return x.name.localeCompare(y.name);
+  });
+  var ids = [];                                                            // what Refresh all follows: every artist once, as the list shows them
+  list.forEach(function (e) { if (ids.indexOf(e.a.id) < 0) ids.push(e.a.id); });
+  S.brOrderIds = ids;
+  if (bySite) list.forEach(function (e) { sites[e.site] = (sites[e.site] || 0) + 1; srcOf[e.site] = srcOf[e.site] || e.src; });
+  if (byStar) list.forEach(function (e) { if (e.a.favorite) stars++; });
+  // The artist who is open is marked once -- in the group clicked last, else in the first it stands in.
+  var mark = "";
+  list.forEach(function (e) { if (e.a.id === S.brArtist && (!mark || e.site === S.brAt)) mark = e.site; });
   var active = new Set((S.sync.active || []).map(function (c) { return c.artist_id; })), queue = new Set(S.sync.queue || []);
   function count(a) {
     var on = active.has(a.id);
@@ -1114,23 +1132,23 @@ function renderBrowseList() {
   }
   // A group (a site, or Favorites / Others) folds under its head; a search shows everything it finds.
   var grouped = byStar && stars && stars < list.length;
-  function groupOf(a, i) { return bySite ? "s:" + siteOf(a) : grouped ? (i < stars ? "f:fav" : "f:rest") : ""; }
+  function groupOf(e, i) { return bySite ? "s:" + e.site : grouped ? (i < stars ? "f:fav" : "f:rest") : ""; }
   function groupHead(g, inner) {
     var open = q || !S.brFolded[g];
     return '<div class="br-group fold" role="button" data-grp="' + esc(g) + '" aria-expanded="' + open + '">' + icon("chevron-right", "fold-ic") + inner + "</div>";
   }
   var html = (q ? "" : '<button type="button" class="br-item all' + (!S.brArtist ? " selected" : "") +
     '" data-id="0">' + icon("photo") + '<span class="br-name">All artists</span><span class="br-n">' + allText() + "</span></button>") +
-    list.map(function (a, i) {
-      var g = groupOf(a, i), head = "";
+    list.map(function (e, i) {
+      var a = e.a, g = groupOf(e, i), head = "";
       if (g && (!i || groupOf(list[i - 1], i - 1) !== g)) {
-        var site = siteOf(a), src = siteSrc(a) || {};
+        var site = e.site, src = e.src || {};
         head = groupHead(g, bySite ? (siteLogo(site, src.kind, src.host) || "") + "<span>" + esc(site || "No source") + '</span><span class="num">' + sites[site] + "</span>"
           : g === "f:fav" ? '<svg class="ic star"><use href="#i-star"/></svg><span>Favorites</span><span class="num">' + stars + "</span>"
           : '<span>Others</span><span class="num">' + (list.length - stars) + "</span>");
       }
       if (g && !q && S.brFolded[g]) return head;
-      return head + '<button type="button" class="br-item' + (S.brArtist === a.id ? " selected" : "") + '" data-id="' + a.id + '">' +
+      return head + '<button type="button" class="br-item' + (S.brArtist === a.id && (!bySite || e.site === mark) ? " selected" : "") + '" data-id="' + a.id + '" data-site="' + esc(e.site || "") + '">' +
         avatarHtml(a) + '<span class="br-name" title="' + esc(a.name) + '">' + esc(a.name) + "</span>" +
         '<span class="br-n' + (S.brCount === "logos" ? " marks" : "") + '">' + count(a) + "</span>" +
         (a.auto_download ? '<span class="br-auto" title="Auto-download on">' + icon("cloud-down") + "</span>" : "") +
@@ -1991,7 +2009,9 @@ $("br-list").addEventListener("click", function (e) {
     return renderBrowseList();
   }
   var b = e.target.closest("[data-id]");
-  if (b && +b.dataset.id !== S.brArtist) browseOpen(+b.dataset.id);
+  if (!b) return;
+  S.brAt = b.dataset.site || "";
+  if (+b.dataset.id !== S.brArtist) browseOpen(+b.dataset.id); else renderBrowseList();      // (the same artist in another group: the mark moves)
 });
 // Download: the card is synced, but only through the sources that are switched on. Another artist's
 // card (from the menu) is downloaded whole.
