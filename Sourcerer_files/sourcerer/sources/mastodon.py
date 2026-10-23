@@ -11,6 +11,7 @@ page, opened in the login window, hands out a read-only token (OAuth, with
 the out-of-band redirect desktop apps use). The token goes with this
 server's API requests only.
 """
+import json
 import logging
 import re
 import urllib.parse
@@ -218,16 +219,57 @@ def profile(url):
             "links": _links(account)}
 
 
+_ids = None          # "server/user" -> the account's id, kept in the settings (mastodon_ids)
+
+
+def _remembered(server, user, new=None, forget=False):
+    """An account's id, kept: a look used to ask accounts/lookup for it every time, half of all the requests Sourcerer made to a
+    Mastodon server (the log of 2026-10-23: lookup 125, statuses 122 in six minutes). The id of an account does not change."""
+    global _ids
+    from .. import db
+    key = "%s/%s" % (server.lower(), user.lower())
+    if _ids is None:
+        try:
+            _ids = json.loads(db.get_setting("mastodon_ids") or "{}")
+        except (ValueError, TypeError):
+            _ids = {}
+    if forget:
+        if _ids.pop(key, None) is not None:
+            db.set_setting("mastodon_ids", json.dumps(_ids))
+    elif new:
+        if _ids.get(key) != new:
+            _ids[key] = new
+            db.set_setting("mastodon_ids", json.dumps(_ids))
+    return _ids.get(key)
+
+
 def pages(url):
-    try:
-        server, account = _account(url)
-    except NotMastodon:
-        yield from misskey.pages(url)
-        return
+    server, user = _parse(url)
+    known = _remembered(server, user)
+    account_id = known
+    if not known:
+        try:
+            server, account = _account(url)
+        except NotMastodon:
+            yield from misskey.pages(url)
+            return
+        account_id = account["id"]
+        _remembered(server, user, new=account_id)
     max_id = None
     while True:
-        statuses = _api(server, "accounts/%s/statuses" % account["id"], {
-            "only_media": "true", "exclude_reblogs": "true", "limit": PAGE, "max_id": max_id})
+        try:
+            statuses = _api(server, "accounts/%s/statuses" % account_id, {
+                "only_media": "true", "exclude_reblogs": "true", "limit": PAGE, "max_id": max_id})
+        except requests.HTTPError as e:
+            if known and max_id is None and e.response is not None and e.response.status_code == 404:
+                # The account moved or the id is stale: forgotten, asked for once more by name.
+                _remembered(server, user, forget=True)
+                server, account = _account(url)
+                account_id = account["id"]
+                _remembered(server, user, new=account_id)
+                known = None
+                continue
+            raise
         if not statuses:
             return
         page = []

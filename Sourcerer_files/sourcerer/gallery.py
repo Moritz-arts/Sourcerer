@@ -628,14 +628,22 @@ def close(gallery_id):
         _forget(g.id)
 
 
+_no_animation = {}                       # gallery -> item numbers whose animation failed: not asked again while it is open
+
+
 def _forget(gallery_id):
     with _lock:
         for key in [k for k in _cache if k[0] == gallery_id]:
-            _cached[0] -= len(_cache.pop(key)[1])
+            old = _cache.pop(key, None)
+            if old:
+                _cached[0] -= len(old[1])
+        _no_animation.pop(gallery_id, None)
 
 
 def _kept(gallery_id, key, data):
     """Keep fetched bytes in memory (the oldest dropped first); nothing of a gallery that closed meanwhile."""
+    if not data:                                     # (nothing to keep: a None here once poisoned the cache, see _once)
+        return
     with _lock:
         if gallery_id not in _galleries:
             return
@@ -645,7 +653,8 @@ def _kept(gallery_id, key, data):
         _cache[key] = data
         _cached[0] += len(data[1])
         while _cached[0] > MEMORY and len(_cache) > 1:
-            _cached[0] -= len(_cache.popitem(last=False)[1][1])
+            gone = _cache.popitem(last=False)[1]
+            _cached[0] -= len(gone[1]) if gone else 0
 
 
 def _once(gallery_id, key, make):
@@ -664,7 +673,7 @@ def _once(gallery_id, key, make):
         flight.wait(120)
     try:
         data = make()
-        _kept(gallery_id, key, data)
+        _kept(gallery_id, key, data)           # (make() may answer None: pixiv's animation of a work that is no ugoira)
     finally:
         with _lock:
             _flight.pop(key).set()
@@ -679,12 +688,16 @@ def picture(gallery_id, number, size):
     s, m = g.items[number]
     thumb = size == "thumb"
     animate = getattr(s.site, "animation", None)
-    if size == "large" and animate:                  # a site's animation (pixiv's ugoira) plays in the large view
+    if size == "large" and animate and number not in _no_animation.get(gallery_id, ()):
+        # a site's animation (pixiv's ugoira) plays in the large view. It answers None for a work that is no ugoira, and an
+        # animation that failed is not asked for again each time the picture is opened: pixiv's ugoira_meta is a request.
         try:
             got = _once(gallery_id, (gallery_id, number, "animation", ""), lambda: animate(m))
             if got:
                 return got
+            _no_animation.setdefault(gallery_id, set()).add(number)
         except Exception as e:
+            _no_animation.setdefault(gallery_id, set()).add(number)
             log.info("animation of %s: %s", m.post_url, net.reason(e))
     url = (m.thumb if thumb else "") or m.large or m.thumb or m.url
     if _gif(m) and m.url:

@@ -266,6 +266,7 @@ def scan_room(url):
 # ---- what was really asked, and what the sites say about their limits -------------------------------------
 
 MAX_WINDOW = 3600           # seconds: the longest rate-limit window believed (X's are 15 minutes)
+MAX_WINDOW_WAIT = 600       # ... and the longest a request waits for one to reopen (Mastodon's and Bluesky's are 5 minutes)
 MAX_ENDPOINTS = 40          # kinds of request kept per site and day; the rest is counted together
 TALLY_EVERY = 50            # the tally is saved and said in the log every this many requests of a site
 _LIMIT_HEADERS = (("X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset"),         # Mastodon
@@ -759,6 +760,13 @@ def _get(url, params=None, stream=False, headers=None, method="GET", data=None, 
     attempt = handshakes = 0
     while attempt < tries:
         session = _picture_session() if pooled else _session()
+        if lane:
+            # A site that announced its window nearly used up (Mastodon: 300 requests in 5 minutes, and a look of ours is two requests at
+            # one a second -- the log of 2026-10-23 had 250 in six minutes): wait for the window to reopen instead of running into a 429.
+            wait = window_wait(url)
+            if wait:
+                log.info("%s: its rate-limit window is nearly used up; waiting %d s for it to reopen", host, wait + 1)
+                time.sleep(min(wait, MAX_WINDOW_WAIT) + random.uniform(0.5, 3))
         if login:
             spend(url)
         try:
