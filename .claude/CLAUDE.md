@@ -773,6 +773,17 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   crashes; INFO is no longer copied into it, it made the two files read alike -- `update.log` the update helper's steps, `setup.log` the
   Windows installer's. `Logs/README.txt` says which is which, and Activity > Log files opens a viewer (the end of each file, a filter,
   *Problems only* = WARNING and ERROR with their traceback lines, Copy). A new log file goes into `LOG_FILES`.
+- **Three views, one window** (`S.view`: `artists | gallery | recommended`, localStorage `sourcerer.view`; `setView` / `showView`, the
+  switch sits beside the logo): **Gallery is the Browse that was**, so every Browse key and poll is guarded by `S.view === "gallery"`
+  (`load()` opens the artist only there, or the page asked a gallery to open under a hidden view). **Artists** (`renderArtists`) is a
+  list of big cards with the newest four pictures of each artist, **made only from what is already known**: `/api/overview?ids=` (up to 60
+  cards, asked 24 at a time as they come near the screen) -> `gallery.overview`: the newest posts of the card's source snapshots, a post
+  already in the library showing its own file (`/api/thumb/<file>`), else `/api/snap/<source>/thumb?k=<remote_key>` (`gallery.snapshot_picture`:
+  takes a post by its key out of the snapshot, never a URL, fetched from the CDN through `net.fetch_picture`, shrunk to 480 px **in memory**:
+  no picture on disk). **No site's API is asked and no login lane is used**; the snapshot's age limits are Browse's (`SEED_AGE`,
+  `OFFLINE_AGE`), a card with none shows its newest downloaded files, else nothing. Unpickling a snapshot is the cost, so `gallery._snap` keeps
+  the last 40 MB of them. A click opens the artist in Gallery (`avOpen`), the right-click is Browse's menu. A new place that lists many
+  cards with pictures must go through `overview`, never one `open_gallery` per card.
 - **Browse's list** (`renderBrowseList`): the order (*Alphabetic | Latest activity | Favorites | Source*; the logo
   is part of Source's group heads) and the number beside a name (*Sources | Images | Downloads | Downloads (%)*, the
   second choice) are kept in localStorage; the numbers are never an order (the user's wish: two clean lists). **A group head folds its artists** (Source's sites, Favorites / Others; chevron,
