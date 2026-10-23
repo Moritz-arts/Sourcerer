@@ -84,7 +84,7 @@ Sourcerer/                        <- what Sourcerer.zip unpacks to; move it free
                                     another library folder is chosen in Settings
 ```
 
-The standalone downloads (built by CI, not in the repository: Sourcerer-Setup.exe and
+The standalone downloads (built by CI, not in the repository: Sourcerer-Windows.exe and
 Sourcerer-Windows.zip, the macOS .dmg, the Linux AppImage and tar.gz) are ONE file each on Windows and
 in the tar.gz -- `Sourcerer.exe` / `Sourcerer`, with Python, the packages, `static/`, `VERSION` and
 gallery-dl inside (no `launch.py`, no `venv/`, no `sourcerer/` sources) -- and `Userdata/` made beside

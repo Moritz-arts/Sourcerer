@@ -47,7 +47,7 @@ LOG_FILES = (
     ("console.log", "Console", "What the program printed by itself, and its crashes (tracebacks): a start that fails, a window that "
      "closes alone. Little else; the story is in the program log."),
     ("update.log", "Updates", "Every step of the last updates, written by the update helper. Look here when an update did not happen."),
-    ("setup.log", "Installer", "The Windows installer's own log of the last update by Sourcerer-Setup.exe (technical). Only when "
+    ("setup.log", "Installer", "The Windows installer's own log of the last update by Sourcerer-Windows.exe (technical). Only when "
      "that update failed."),
 )
 # Sourcerer keeps no pictures of its own. These two folders were made by v0.32 and older (profile pictures, small copies

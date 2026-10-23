@@ -4,10 +4,10 @@
 
 Everything to publish ends up in <out_dir>/assets/:
 
-    Windows   Sourcerer-Setup.exe             the installer (Inno Setup; per user, no admin)
+    Windows   Sourcerer-Windows.exe             the installer (Inno Setup; per user, no admin)
               Sourcerer-Windows.zip           portable: Sourcerer.exe, one file
     macOS     Sourcerer-macOS-<arch>.dmg      the app, to drag into Applications
-    Linux     Sourcerer-x86_64.AppImage       one file
+    Linux     Sourcerer-Linux.AppImage        one file
               Sourcerer-Linux.tar.gz          portable: Sourcerer/Sourcerer, one file
 
 As few files as can be (Pikura's install folder holds a handful): Windows and the Linux tar.gz are ONE
@@ -150,7 +150,7 @@ def linux(out, assets, version):
         tool.chmod(tool.stat().st_mode | stat.S_IXUSR)
         # No FUSE on a build machine: let the tool unpack itself and run from there.
         subprocess.check_call([str(tool), "--appimage-extract-and-run", str(appdir),
-                               str(assets / "Sourcerer-x86_64.AppImage")],
+                               str(assets / "Sourcerer-Linux.AppImage")],
                               env=dict(os.environ, ARCH="x86_64", APPIMAGE_EXTRACT_AND_RUN="1"))
 
 

@@ -62,13 +62,13 @@ goes under *Traps* below; a new folder goes into the folder map; a finished
 milestone or a decision goes into the roadmap. If it is only in a chat, it is
 lost.
 
-## The standalone downloads — Sourcerer-Setup.exe, .dmg, .AppImage
+## The standalone downloads — Sourcerer-Windows.exe, .dmg, .AppImage
 
 Beside Sourcerer.zip, for people without Python (Pikura's way: an installer or app per system, plus a
 portable one): PyInstaller, one runner per system, `.github/workflows/build-exe.yml` +
-`.github/exe/build.py`. Output (`build-exe/assets/`): **Windows** `Sourcerer-Setup.exe` (Inno Setup,
+`.github/exe/build.py`. Output (`build-exe/assets/`): **Windows** `Sourcerer-Windows.exe` (Inno Setup,
 `Sourcerer.iss`, per user, no admin) and `Sourcerer-Windows.zip`; **macOS** `Sourcerer-macOS-arm64.dmg` /
-`-x86_64.dmg`; **Linux** `Sourcerer-x86_64.AppImage` and `Sourcerer-Linux.tar.gz`. They are attached on a
+`-x86_64.dmg`; **Linux** `Sourcerer-Linux.AppImage` and `Sourcerer-Linux.tar.gz`. They are attached on a
 release (by hand, or `publish.yml` calls it for the release it made), and built and tested on pull
 requests -- never for the main branch: there is no beta download (below). `.github/exe/smoke.py` starts every
 file like a user *before* it is attached -- a failing check keeps that system's files off the release
@@ -88,7 +88,7 @@ finds a running Sourcerer itself and `SOURCERER_DETACHED` is set in `app.py`; no
 program started with `--gallery-dl` (dispatched first thing in `app.py`) and is upgraded only by a new build
 (`_gdl.upgrade` refuses, the weekly upgrade is skipped); no Python for the swap helper, so **an installed
 Windows copy updates through its own installer** (`updater.installed()`: `unins000.exe` beside the program;
-`_install_setup` downloads the latest `Sourcerer-Setup.exe`, checks GitHub's SHA-256 of the asset and runs
+`_install_setup` downloads the latest `Sourcerer-Windows.exe`, checks GitHub's SHA-256 of the asset and runs
 it silently with `/START=1`; the new `Sourcerer.exe` replaces the old one and Userdata stays beside it) while every other standalone copy is **updated by hand** (`check` returns
 `manual`, the page shows *Download* for `updater.ASSET`, install / reinstall refuse; macOS: drag the app over
 the old one, AppImage: replace the file, portable zip / tar.gz: delete all but `Userdata`, unpack). The
@@ -96,6 +96,11 @@ the old one, AppImage: replace the file, portable zip / tar.gz: delete all but `
 `$APPIMAGE`, its inner binary dies with the mount).
 
 Traps:
+- **Every file is named for its system** (v0.57: the installer was `Sourcerer-Setup.exe`, the AppImage `Sourcerer-x86_64.AppImage`): `Sourcerer-<System>.<ext>`,
+  `updater.ASSET`, `build.py`, `Sourcerer.iss`, `smoke.py`, `release_notes.py` and the README table all spell the name, so a new one changes them together.
+  **An installed copy of v0.56 or older asks the latest release for the old name**, finds none and shows Install greyed for ever -- it is updated by hand once
+  (download `Sourcerer-Windows.exe`); `release_notes.py` still links the old names on releases that have them. A release holds seven files of ours;
+  the two "Source code" archives are GitHub's own and cannot be turned off.
 - **The Install button shows as soon as a release is newer, greyed until its file is attached**
   (`showUpdate`, `u.newer` without `u.available`) and the page asks again every minute, 15 times: the
   installers come minutes after the release, and a hidden button read as a missing one.

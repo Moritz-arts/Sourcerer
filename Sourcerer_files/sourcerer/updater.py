@@ -44,11 +44,11 @@ REQUIRED = ("Sourcerer_files/VERSION", "Sourcerer_files/launch.py",
 if not config.FROZEN:
     ASSET = "Sourcerer.zip"
 elif sys.platform == "win32":
-    ASSET = "Sourcerer-Setup.exe"
+    ASSET = "Sourcerer-Windows.exe"
 elif sys.platform == "darwin":
     ASSET = "Sourcerer-macOS-%s.dmg" % ("arm64" if platform.machine() == "arm64" else "x86_64")
 else:
-    ASSET = "Sourcerer-x86_64.AppImage" if config.APPIMAGE else "Sourcerer-Linux.tar.gz"
+    ASSET = "Sourcerer-Linux.AppImage" if config.APPIMAGE else "Sourcerer-Linux.tar.gz"
 
 
 def version_tuple(v):
@@ -119,7 +119,7 @@ INDEPENDENT = {"PYINSTALLER_RESET_ENVIRONMENT": "1"}
 
 
 def installed():
-    """A copy that Sourcerer-Setup.exe put in place -- its uninstaller sits beside the program.
+    """A copy that Sourcerer-Windows.exe put in place -- its uninstaller sits beside the program.
 
     Only such a copy updates itself: the installer does the swap (closes Sourcerer, clears the old
     program files, keeps Userdata, starts the new one). A portable copy, a macOS app and an
@@ -203,7 +203,7 @@ def run_setup_script(exe, setup, log_dir, wait=SETUP_WAIT):
                 break
             time.sleep(0.1)
         raise RuntimeError("The update helper did not start (is cmd.exe blocked here?). "
-                           "Sourcerer keeps running; install the new Sourcerer-Setup.exe by hand.")
+                           "Sourcerer keeps running; install the new %s by hand." % ASSET)
     except BaseException:
         if proc is not None and proc.poll() is None:
             proc.kill()
@@ -217,7 +217,7 @@ def _setup_after_exit(setup):
 
 
 def _install_setup(channel):
-    """Windows, installed: download the newest Sourcerer-Setup.exe and run it silently."""
+    """Windows, installed: download the newest Sourcerer-Windows.exe and run it silently."""
     if not installed():
         raise RuntimeError("The standalone Sourcerer is updated by hand: download %s." % ASSET)
     info = _check_release()
