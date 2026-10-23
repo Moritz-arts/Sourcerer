@@ -252,7 +252,7 @@ def static_file(name):
 
 @app.get("/favicon.ico")
 def favicon():
-    return send_from_directory(config.STATIC, "logo.svg", mimetype="image/svg+xml")
+    return send_from_directory(config.STATIC, "favicon.ico", mimetype="image/vnd.microsoft.icon")
 
 
 @app.before_request

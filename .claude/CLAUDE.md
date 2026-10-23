@@ -28,8 +28,19 @@ keep the mockups as the reference. **One decision of the user's supersedes the
 main window mockup: there is no card grid any more** -- Browse is the window
 (2026-10-16); the toolbar, the card dialog and the activity bar stay as drawn. **Everything is English** — the interface
 too (the user's decision; the mockups' German wording is superseded), as are
-code, comments and file names. The logo is `static/logo.svg`, also the
-favicon.
+code, comments and file names. **The corporate identity is the brand guide v9 ("Concept C": a monoline wizard's hat with a `>_` prompt,
+v0.55; `Sourcerer_files/docs/brand/brand-guide.png`)**: Midnight `#15122E`, Arcane Violet `#6038F0`, Violet Light `#A48BFF`, Spark Amber `#FF9A2E`,
+Spark Light `#FFDC7A`, Mist `#ECE9FF`; the wordmark is Poppins Medium, drawn as paths in the banners (the page itself keeps the system font:
+no CDN, no font file). Rules from the guide: clear space of a quarter of the glyph's width, the wordmark always one colour (Mist or Midnight),
+**the optical size follows the display size -- line version from 64 px (`static/logo.svg`, the hero marks, README, icons), bold 32-48 px, filled
+up to 24 px (`static/logo-small.svg`: the header, the tab icon)**, the compact logo under 200 px wide, the sparkle always amber and mono on colour
+fields. Where it lives: `static/logo.svg` / `logo-small.svg` / `favicon.ico` (16-256 px, served at `/favicon.ico`) / `icon.png` (256 px, the Qt/GTK
+window), `.github/exe/Sourcerer.ico` / `.icns` / `.png` (the installer, the exe, the .app, the AppImage), `docs/brand/` (banners for the README,
+the 1280x640 social preview and the guide: kept out of the archive by `.gitattributes`). **The page's accent is Arcane Violet** (`--fill-accent` and
+its light/dark companions in `app.css`; the neutral surfaces stay as drawn in the mockups). A new icon size or variant is made from `logo.svg`
+(Chromium renders it; Pillow writes the `.icns`); the window's own icon on Windows is set by `desktop._window_icon` (WM_SETICON, best effort).
+**GitHub's social preview cannot be set from here**: Settings > Social preview takes `docs/brand/social-preview.png`; the repository's description
+and topics are set there too.
 
 ## Where the knowledge lives
 

@@ -133,6 +133,28 @@ def _running(focus=False):
         return False
 
 
+def _window_icon(hwnd):
+    """Windows: the brand icon on the window and its taskbar button. A start from source runs under pythonw.exe, whose icon is
+    Python's; an installed Sourcerer.exe carries its own (the same file). Best effort -- the icon is not worth a failed start."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+        user32 = server.own_user32()
+        user32.LoadImageW.argtypes = [wintypes.HINSTANCE, wintypes.LPCWSTR, wintypes.UINT, ctypes.c_int, ctypes.c_int, wintypes.UINT]
+        user32.LoadImageW.restype = wintypes.HANDLE
+        user32.SendMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+        user32.SendMessageW.restype = ctypes.c_ssize_t
+        path = str(config.STATIC / "favicon.ico")
+        # IMAGE_ICON = 1, LR_LOADFROMFILE = 0x10; WM_SETICON = 0x80 (ICON_SMALL 0 / ICON_BIG 1); SM_CXICON 11 / SM_CXSMICON 49
+        for which, metric in ((1, 11), (0, 49)):
+            size = user32.GetSystemMetrics(metric)
+            icon = user32.LoadImageW(None, path, 1, size, size, 0x10)
+            if icon:
+                user32.SendMessageW(hwnd, 0x80, which, icon)
+    except Exception as e:
+        log.info("window icon not set: %s", e)
+
+
 def _custom_frame(window):
     """Windows: take the title bar off, so the page's own bar is the top of the window and draws the
     buttons (minimize, maximize, close). The resize border stays: only WS_CAPTION goes, and the style is
@@ -152,6 +174,7 @@ def _custom_frame(window):
                                         ctypes.c_int, wintypes.UINT]
         hwnd = wintypes.HWND(int(window.native.Handle.ToInt64()))
         server.HWND[0] = hwnd
+        _window_icon(hwnd)
         GWL_STYLE, WS_CAPTION, WS_THICKFRAME, WS_MINIMIZEBOX, WS_MAXIMIZEBOX = -16, 0x00C00000, 0x00040000, 0x00020000, 0x00010000
         style = user32.GetWindowLongW(hwnd, GWL_STYLE)
         user32.SetWindowLongW(hwnd, GWL_STYLE, (style & ~WS_CAPTION) | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX)
@@ -252,7 +275,10 @@ def main(argv=None):
                 if os.name == "nt":
                     server.WINDOW.events.shown += lambda: _custom_frame(server.WINDOW)
                     server.WINDOW.events.loaded += lambda: _custom_frame(server.WINDOW)       # once more if `shown` came too early
-                webview.start()
+                try:
+                    webview.start(icon=str(config.STATIC / "icon.png"))       # (Qt and GTK show it; Windows and macOS ignore it)
+                except TypeError:                             # a pywebview without the icon argument
+                    webview.start()
                 return 0                                      # the window was closed
             except Exception as e:
                 server.WINDOW = None

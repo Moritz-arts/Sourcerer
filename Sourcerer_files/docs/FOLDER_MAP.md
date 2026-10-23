@@ -51,12 +51,13 @@ Sourcerer/                        <- what Sourcerer.zip unpacks to; move it free
     │   ├─ server.py              Flask: /api/* and the page
     │   └─ desktop.py             main(): server thread, window or browser
     ├─ static/                    the page: index.html, app.css, app.js,
-    │                               logo.svg (also the favicon),
+    │                               logo.svg, logo-small.svg (filled, <= 24 px), favicon.ico, icon.png (the brand, see CLAUDE.md),
     │                               icons-LICENSE.txt (inline icons after Tabler, site logos from Simple Icons)
     ├─ docs/
     │   ├─ CHANGELOG.md           written by the workflow, never by hand
     │   ├─ FOLDER_MAP.md          this file
-    │   └─ ROADMAP.md             goal, sources, decisions, done / next
+    │   ├─ ROADMAP.md             goal, sources, decisions, done / next
+    │   └─ brand/                 README banners, social preview, brand guide v9 (not in the archive)
     │
     ├─ venv/                      NOT shipped -- launch.py builds it on first start
     │   ├─ windows/ linux/ macos/   one environment per system that started it
