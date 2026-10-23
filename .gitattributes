@@ -17,5 +17,5 @@
 /.gitattributes  export-ignore
 /.gitignore      export-ignore
 /.claude         export-ignore
-# The brand guide and the README banners are for GitHub, not for the program.
-/Sourcerer_files/docs/brand export-ignore
+# The brand guide and the social preview are for GitHub, not for the program; the README's two banners (SVG) go with it, or its picture is broken.
+/Sourcerer_files/docs/brand/*.png export-ignore

@@ -21,7 +21,7 @@
     --surface-1: #151515; --surface-2: #1a1a19; --surface-3: #20201f;
     --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #898781;
     --border: rgba(255, 255, 255, .10); --border-strong: rgba(255, 255, 255, .20);
-    --border-accent: #3b2a8f; --bg-accent: #1d1748; --text-accent: #a48bff;
+    --border-accent: #3b2a8f; --fill-accent: #7a5cff; --bg-accent: #1d1748; --text-accent: #a48bff;
     --bg-success: #11260f; --text-success: #0ca30c; --dot-ok: #2fbf4e;
     --bg-warning: #311a00; --text-warning: #db9300; --dot-warn: #e2a21a;
     --bg-danger: #3c0e0e; --text-danger: #ec7e7e; --dot-bad: #ef5b5b;
@@ -33,7 +33,7 @@
   --surface-1: #151515; --surface-2: #1a1a19; --surface-3: #20201f;
   --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #898781;
   --border: rgba(255, 255, 255, .10); --border-strong: rgba(255, 255, 255, .20);
-  --border-accent: #3b2a8f; --bg-accent: #1d1748; --text-accent: #a48bff;
+  --border-accent: #3b2a8f; --fill-accent: #7a5cff; --bg-accent: #1d1748; --text-accent: #a48bff;
   --bg-success: #11260f; --text-success: #0ca30c; --dot-ok: #2fbf4e;
   --bg-warning: #311a00; --text-warning: #db9300; --dot-warn: #e2a21a;
   --bg-danger: #3c0e0e; --text-danger: #ec7e7e; --dot-bad: #ef5b5b;
@@ -60,8 +60,8 @@ a { color: var(--text-accent); }
   fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
 }
 .ic.sm { width: 13px; height: 13px; }
-.logo { width: 24px; height: 24px; }
-.logo-hero { width: 56px; height: 56px; }
+.logo { width: 34px; height: 34px; }       /* the filled mark (logo-small.svg), bigger than the first 24 px: the brand mark is what the window is known by */
+.logo-hero { width: 72px; height: 72px; }
 .kbd {
   font: 11px/1 var(--font-mono); padding: 3px 5px; border-radius: 4px; color: var(--text-secondary);
   border: .5px solid var(--border-strong); border-bottom-width: 1.5px; background: var(--surface-1);
