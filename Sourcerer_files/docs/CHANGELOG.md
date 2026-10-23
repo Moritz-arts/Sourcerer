@@ -5,6 +5,10 @@ automatically -- one line per change, newest first. A release is drafted by hand
 from the tag of whichever version is judged ready, and this is the text to paste
 into it.
 
+## v0.46 — 2026-10-23
+
+- The gallery no longer chokes on a pixiv still, a Mastodon account's id is asked for once, and a token lane waits for a rate-limit window the site says is nearly used up
+
 ## v0.45 — 2026-10-22
 
 - A sweep leaves a source alone for a while after it was read: Refresh all, the automatic sync and the scan at start hold a look gap that grows with the artist's quiet
