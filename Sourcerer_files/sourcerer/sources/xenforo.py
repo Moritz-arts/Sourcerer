@@ -18,12 +18,13 @@ import json
 import logging
 import random
 import re
+import threading
 import urllib.parse
 
 import requests
 
 from . import _gdl
-from .. import accounts, config, net
+from .. import accounts, config, db, net
 
 log = logging.getLogger(__name__)
 KIND = "xenforo"
@@ -36,6 +37,7 @@ _PATH = re.compile(r"^(.*?)/(index\.php\?)?(media/users|members|media/albums|thr
 # VerticalScope's forums answered its usual handshake with 409 (see net._Tls13).
 # retries: 0 -- gallery-dl would answer a 429 with four more requests, with the login.
 OPTIONS = {"sleep-request": "2.0-5.0", "metadata": False, "tls12": False, "retries": 0}
+OPEN_SLEEP = "1.0-2.0"   # ... while somebody waits for the page (an artist's gallery): X's gap for the same case; still random
 # The title is the picture's alt text in the listing, which gallery-dl cuts into filename and extension ("IMG_1234.jpg"): no request.
 # The date is the time of its tile in the page (gdl_run.py's "xenforo" mode adds it; a gallery-dl without it, or a page that shows
 # none, says null).
@@ -91,6 +93,8 @@ def _options(url):
     # The forum's own pass (Cloudflare) holds only with the browser that earned it.
     options.update({"user-agent": accounts.headers_for(url).get("User-Agent") or config.USER_AGENT,
                     "browser": ""})
+    if net.waiting():
+        options["sleep-request"] = OPEN_SLEEP
     if re.search(r"[/?]threads/", url):
         options["order-posts"] = "desc"          # newest first, for the early stop
     return options
@@ -324,6 +328,36 @@ def _epoch(text):
         return None
 
 
+# What the exact times read so far say about the forum's clock, kept across listings and restarts (setting `xenforo_clock:<host>`): the
+# media ids run on for the whole forum, so a time read for one member's picture dates another member's as well -- the first artist of a
+# forum costs its asks, the second few, the tenth none. Exact times only: an estimate as an anchor would add its error to the next.
+_clock, _clock_lock = {}, threading.Lock()
+MAX_CLOCK = 3000          # anchors kept per forum: more are thinned out (every other one), so the whole range stays covered
+
+
+def _anchors(host):
+    with _clock_lock:
+        if host not in _clock:
+            try:
+                _clock[host] = {int(k): float(v) for k, v in json.loads(db.get_setting("xenforo_clock:" + host, "{}")).items()}
+            except (ValueError, TypeError, AttributeError):
+                _clock[host] = {}
+        return _clock[host]
+
+
+def _keep_anchors(host):
+    with _clock_lock:
+        known = _clock.get(host) or {}
+        if len(known) > MAX_CLOCK:
+            for n in sorted(known)[::2]:
+                del known[n]
+        db.set_setting("xenforo_clock:" + host, json.dumps(known))
+
+
+def _iso(t):
+    return datetime.datetime.fromtimestamp(t, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+
+
 ASKS = 7                  # pages a batch of twenty may cost for its dates: the ends, then the middle of the widest gap
 CLOSE = 2 * 86400         # a gap between two known times this narrow (seconds) is not asked into: the id between them is good enough
 
@@ -334,7 +368,8 @@ def _fill_dates(host, batch):
     clock that only runs forward: the time of the batch's lowest and highest id is read from their own pages, then of the middle one of the
     widest gap between two known times, until the gaps are under two days or ASKS pages were read; the pictures between are placed by their
     id, which cannot be wrong by more than the gap they sit in. Done only where somebody waits (an artist's gallery: net.waiting) and never
-    for a sync; whatever is known is kept (_dated) and the next listing asks for nothing it knows. Any trouble -- the forum rests, wants a
+    for a sync, nor when the forum is the gallery's only source (net.sole: its pictures are ordered among themselves by the forum's own
+    order, and the first page used to wait for up to seven page requests -- the viewer still shows the exact time when a picture opens); whatever is known is kept (_dated) and the next listing asks for nothing it knows. Any trouble -- the forum rests, wants a
     login, says no time -- leaves the pictures as they are (undated, or estimated from what was read)."""
     rows = []
     for f in batch:
@@ -349,10 +384,22 @@ def _fill_dates(host, batch):
             f["date"] = _dated[(host, n)]
         else:
             rows.append((n, f))
-    if not rows or not net.waiting():
+    if not rows or not net.waiting() or net.sole():
         return
-    rows.sort(key=lambda r: r[0])
-    anchors, asked = {}, [0]
+    known = _anchors(host)
+    for n, f in rows:
+        if n in known:
+            f["date"] = _dated[(host, n)] = _iso(known[n])
+    rows = sorted((r for r in rows if not r[1].get("date")), key=lambda r: r[0])
+    if not rows:
+        return
+    anchors, asked, learned = dict(known), [0], [False]
+
+    def covered(n):
+        """Known times on both sides of n that are close enough to place it: nothing to ask."""
+        lo = max((a for a in anchors if a < n), default=None)
+        hi = min((b for b in anchors if b > n), default=None)
+        return lo is not None and hi is not None and abs(anchors[hi] - anchors[lo]) <= CLOSE
 
     def ask(n, f):
         try:
@@ -364,13 +411,16 @@ def _fill_dates(host, batch):
         if not when or _epoch(when) is None:
             return False
         f["date"] = _dated[(host, n)] = when
-        anchors[n] = _epoch(when)
+        anchors[n] = known[n] = _epoch(when)
+        learned[0] = True
         return True
 
+    working = True                       # (a forum that rests or shows no time is not asked again)
     for n, f in (rows[:1] + rows[-1:] if len(rows) > 1 else rows):
-        if not ask(n, f):
-            return
-    while asked[0] < ASKS:
+        if not f.get("date") and not covered(n) and not ask(n, f):
+            working = False
+            break
+    while working and asked[0] < ASKS:
         ns = sorted(anchors)
         gaps = [(abs(anchors[b] - anchors[a]), a, b) for a, b in zip(ns, ns[1:])
                 if any(a < n < b and not f.get("date") for n, f in rows)]
@@ -387,7 +437,9 @@ def _fill_dates(host, batch):
         lo = max((a for a in ns if a < n), default=ns[0])
         hi = min((b for b in ns if b > n), default=ns[-1])
         t = anchors[lo] + (anchors[hi] - anchors[lo]) * (n - lo) / (hi - lo) if hi != lo else anchors[lo]
-        f["date"] = _dated[(host, n)] = datetime.datetime.fromtimestamp(t, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+        f["date"] = _dated[(host, n)] = _iso(t)
+    if learned[0]:
+        _keep_anchors(host)
     if len(_dated) > MAX_DATED:
         _dated.clear()
 
