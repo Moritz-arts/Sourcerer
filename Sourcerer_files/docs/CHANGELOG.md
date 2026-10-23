@@ -5,6 +5,13 @@ automatically -- one line per change, newest first. A release is drafted by hand
 from the tag of whichever version is judged ready, and this is the text to paste
 into it.
 
+## v0.54 — 2026-10-23
+
+- XenForo: the members a login follows become cards with their profile pictures; a card whose picture a missing login hid is looked for again within hours
+- A card made from a login's follows gets its first look: the follow read asks for the cards it made, and a sweep takes a card that has never been read
+- XenForo follows: members whose address has no name are accepted, and a new card from a follow list is scanned once instead of refreshed
+- The page's preferences (view, sort orders, picture size, hidden sites, last artist) are kept in Userdata and survive restarts and updates
+
 ## v0.53 — 2026-10-23
 
 - Update FUNDING.yml with Patreon username
