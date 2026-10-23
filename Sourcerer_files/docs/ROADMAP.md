@@ -342,6 +342,11 @@ add the one that replaced it.
   snapshot's posts run out, or by Refresh (`gallery.FRESH`, `FRESH_LOGIN`). The numbers are first guesses to tune by the request tally in the log.
 - 2026-10-23 — **Merge sources merges one pair at a time.** The user: each pair on its own button instead of all at once, "so no mistake can
   happen". The ticks and the button that merged every ticked card are gone; each card has *Merge into «keeper»* (`twinsMerge`).
+- 2026-10-23 — **XenForo pictures carry their name and their date in the gallery.** The user saw every forum picture called "index.php" in the
+  grid, while the viewer knows the original name, date, size, views and likes. v0.51: the grid says the title the uploader's file name became
+  (the extension put back), and the forum's pictures have a date from the time their tile shows on the list page (gdl_run.py, mode `xenforo`), so
+  they sort among the other sources' posts instead of alternating with them. Not seen on a real forum: if a forum's tiles show no time, its pictures
+  stay undated and the viewer fills the date in when one is opened.
 
 ## Done
 

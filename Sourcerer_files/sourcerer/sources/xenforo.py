@@ -33,7 +33,10 @@ _PATH = re.compile(r"^(.*?)/(index\.php\?)?(media/users|members|media/albums|thr
 # VerticalScope's forums answered its usual handshake with 409 (see net._Tls13).
 # retries: 0 -- gallery-dl would answer a 429 with four more requests, with the login.
 OPTIONS = {"sleep-request": "2.0-5.0", "metadata": False, "tls12": False, "retries": 0}
-FIELDS = {"url": "{_url!j}", "id": "{id!j}", "title": "{filename!j}"}      # the title is the picture's alt text in the listing: no request
+# The title is the picture's alt text in the listing, which gallery-dl cuts into filename and extension ("IMG_1234.jpg"): no request.
+# The date is the time of its tile in the page (gdl_run.py's "xenforo" mode adds it; a gallery-dl without it, or a page that shows
+# none, says null).
+FIELDS = {"url": "{_url!j}", "id": "{id!j}", "title": "{filename!j}", "ext": "{extension!j}", "date": "{date!j}"}
 LOGIN = ("recommended", "Most forums show their media to members only.")
 
 
@@ -182,13 +185,26 @@ def info(media):
     return {k: v for k, v in out.items() if v not in ("", 0, None)}
 
 
+def _title(f):
+    """The picture's name as the list shows it: the alt text, which is the title the uploader's file name became ("IMG_1234.jpg") --
+    gallery-dl cuts it at the last dot, so it is put back together; the id when the list says nothing."""
+    title, ext = (f.get("title") or "").strip(), (f.get("ext") or "").strip()
+    return (title + "." + ext if title and ext else title) or str(f["id"])
+
+
+def _when(text):
+    """The time a tile shows as ISO ("2020-05-01T12:00:00+0000" has no colon in its offset, which older Pythons do not read), or ""."""
+    text = re.sub(r"([+-]\d\d)(\d\d)$", r"\1:\2", str(text or "").strip())
+    return text if re.match(r"\d{4}-\d\d-\d\d", text) else ""
+
+
 def pages(url):
     from . import LoginRequired, Media
     if not _gdl.available():
         raise RuntimeError("Forums need gallery-dl, which did not install: Settings > Repair")
     host = _host(url)
     net._stopped(url)
-    listing = _gdl.items(url, None, _options(url), FIELDS, lock="xenforo:" + host)
+    listing = _gdl.items(url, None, _options(url), FIELDS, lock="xenforo:" + host, trace="xenforo")
     while True:
         try:
             batch = next(listing)
@@ -212,7 +228,7 @@ def pages(url):
                      post_url=f["url"].rsplit("/full", 1)[0] + "/" if "/full" in f["url"] else f["url"],
                      # the title is the file name's last resort and what a tile says (the forum's own name for the file
                      # comes with the download, and wins)
-                     posted="", name=(f.get("title") or "").strip() or str(f["id"]),
+                     posted=_when(f.get("date")), name=_title(f),
                      # The forum shows its files to members only: the gallery fetches
                      # them through Sourcerer, with the login, and makes its own small copy.
                      large=f["url"], preview_headers={})

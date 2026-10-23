@@ -124,11 +124,12 @@ def _command(conf, args, url, trace=False):
 def _start(cmd, trace=False):
     # In the one-file build gallery-dl is the program itself again; it shares the parent's unpacked
     # folder unless told otherwise, so it must not be told otherwise (see updater.INDEPENDENT).
-    # trace: True is gdl_run.py's whole shim (X's answers, the follows' recovery); "limits" only reports the limits X announces.
+    # trace: True is gdl_run.py's whole shim (X's answers, the follows' recovery); "limits" only reports the limits X announces;
+    # "xenforo" lets a forum's media list carry the dates its page shows.
     env = {k: v for k, v in os.environ.items() if k != "PYINSTALLER_RESET_ENVIRONMENT"}
     kwargs = {"stdout": subprocess.PIPE, "stderr": subprocess.PIPE, "stdin": subprocess.DEVNULL,
               "cwd": str(DIR), "env": dict(env, PYTHONIOENCODING="utf-8",
-                                           **({"SOURCERER_GDL_TRACE": "limits" if trace == "limits" else "1"} if trace else {}))}
+                                           **({"SOURCERER_GDL_TRACE": trace if isinstance(trace, str) else "1"} if trace else {}))}
     if os.name == "nt":
         kwargs["creationflags"] = 0x08000000           # CREATE_NO_WINDOW
     return subprocess.Popen(cmd, **kwargs)
@@ -146,7 +147,7 @@ def _failure(code, errors, lines=()):
     return Failed(text, auth=auth, slow=slow)
 
 
-def items(url, section, options, fields, lock=None, site=None, only=None):
+def items(url, section, options, fields, lock=None, site=None, only=None, trace=False):
     """Yield pages (lists) of dicts, one per file, newest first.
 
     fields: {name: gallery-dl format expression}, e.g. {"url": "{_url!j}"}.
@@ -154,13 +155,13 @@ def items(url, section, options, fields, lock=None, site=None, only=None):
     every forum is the same), by default the section.
     site: a URL of the site whose day's budget this read counts against. gallery-dl runs with -v then and every request it makes is
     counted (_Watch) -- the files of a page said nothing about what the site was asked. only: a regex the path of a request must
-    match to count (X: its API, not the scripts it loads for the request signature).
+    match to count (X: its API, not the scripts it loads for the request signature). trace: a mode of gdl_run.py ("xenforo").
     Stopping early -- closing this generator -- ends the gallery-dl process.
     """
     fmt = "prepare:{{" + ",".join('"%s":%s' % (k, v) for k, v in fields.items()) + "}}"
     lock = _site_lock(lock or section)
     watch = _Watch(site, only) if site else None
-    listing = _items(url, section, options, fmt, watch)
+    listing = _items(url, section, options, fmt, watch, trace)
     try:
         while True:
             if not lock.acquire(timeout=WAIT_INFO):
@@ -213,10 +214,10 @@ class _Watch:
             log.exception("counting gallery-dl's requests")
 
 
-def _items(url, section, options, fmt, watch=None):
+def _items(url, section, options, fmt, watch=None, trace=False):
     conf = _config(section, options)
-    proc = _start(_command(conf, ["-N", fmt] + (["-v"] if watch else []), url, "limits" if watch else False),
-                  "limits" if watch else False)
+    trace = "limits" if watch else trace
+    proc = _start(_command(conf, ["-N", fmt] + (["-v"] if watch else []), url, trace), trace)
     errors, lines = [], collections.deque(maxlen=400)       # (-v: a long listing would keep every debug line)
 
     def read_errors():

@@ -688,9 +688,21 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   path says "index.php", which was the name of every such card, its alias and (in `handlesOf`) a handle all of them shared -- use
   `xenforo.account_name` (name_from_url does) and mind `follows._NOT_NAMES` / `NOT_NAMES` in app.js. **A member's name and picture come from the
   member's own page** (`members/<slug>.<id>/`: schema.org `mainEntity.name` / `image`, og:image as the fallback), not from the media page,
-  whose header shows the viewer's. **A picture's title** (the listing's alt text, `FIELDS["title"]`, no request) is `Media.name` -- the file name's
+  whose header shows the viewer's. **A picture's title** (the listing's alt text, `FIELDS["title"]` + `"ext"`, no request: gallery-dl cuts the alt text at its last dot
+  into filename and extension, `xenforo._title` puts "IMG_1234.jpg" back together) is `Media.name` -- the file name's
   last resort and what a tile says; `Media.filename` stays empty (it drives `_local_names` adoption and `_from_memory`, and a title is not a
-  file name). **Everything else the forum knows of a picture** (description, who, when, size, views) is asked when the viewer opens it
+  file name). **A tile of a picture that has no `filename` says `Media.name`, not the last part of its address** (`gallery._fname`; `NOT_FILES`:
+  "index.php", the route of every picture on a forum that routes through `index.php?`, was what every tile said). **The date comes from the
+  list page, not from one request per picture** (v0.51): gallery-dl's `metadata` asks every picture's page (a minute for a page of twenty,
+  at the forum's login lane) and throws the tile's time away otherwise; `gdl_run.py`'s mode `xenforo` (`_gdl.items(trace="xenforo")`)
+  reads the `<time datetime>` of each tile on the pages gallery-dl fetches (`tile_dates`, our own regex; no gallery-dl code is copied) and hands
+  it to its record of the picture as `date`, so `Media.posted` is set and the gallery sorts the forum's pictures among the other sources'
+  (before, a forum had no dates at all and its posts alternated with whatever else was waiting). **The hook is installed in `config.load`**:
+  gallery-dl builds the pattern of the forums it answers for from `extractor.xenforo` when its extractor module is *imported*, so a module imported
+  before the config is read knows none of ours ("Unsupported URL" for every forum -- found with a fake forum, `forum.test` in /etc/hosts and a
+  local server). A forum whose tiles show no time keeps `posted=""` as before. **Checked against a made-up page, not a real forum** -- the
+  tile markup (`itemList-item js-inlineModContainer`, a `<time datetime>` inside) is gallery-dl's marker plus a guess; the viewer's `info()` still
+  gives the date of a picture that has none. **Everything else the forum knows of a picture** (description, who, when, size, views) is asked when the viewer opens it
   (`xenforo.info`, `/api/gallery/info`, one request through the forum's lane, kept per gallery; a site gets this by having an `info(media)`;
   the date it finds is put on the item): gallery-dl's `metadata` would ask for every picture of a listing page.
 - **A Misskey looks like a Mastodon in the address** (`https://misskey.io/@user`) **and answers nothing a

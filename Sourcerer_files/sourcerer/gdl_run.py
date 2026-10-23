@@ -11,6 +11,10 @@ the two runs that read who the login follows -- two more things are added, both 
 * a way round gallery-dl's own reading of a list of users: it looks for them at one place and ends quietly when X moved them
   (the KeyError in `_pagination_users`). Users are looked for anywhere in the answer, and the page after it by the bottom cursor.
 
+When it is "xenforo" -- the listings of a forum's media -- only one thing is added (`xenforo()`): the date each picture's tile shows in
+the list page is handed to gallery-dl's own record of the picture (`date`), which it throws away without `metadata` (one more
+request per picture).
+
 Standalone on purpose: it imports nothing of Sourcerer, so it runs as a script (`python gdl_run.py ...`) and, in the one-file
 build, from app.py's `--gallery-dl` before anything else is loaded.
 """
@@ -160,13 +164,84 @@ def install():
     api._call, api._pagination_users = call, users
 
 
+# One tile of a forum's media list, as gallery-dl cuts them (the same marker it splits the page at): the address of the picture's page,
+# then somewhere in the tile the time it was made as XenForo writes it, <time ... datetime="2020-05-01T12:00:00+0000">.
+TILE = '<div class="itemList-item js-inlineModContainer'
+TILE_LENGTH = 2500                                    # the last tile of a page runs on into the page's footer: its own time is near its start
+TIME = re.compile(r"<time\b[^>]*?\bdatetime=[\"']([^\"']+)[\"']", re.I)
+HREF = re.compile(r"href=[\"']([^\"']+)[\"']", re.I)
+
+
+def tile_dates(page, dates):
+    """{slug: datetime text} of the tiles of a list page -- "title.123" is how gallery-dl names the picture (the last part of its address)."""
+    for tile in page.split(TILE)[1:]:
+        tile = tile[:TILE_LENGTH]
+        href, when = HREF.search(tile), TIME.search(tile)
+        if href and when:
+            dates[href.group(1).rstrip("/").rsplit("/", 1)[-1]] = when.group(1)
+
+
+def xenforo():
+    """Dates for the pictures of a forum's media list. gallery-dl reads each tile's address and alt text and nothing else; its pages go
+    through `_pagination`, which is wrapped to read the tiles' times on their way, and the record it makes of a picture
+    (`_extract_media`) gets the time of its tile as `date`. Any change of gallery-dl that breaks this leaves it as it was (no date).
+    The extractor's module is imported only once gallery-dl has read its config: it builds the pattern of the forums it answers for from
+    the instances the config names (Sourcerer's own, registered by sources/xenforo.py), and a module imported before that knows none."""
+    from gallery_dl import config
+    plain_load = config.load
+
+    def load(*args, **kwargs):
+        done = plain_load(*args, **kwargs)
+        try:
+            wrap_xenforo()
+        except Exception as e:
+            sys.stderr.write("[sourcerer][trace] xenforo dates not installed: %s\n" % e)
+        return done
+
+    config.load = load
+
+
+def wrap_xenforo():
+    from gallery_dl.extractor import xenforo as module
+    cls, dates = module.XenforoExtractor, {}
+
+    def paged(plain):
+        def pages(self, *args, **kwargs):
+            for page in plain(self, *args, **kwargs):
+                try:
+                    tile_dates(page, dates)
+                except Exception:
+                    pass
+                yield page
+        return pages
+
+    plain_media = cls._extract_media
+
+    def media(self, url, file, *args, **kwargs):
+        found = plain_media(self, url, file, *args, **kwargs)
+        try:
+            if dates.get(file) and isinstance(found, tuple) and isinstance(found[1], dict):
+                found[1]["date"] = dates[file]
+        except Exception:
+            pass
+        return found
+
+    cls._pagination = paged(cls._pagination)
+    if hasattr(cls, "_pagination_reverse"):
+        cls._pagination_reverse = paged(cls._pagination_reverse)
+    cls._extract_media = media
+
+
 def main():
     mode = os.environ.get(TRACE)
     if mode:
         try:
-            limits()
-            if mode != "limits":
-                install()
+            if mode == "xenforo":
+                xenforo()
+            else:
+                limits()
+                if mode != "limits":
+                    install()
         except Exception as e:                                   # a gallery-dl that changed: plain, as before
             sys.stderr.write("[sourcerer][trace] not installed: %s\n" % e)
     import gallery_dl
