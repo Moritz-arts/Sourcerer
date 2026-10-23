@@ -8,6 +8,25 @@ var S = {
 var F = null;   // the card dialog's working copy: {id, sources, layout, dedupe, master, autoName}
 var DEFAULT_GAL = 200;
 
+// What the page keeps for itself (`sourcerer.*` in localStorage) is mirrored into Userdata: the window's origin changes with its port at
+// every start, so the browser's own copy was gone at the next start or update. The server's copy is put back first (/api/ui.js, before
+// this file), keys only the browser has are sent once, and every later change is sent as it happens.
+(function () {
+  var ls, kept = window.UI_PREFS || {}, queue = {}, timer = 0, mine = /^sourcerer\./;
+  try { ls = window.localStorage; Object.keys(kept).forEach(function (k) { ls.setItem(k, kept[k]); }); } catch (e) { return; }
+  function flush() {
+    clearTimeout(timer); timer = 0;
+    var body = JSON.stringify(queue); queue = {};
+    if (body !== "{}") fetch("/api/ui", { method: "POST", headers: { "Content-Type": "application/json" }, body: body, keepalive: true }).catch(function () {});
+  }
+  function note(k, v) { queue[k] = v; if (!timer) timer = setTimeout(flush, 400); }
+  var put = Storage.prototype.setItem, drop = Storage.prototype.removeItem;
+  Storage.prototype.setItem = function (k, v) { put.call(this, k, v); if (this === ls && mine.test(k)) note(k, String(v)); };
+  Storage.prototype.removeItem = function (k) { drop.call(this, k); if (this === ls && mine.test(k)) note(k, null); };
+  try { Object.keys(ls).forEach(function (k) { if (mine.test(k) && !(k in kept)) note(k, ls.getItem(k)); }); } catch (e) {}
+  window.addEventListener("pagehide", flush);
+})();
+
 function $(id) { return document.getElementById(id); }
 function $$(sel) { return Array.prototype.slice.call(document.querySelectorAll(sel)); }
 function esc(text) {
