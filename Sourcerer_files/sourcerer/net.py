@@ -55,7 +55,7 @@ RETRIES = 4
 _local = threading.local()
 _lock = threading.Lock()
 _hosts = {}                 # (host, carries a login, small pictures) -> its limiter's state
-_limits = {"per_host": 4, "pace": 0.25}
+_limits = {"per_host": 32, "pace": 0.1}
 CAP = 300                   # the longest Retry-After waited out; a longer one pauses the site
 
 # Sites stricter than Settings: (requests at once, seconds apart). With

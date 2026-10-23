@@ -76,17 +76,17 @@ DEFAULTS = {
     "grid_quality": "fast",     # 'fast': the sites' small pictures in the grid (a wide tile is sharpened); 'best': the largest rendition below the original, always
     "tile_logo": "1",           # '0': no site mark on the pictures of the gallery
     "browse_window": "7",       # All artists reaches back this many days first ('0': everything); "Load older" goes on (gallery.py)
-    "login_gap": "normal",     # the pause between two artists on a site where a login can get banned: 'careful', 'normal', 'fast'
-    "scan_on_start": "1",       # '1': every start looks for new posts of every card, as Refresh does
+    "login_gap": "fast",        # the pause between two artists on a site where a login can get banned: 'careful', 'normal', 'fast'
+    "scan_on_start": "0",       # '1': every start looks for new posts of every card, as Refresh does
     "auto_sync": "0",           # '1': sync every card on its own
     "auto_hours": "6",          # how often, in hours
     "import_follows": "1",      # '1': the accounts a login follows become artists in the list (follows.py)
     "last_auto": "",            # when it last did
     # The speed settings: as fast as the sites' limits allow (a site that is touchier -- pixiv, Patreon, X, the
     # boorus, every login -- keeps its own lower limit, net.HOSTS), so these only rule the sites that carry it.
-    "parallel": "8",            # downloads at once, all sites together
-    "per_host": "4",            # downloads at once from one site
-    "pace_ms": "250",           # pause between two requests to one site (times 1.0-1.6: a random gap, never a regular one)
+    "parallel": "24",           # downloads at once, all sites together
+    "per_host": "32",           # downloads at once from one site
+    "pace_ms": "100",           # pause between two requests to one site (times 1.0-1.6: a random gap, never a regular one)
     "channel": "stable",        # updates: 'stable' (the latest release) or 'beta' (the main branch)
     "gdl_updated": "",          # when gallery-dl was last brought up to date (weekly)
     "update_seen": "",          # the update helper's last run that was already reported
