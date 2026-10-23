@@ -3,6 +3,11 @@
 Newest first. Each entry is made from the commit subjects when a version is made, so a subject is one short,
 plain sentence.
 
+## v0.57 — 2026-10-23
+
+- A bigger Sourcerer mark in the header and on the start pages, and the code review's fixes for stability and speed
+- Every download is named for its system: Sourcerer-Windows.exe and Sourcerer-Linux.AppImage
+
 ## v0.56 — 2026-10-23
 
 - README rewritten: short, plain, with a download table
