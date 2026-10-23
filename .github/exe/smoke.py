@@ -347,7 +347,8 @@ def main():
         if ping:
             status, body = get("/")
             check(status == 200 and b"Sourcerer" in body, "page is served")
-            check(get("/static/app.js")[0] == 200 and get("/static/logo.svg")[0] == 200, "static files are served")
+            check(get("/static/app.js")[0] == 200 and get("/static/logo.svg")[0] == 200 and get("/favicon.ico")[0] == 200,
+                  "static files and the favicon are served")
             info = json.loads(get("/api/info")[1])
             check(info["frozen"] and info["gallery_dl"], "info says frozen, gallery-dl present", info["gallery_dl"])
             check(ping["version"] == info["version"] and (data / "sourcerer.db").is_file(),

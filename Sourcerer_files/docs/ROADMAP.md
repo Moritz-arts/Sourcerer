@@ -479,6 +479,10 @@ add the one that replaced it.
 - [x] Browse's Source order lists an artist under every site it has an account on (v0.55); "All artists" still counts artists
 - [x] A forum's gallery is faster (v0.55): a shorter gap between pages while somebody waits, no date requests when the forum is the gallery's only
       source, and the times read once date the whole forum's pictures (kept across restarts)
+- [x] Corporate identity v9 (v0.55): logo (line, filled for small sizes), favicon, app icons (.ico, .icns, .png), banners in the README, accent
+      colour Arcane Violet; the window gets the icon too
+- [x] All artists: the site chips are updated in place (the spinner kept restarting at every poll); a forum's pictures are dated only when
+      the forum does not list newest first by id
 
 ## Next
 

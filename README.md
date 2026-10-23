@@ -1,3 +1,12 @@
+<p align="center">
+  <a href="https://github.com/Moritz-arts/Sourcerer">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="Sourcerer_files/docs/brand/banner-dark.svg">
+      <img alt="Sourcerer" src="Sourcerer_files/docs/brand/banner-light.svg" width="560">
+    </picture>
+  </a>
+</p>
+
 # Sourcerer v0.54
 
 [what changed](Sourcerer_files/docs/CHANGELOG.md) · [roadmap](Sourcerer_files/docs/ROADMAP.md) · [releases](https://github.com/Moritz-arts/Sourcerer/releases)
