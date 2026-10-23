@@ -11,6 +11,7 @@ Sourcerer, and so does a page that has not been open for IDLE_MINUTES.
 """
 import argparse
 import importlib.util
+import inspect
 import json
 import logging
 import logging.handlers
@@ -133,9 +134,18 @@ def _running(focus=False):
         return False
 
 
+_ICONED = set()
+
+
 def _window_icon(hwnd):
     """Windows: the brand icon on the window and its taskbar button. A start from source runs under pythonw.exe, whose icon is
-    Python's; an installed Sourcerer.exe carries its own (the same file). Best effort -- the icon is not worth a failed start."""
+    Python's; an installed Sourcerer.exe carries its own. Best effort -- the icon is not worth a failed start. Once per window
+    (_custom_frame runs again at every page load while the native bar stays: each pass would load, and leak, two icons), and the big
+    icon is asked at 64 px, not at SM_CXICON's 32: the taskbar scales it down on a 125-200 % screen instead of up."""
+    key = getattr(hwnd, "value", hwnd)
+    if key in _ICONED:
+        return
+    _ICONED.add(key)
     try:
         import ctypes
         from ctypes import wintypes
@@ -145,11 +155,10 @@ def _window_icon(hwnd):
         user32.SendMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
         user32.SendMessageW.restype = ctypes.c_ssize_t
         path = str(config.STATIC / "favicon.ico")
-        # IMAGE_ICON = 1, LR_LOADFROMFILE = 0x10; WM_SETICON = 0x80 (ICON_SMALL 0 / ICON_BIG 1); SM_CXICON 11 / SM_CXSMICON 49
-        for which, metric in ((1, 11), (0, 49)):
-            size = user32.GetSystemMetrics(metric)
+        # IMAGE_ICON = 1, LR_LOADFROMFILE = 0x10; WM_SETICON = 0x80 (ICON_SMALL 0 / ICON_BIG 1); SM_CXSMICON 49
+        for which, size in ((1, 64), (0, user32.GetSystemMetrics(49) or 16)):
             icon = user32.LoadImageW(None, path, 1, size, size, 0x10)
-            if icon:
+            if icon:                                     # (kept for the window's life; the icon it had before is the process's, not ours to free)
                 user32.SendMessageW(hwnd, 0x80, which, icon)
     except Exception as e:
         log.info("window icon not set: %s", e)
@@ -278,11 +287,8 @@ def main(argv=None):
                 # The icon argument is Qt's and GTK's (a PNG). On Windows pywebview builds a .NET Icon from it and a PNG is no icon: the
                 # restarted Sourcerer of the smoke test came up, logged its port and was gone (v0.55's first build); Windows gets its icon
                 # from the exe and from _window_icon.
-                if sys.platform.startswith("linux"):
-                    try:
-                        webview.start(icon=str(config.STATIC / "icon.png"))
-                    except TypeError:                         # a pywebview without the icon argument
-                        webview.start()
+                if sys.platform.startswith("linux") and "icon" in inspect.signature(webview.start).parameters:
+                    webview.start(icon=str(config.STATIC / "icon.png"))
                 else:
                     webview.start()
                 return 0                                      # the window was closed

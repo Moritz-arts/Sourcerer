@@ -1049,7 +1049,8 @@ function browseClose() {
 }
 
 // The artists, "All artists" first; the one open is marked. Alphabetic, the latest activity first, or grouped by source
-// (under each site's logo and a line; an artist stands once, under its master source, else its first one Sourcerer can read),
+// (under each site's logo and a line; an artist stands in every group whose site it has an account on -- a site is told by its own name:
+// a Mastodon server, a forum and a booru are told apart, describe's `site`),
 // and the number beside a name is what the second choice says: the sources Sourcerer tracks or the images in the library.
 // The cloud at the end is the card's auto-download: green when it is on, dark grey when it is off. A card that
 // is syncing shows a ring instead of its number. The list is only replaced when its markup changed: it is
@@ -1057,11 +1058,6 @@ function browseClose() {
 var brHtml = "";
 function siteSrc(a) {
   return a.sources.filter(function (x) { return x.master; })[0] || a.sources.filter(function (x) { return x.supported; })[0] || a.sources[0];
-}
-// The website the card's main account is on, by its own name: a Mastodon server, a forum and a booru are told apart (describe's `site`).
-function siteOf(a) {
-  var s = siteSrc(a);
-  return s ? s.site || s.label : "";
 }
 // The sites an artist has an account on, one source for each (Source order lists the artist under every one of them: Avocado on X, pixiv and
 // Mastodon stands in three groups). A card with no readable source stands once, where its main account is.
@@ -1101,29 +1097,33 @@ function allText() {
   if (S.brCount === "percent") return tot ? Math.round(100 * done / tot) + "%" : "";
   return S.artists.length || "";
 }
+var BR_COLLATOR = new Intl.Collator();       // one collator: localeCompare builds one per call, and a sort makes tens of thousands of calls
 function renderBrowseList() {
-  var q = $("br-search").value.trim().toLowerCase(), bySite = S.brSort === "source", sites = {}, srcOf = {};
-  var byStar = S.brSort === "favorites", stars = 0;
+  var q = $("br-search").value.trim().toLowerCase(), bySite = S.brSort === "source", sites = {};
+  var byStar = S.brSort === "favorites", byTime = S.brSort === "activity", stars = 0, when = {};
   var found = S.artists.filter(function (a) { return !q || nameHit(a, q); });
   // Source order: one entry per site an artist is on, so the artist stands in each group; every other order has one entry per artist.
-  var list = bySite ? [].concat.apply([], found.map(function (a) {
-    return siteSources(a).map(function (s) { return { a: a, site: s ? s.site || s.label : "", src: s || {} }; });
-  })) : found.map(function (a) { return { a: a }; });
+  var list = [];
+  found.forEach(function (a) {
+    if (!bySite) return list.push({ a: a });
+    siteSources(a).forEach(function (s) { list.push({ a: a, site: s ? s.site || s.label : "", src: s || {} }); });
+  });
+  if (byTime) found.forEach(function (a) { when[a.id] = activityKey(a); });                 // (once per artist, not once per comparison)
   list.sort(function (ex, ey) {
     var x = ex.a, y = ey.a;
     if (byStar && !x.favorite !== !y.favorite) return x.favorite ? -1 : 1;
-    if (S.brSort === "activity") { var tx = activityKey(x), ty = activityKey(y); if (tx !== ty) return !tx ? 1 : !ty ? -1 : tx < ty ? 1 : -1; }
-    if (bySite && ex.site !== ey.site) return !ex.site ? 1 : !ey.site ? -1 : ex.site.localeCompare(ey.site);
-    return x.name.localeCompare(y.name);
+    if (byTime) { var tx = when[x.id], ty = when[y.id]; if (tx !== ty) return !tx ? 1 : !ty ? -1 : tx < ty ? 1 : -1; }
+    if (bySite && ex.site !== ey.site) return !ex.site ? 1 : !ey.site ? -1 : BR_COLLATOR.compare(ex.site, ey.site);
+    return BR_COLLATOR.compare(x.name, y.name);
   });
-  var ids = [];                                                            // what Refresh all follows: every artist once, as the list shows them
-  list.forEach(function (e) { if (ids.indexOf(e.a.id) < 0) ids.push(e.a.id); });
+  var ids = [], seen = {}, mark = "";                                      // ids: what Refresh all follows, every artist once, as the list shows them
+  list.forEach(function (e) {
+    if (!seen[e.a.id]) { seen[e.a.id] = 1; ids.push(e.a.id); }
+    if (bySite) sites[e.site] = (sites[e.site] || 0) + 1;
+    if (byStar && e.a.favorite) stars++;
+    if (e.a.id === S.brArtist && (!mark || e.site === S.brAt)) mark = e.site;   // the open artist is marked once: in the group clicked last, else the first
+  });
   S.brOrderIds = ids;
-  if (bySite) list.forEach(function (e) { sites[e.site] = (sites[e.site] || 0) + 1; srcOf[e.site] = srcOf[e.site] || e.src; });
-  if (byStar) list.forEach(function (e) { if (e.a.favorite) stars++; });
-  // The artist who is open is marked once -- in the group clicked last, else in the first it stands in.
-  var mark = "";
-  list.forEach(function (e) { if (e.a.id === S.brArtist && (!mark || e.site === S.brAt)) mark = e.site; });
   var active = new Set((S.sync.active || []).map(function (c) { return c.artist_id; })), queue = new Set(S.sync.queue || []);
   function count(a) {
     var on = active.has(a.id);

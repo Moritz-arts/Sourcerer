@@ -483,6 +483,9 @@ add the one that replaced it.
       colour Arcane Violet; the window gets the icon too
 - [x] All artists: the site chips are updated in place (the spinner kept restarting at every poll); a forum's pictures are dated only when
       the forum does not list newest first by id
+- [x] A bigger mark (v0.56): 34 px in the header with the glyph filling the tile, 72 px on the hero pages, a favicon of 16-64 px; the code review of v0.55
+      fixed: forum dates never extrapolated, shared date anchors locked, a lone forum's snapshot fresh again, the author of a forum picture shown, the
+      Browse list linear (1000 artists on three sites: 36 ms), a lighter violet on dark surfaces, the README's banner in the archive
 
 ## Next
 
