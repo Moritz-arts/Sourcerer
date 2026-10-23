@@ -3,6 +3,13 @@
 Newest first. Each entry is made from the commit subjects when a version is made, so a subject is one short,
 plain sentence.
 
+## v0.56 — 2026-10-23
+
+- README rewritten: short, plain, with a download table
+- Changelog and roadmap rewritten in short, plain sentences
+- Release notes list what is new and link every download
+- Real artist names and handles in comments and notes replaced by templates
+
 ## v0.55 — 2026-10-23
 
 - Source order lists an artist under every site it is on; All artists still counts each artist once
