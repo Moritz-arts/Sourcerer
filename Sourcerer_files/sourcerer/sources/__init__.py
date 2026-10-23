@@ -245,6 +245,23 @@ def bio_links(*things):
     return profile_links(found)
 
 
+def note_total(url, count):
+    """How many posts the site says this account has, kept on the source (`posted`) -- only from an answer a look makes anyway
+    (pixiv's list of works, X's profile): no request is made for a number, so the Images count in Browse costs nothing."""
+    try:
+        count = int(count)
+    except (TypeError, ValueError):
+        return
+    if count < 0:
+        return
+    from .. import db
+    try:
+        with db.connect() as con:
+            con.execute("UPDATE sources SET posted = ? WHERE url = ? AND COALESCE(posted, -1) != ?", (count, url, count))
+    except Exception as e:                    # a busy database is no reason to fail the look
+        log.info("count of %s not kept: %s", url, e)
+
+
 _profiles = {}            # url -> (when, answer): the card dialog, Save and the avatar ask alike
 PROFILE_SECONDS = 1800
 

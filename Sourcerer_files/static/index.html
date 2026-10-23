@@ -135,6 +135,7 @@
         </select>
         <select id="br-count" aria-label="The number beside each artist" title="The number beside each artist">
           <option value="sources">Sources</option>
+          <option value="logos">Source (Logo)</option>
           <option value="images">Images</option>
           <option value="downloads">Downloads</option>
           <option value="percent">Downloads (%)</option>
@@ -342,6 +343,7 @@
     <p class="hint" id="merge-hint"></p>
     <input id="merge-search" type="text" placeholder="Search artists" autocomplete="off">
     <div id="merge-list" class="merge-list"></div>
+    <p id="merge-apart" class="hint apart-note"></p>
   </div>
   <div class="dlg-foot">
     <span id="merge-sum" class="hint grow"></span>
@@ -356,16 +358,25 @@
     <button type="button" class="icon flat" data-close aria-label="Close"><svg class="ic"><use href="#i-x"/></svg></button>
   </div>
   <div class="dlg-body">
-    <p class="hint">Cards that look like one artist: a profile or a bio names the other account, the same name, the same account name.
-      Ticked cards become one card with the one marked Stays; untick what is not the same artist. Two cards with an account on the same
-      site are never offered. Nothing merges before the button.</p>
+    <p class="hint">Cards that look like one artist, each with the reason under its name: a profile or a bio names the other account, the
+      same name or account name, names a letter or two apart. Ticked cards become one card with the one marked Stays; untick what is not the
+      same artist. <b>Open</b> shows an artist in Sourcerer so you can compare with your own eyes (a button brings you back here),
+      <b>Not the same</b> is remembered and never offered again. Two cards with an account on the same site are usually two people: they
+      are offered unticked, with a warning. Nothing merges before the button.</p>
     <div id="twins-list" class="merge-list twins"></div>
+    <p id="twins-apart" class="hint apart-note"></p>
   </div>
   <div class="dlg-foot">
     <span id="twins-sum" class="hint grow"></span>
     <button type="button" id="twins-go" class="primary" disabled>Merge</button>
   </div>
 </dialog>
+
+<!-- Merge sources waits here while an artist is open for comparing: one button back to the list. -->
+<div id="twins-back" class="twins-back hidden">
+  <button type="button" id="twins-back-go" class="primary"><svg class="ic"><use href="#i-merge"/></svg> Back to the merge suggestions</button>
+  <button type="button" id="twins-back-x" class="icon flat" aria-label="Forget the suggestions" title="Forget the suggestions"><svg class="ic"><use href="#i-x"/></svg></button>
+</div>
 
 <!-- The log files, read here: which file holds what is said above each one; Problems keeps the warnings and errors. -->
 <dialog id="dlg-logs" class="dlg wide">

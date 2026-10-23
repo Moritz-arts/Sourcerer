@@ -140,10 +140,12 @@ def profile(url):
 
 
 def pages(url, known=frozenset()):
+    from . import note_total
     uid = _uid(url)
     every = _ajax("user/%s/profile/all" % uid)
     ids = sorted({int(i) for kind in ("illusts", "manga") for i in (every.get(kind) or {})},
                  reverse=True)
+    note_total(url, len(ids))              # (the list names every work the artist has: the page's "images posted", at no request)
     for start in range(0, len(ids), PAGE):
         chunk = ids[start:start + PAGE]
         if known and all("pixiv:%s_p0" % i in known or "pixiv:%s_ugoira" % i in known for i in chunk):

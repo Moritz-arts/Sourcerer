@@ -612,15 +612,29 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   many at once and asks nothing twice**: the open card is pinned and ticked, ticking others adds them,
   the button at the bottom is the confirmation (no `confirm()`), and the card marked *Stays* (the first
   ticked, or the one asked for with *Keep this one*) receives the rest through one `/merge` call each,
-  in turn. At the top *Possibly the same artist* lists likely twins (`sameness` in `app.js`): same name
+  in turn. At the top *Possibly the same artist* lists likely twins (`suggest` / `evidence` in `app.js`): same name
   once everything but letters and digits is gone (`nameKey`: emoji, spaces, width, case -- "👹 青林檎テル"
   is "青林檎テル"), same but for a trailing "(handle)", a shared account name in the links, one name inside
-  the other. It is a suggestion only; nothing merges by itself.
+  the other. It is a suggestion only; nothing merges by itself. **Every suggestion says why, in the artist's own words**
+  (`evidence(p, q)` returns `{s, why}`: "both go by «小也暁也»", "«Kuroneko»'s own profile links to «kuro»'s account (x.com/kuro_art)",
+  "the names are a letter or two apart: «tinyshoya» and «tinyshoyac»"; `profileOf` keeps the text each name key came from, `shown`, and the
+  address each account name came from, `at`) in a wrapping line under the name -- the old reason sat in the name's ellipsis and was cut off.
+  **"Not the same" is kept for good** (table `apart`, `/api/apart`, `S.apart`, `markApart`): a button on every suggestion in both dialogs
+  (in *Merge sources* it takes that card out of the group against every other card of it); both dialogs offer *Offer them again*
+  (`forgetApart`) as the way back (no `confirm()`, no undo toast). A pair is two artist ids with `ON DELETE CASCADE` -- a row id SQLite
+  hands out again never inherits an answer -- and `sync.merge` moves the merged card's pairs to the card that stays (it is the same artist now).
   **Merge sources** (the button beside *Add artist*, `#dlg-twins`, `findTwins`) is the same evidence over all cards at once
-  (`likeness(profileOf(a), profileOf(b))`): candidate pairs come from an index (names, account names, stems, the addresses a profile
-  or a bio names; a name that more than `MAX_SHARERS` cards have is skipped -- no all-pairs walk over a thousand cards), pairs that
-  share a one-account-per-artist site (`ONE_PER_SITE`: Bluesky, X, pixiv, Patreon, Fanbox, Fantia) are never offered, the
-  rest become groups (connected pairs of evidence 2 and up). The card that stays is the user's own, then the one with most downloads
+  (`evidence(profileOf(a), profileOf(b))`): candidate pairs come from an index (names, account names, stems, the addresses a profile
+  or a bio names; a name that more than `MAX_SHARERS` cards have is skipped -- no all-pairs walk over a thousand cards) **and from `insidePairs`**
+  (a name inside another's name, "tinyshoya" in "tinyshoyac", "小也暁也" in "小也暁也 | commissions": all names in one string, searched with the
+  native `indexOf`). Names count in all their forms (a card's own, every alias a site shows): until v0.49 only the card's own name was compared
+  for "inside", and a pair with a weak sign (evidence 1) was never a candidate -- "I have the same artist three times and Sourcerer found two" was
+  `tinyshoyac` (evidence 3: names a letter or two apart, a minimum of 6 letters; 2: a name inside another, 5 letters or 3 CJK characters).
+  Pairs that share a one-account-per-artist site (`ONE_PER_SITE`: Bluesky, X, pixiv, Patreon, Fanbox, Fantia) were never offered; they are now,
+  **unticked and with the warning** ("Both have a pixiv account, which is usually two people": a main and a second account of one artist look
+  exactly so), after everything else. The groups are connected pairs of evidence 2 and up.
+  Each card has **Open**: the dialog closes, the artist opens in Gallery (`twinsOpen`, `avOpen`), and a button at the bottom (`#twins-back`)
+  or *Merge sources* itself brings the same list back (`C.parked`, `resumeTwins`: ticks and keepers stay, merged cards drop out). The card that stays is the user's own, then the one with most downloads
   (`stayOrder`); a member is ticked beforehand from evidence 4 (`TICKED_FROM`), the rest is only offered. The button merges one card
   after the other (`/merge`), goes on when one fails (a card that syncs) and says how many did not merge.
 - **Logins are made in "Manage your accounts" (`#dlg-accounts`) and nowhere
@@ -803,7 +817,7 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
 - **Three views, one window** (`S.view`: `artists | gallery | recommended`, localStorage `sourcerer.view`; `setView` / `showView`, the
   switch sits beside the logo): **Gallery is the Browse that was**, so every Browse key and poll is guarded by `S.view === "gallery"`
   (`load()` opens the artist only there, or the page asked a gallery to open under a hidden view). **Artists** (`renderArtists`) is a
-  list of big cards with the newest four pictures of each artist, **made only from what is already known**: `/api/overview?ids=` (up to 60
+  list of big cards with the newest **eight** pictures of each artist (`gallery.OVERVIEW`, `AV_PICS`; the artist's picture, name and site marks are large: 96 px / 20 px / 28 px), **made only from what is already known**: `/api/overview?ids=` (up to 60
   cards, asked 24 at a time as they come near the screen) -> `gallery.overview`: the newest posts of the card's source snapshots, a post
   already in the library showing its own file (`/api/thumb/<file>`), else `/api/snap/<source>/thumb?k=<remote_key>` (`gallery.snapshot_picture`:
   takes a post by its key out of the snapshot, never a URL, fetched from the CDN through `net.fetch_picture`, shrunk to 480 px **in memory**:
@@ -819,11 +833,15 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   `snapshots.save` from the posts' dates), else the last download or look; a card with nothing known goes
   last -- its `created` is the day it was imported, and as a sort key it put every imported follow first.
   *Source* groups under the site's mark, name, a line and a count; an artist stands once,
-  under its master source, else its first readable one, no source last. **Images is the total, not what
-  is downloaded**: `file_count + pending` (what the last look counted as still to download; a look reads
-  the newest `REFRESH_ITEMS` posts of a source, so a long history shows a "+"), Downloads is `file_count`, the
-  percentage their share. "All artists" carries the same number for the whole list (Sources: the number of
-  artists). The
+  under its master source, else its first readable one, no source last. **Images is the number *posted*, not what
+  is downloaded** (`totalOf`, per source `srcTotal`): the most of what the library has of the source (`files_all`: every file it listed, a
+  duplicate that was not kept too), what the last look found waiting (`pending`), what the newest posts ever showed (`sources.seen`, set by
+  `snapshots.save`: any card that was opened or scanned has a number) and what **the site itself says** (`sources.posted`: pixiv's list of
+  works and X's `media_count`, both in an answer a look makes anyway -- `sources.note_total`; **no request is made for a number**; Bluesky's and
+  Mastodon's counts include text posts and replies, so they are not used). A "+" stays while a source was never walked to its end
+  (`complete`) and no site count covers it (`srcExact`). Downloads is `file_count`, the percentage their share (the same picture on two sites is
+  posted twice, so the share can stay below 100 %). "All artists" carries the same number for the whole list (Sources: the number of
+  artists). The choice **Source (Logo)** shows the marks of the sites the card's accounts are on instead of a number (`siteMarks`, `.br-n.marks`). The
   **green auto-download cloud marks a card that downloads by itself, and only that** (no grey one
   for the others, and never a choice of the number); the switch *Auto-download* beside the head's
   Download button (`#br-auto`) and the artist's right-click menu (edit, auto-download, refresh,
@@ -850,7 +868,7 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   A picture already in the library is never fetched again, whichever way. **A GIF plays** (`gallery._gif`, item `gif`): its
   grid picture and viewer picture are the file itself, not the site's still, and no `mid` / small JPEG is made of it;
   Mastodon's "gifv" is a looping video and plays in the viewer.
-- **Every start looks for new posts** (setting `scan_on_start`, default on; `sync.scheduler`, after the login check): the
+- **Every start looks for new posts** (setting `scan_on_start`, default **off** since v0.49 -- the user's base settings: Refresh does it when asked; `sync.scheduler`, after the login check): the
   same as Refresh -- cards with auto-download download what they find, listed cards are left out. Sourcerer's own updates
   are checked at every start too (the dot on the settings button).
 - **A failed file in the activity log is a link**: `sync._fetch` and the give-up line pass `post` and `key` (the remote key)
@@ -920,8 +938,10 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   other); a look stops at the first page whose oldest post is in the library (`_glance`: an up-to-date card is one request per
   source -- 2 s for three sources, it was a minute). **Only a cookie login is spaced out between artists**
   (`accounts.careful`: pixiv, X, Patreon, Fanbox, Fantia, forums; `LOGIN_GAPS`, Settings > Sites & network
-  *Gap between artists on a cookie login*: careful 15-60 s, default `normal` 10-30 s, fast 3-15 s (the user's numbers) -- the other speed settings were worked out the same way
-  in v0.33: 8 downloads at once, 4 per site, 0.25 s between requests (times 1.0-1.6), `net.HOSTS` keeping the touchy hosts
+  *Gap between artists on a cookie login*: careful 15-60 s, normal 10-30 s, fast 3-15 s (the user's numbers; default **fast** since v0.49) -- the other speed settings
+  were worked out in v0.33 (8 downloads at once, 4 per site, 0.25 s between requests, times 1.0-1.6) and are **24 downloads, 32 per site, 0.1 s since v0.49:
+  the user's own settings became the base settings** (the screenshots of Settings > Sync / Sites & network / Appearance, 2026-10-23; the Appearance ones --
+  System, Quick, a week, the site mark on -- were the defaults already); `net.HOSTS` keeps the touchy hosts
   lower; `db.init` dropped what was saved before, once, `speed_defaults_v2`): a token or key (Bluesky, Mastodon, Misskey, boorus) is an API
   client with published limits and only gets `net.TOKEN_PACE` between requests, no reading breaks, no gap between cards
   (`net._carries_login` says `True` / `"token"` / `False`; the token lane has its own key in `_hosts`). Galleries use

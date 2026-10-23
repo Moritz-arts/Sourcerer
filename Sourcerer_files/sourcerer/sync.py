@@ -712,6 +712,11 @@ def merge(into_id, other_id, auto=False):
                      a["avatar_url"] or b["avatar_url"], a["avatar_headers"] if a["avatar_url"] else b["avatar_headers"],
                      max(filter(None, [a["last_activity"], b["last_activity"]]), default=None),
                      1 if a["favorite"] or b["favorite"] else 0, into_id, into_id))      # a star stays on the merged card
+        # "Not the same artist" said about the card that goes holds for the one it joins.
+        for (x,) in con.execute("SELECT CASE WHEN a = ? THEN b ELSE a END FROM apart WHERE a = ? OR b = ?",
+                                (other_id, other_id, other_id)).fetchall():
+            if x != into_id:
+                con.execute("INSERT OR IGNORE INTO apart (a, b) VALUES (?, ?)", (min(x, into_id), max(x, into_id)))
         con.execute("DELETE FROM artists WHERE id = ?", (other_id,))
     if not auto:
         event("info", "%s is part of %s now" % (b["name"], a["name"]))

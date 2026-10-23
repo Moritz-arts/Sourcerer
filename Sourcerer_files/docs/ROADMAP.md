@@ -327,6 +327,15 @@ add the one that replaced it.
   Patreon) for an active / normal / dormant artist (a post in the last 7 / 60 days / older), 1 / 6 / 24 h where limits are published; a card
   asked for by name is never held back, and the log says how many were left alone. Together with v0.43 (All artists shows snapshots) this is the
   first half of "read all artists without reaching a limit"; the second half is one feed per login site (below).
+- 2026-10-23 — **Merge, explained and undoable; the user's settings as the base; more in Artists.** The user (v0.48): a merge should say why Sourcerer
+  thinks two cards belong together, two suggestions that are not the same artist must be dismissable, *Merge sources* needs a way to look at an artist
+  before merging, and "I have the same artist three times, Sourcerer found two" (`tinyshoya`, `tinyshoyac`, `小也暁也`). **v0.49:** every suggestion
+  carries its reason in words (`evidence`), *Not the same* is kept (`apart`), *Open* leaves the dialog and a button brings it back, and the search for a
+  pair widened (names a letter or two apart, a name inside another, two accounts on one site offered unticked with a warning) -- the likely cause of
+  the missing third card was that its names were only "similar" (evidence 1), which was never a candidate. Artists shows eight pictures with a
+  larger picture, name and site marks; Browse's numbers gain **Source (Logo)** and *Images* counts what was posted (the site's own count where an
+  answer carries it free, else what the looks saw), not only what is downloaded. The user's settings are the defaults now (24 parallel downloads,
+  32 per site, 0.1 s, fast gap between artists, no scan at start). Open: a short age limit on a gallery's live check (below).
 
 ## Done
 
@@ -492,4 +501,7 @@ add the one that replaced it.
 - [ ] Gallery: a filter by date.
 - [ ] Browse: a background timeline that refreshes the snapshots of cards nobody has opened would make "All artists" complete
       without a Refresh all (a login site is never read live there since v0.43; an account with no snapshot shows nothing).
+- [ ] Gallery: an artist opened on its own asks every source for its first page each time (the snapshot shows at once, the check runs anyway, and
+      it is a logged-in request on X / pixiv / Patreon). A snapshot younger than a few minutes (open APIs) or an hour (cookie logins) could stand in for
+      that check -- `_Source.start_checks` has no age test yet; scrolling past the snapshot still needs the live listing.
 - [ ] Browse: select several pictures and download them together.

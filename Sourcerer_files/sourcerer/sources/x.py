@@ -236,6 +236,7 @@ def following(key):
 
 def profile(url):
     """Who the account is. X shows this to guests too."""
+    from . import note_total
     if not _gdl.available():
         raise RuntimeError("X needs gallery-dl, which did not install: Settings > Repair")
     net._stopped("https://x.com")
@@ -246,6 +247,8 @@ def profile(url):
             net.spend("https://x.com")
             net.note("https://x.com", "UserByScreenName")
     user = next((m[-1] for m in messages if m and m[0] == 2 and isinstance(m[-1], dict)), {})
+    if user.get("media_count") is not None:
+        note_total(url, user["media_count"])          # (what X says the account posted with media: the page's "images posted")
     return {"name": user.get("nick") or user.get("name") or _name(url),
             "handle": "@" + (user.get("name") or _name(url)),
             # The default egg is no picture of the artist.
