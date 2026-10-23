@@ -1,0 +1,36 @@
+# Rewrite the notes of releases that are already out, from the changelog and the download table of
+# .github/release_notes.py -- for when the wording of the changelog or of the table changed.
+#
+# Actions > Release notes > Run workflow. `tag` empty: every release; a tag (v0.55): that one.
+# Only the text of a release changes, never its files or its tag.
+name: Release notes
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release to rewrite (v0.55); empty = every release
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  notes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rewrite the notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -eu
+          tags="$TAG"
+          [ -n "$tags" ] || tags=$(gh release list --limit 200 --json tagName --jq '.[].tagName')
+          for t in $tags; do
+            python3 .github/release_notes.py "$t" > notes.md
+            gh release edit "$t" --notes-file notes.md
+            echo "Rewrote the notes of $t" >> "$GITHUB_STEP_SUMMARY"
+          done

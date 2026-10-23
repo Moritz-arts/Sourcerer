@@ -109,19 +109,9 @@ jobs:
             echo "::error::$TAG is already released."
             exit 1
           fi
-          # The version's own section of the changelog, then what to download.
-          git show "$TAG:Sourcerer_files/docs/CHANGELOG.md" \
-            | awk -v h="## $TAG " 'index($0,h)==1{f=1; print; next} f&&/^## v/{exit} f' > notes.md
-          [ -s notes.md ] || printf '## %s\n' "$TAG" > notes.md
-          cat >> notes.md <<'NOTES'
-
-          **Download for your system** (the files are not signed; the README says how to get past the first-start warning):
-
-          - Windows: Sourcerer-Setup.exe (installer) or Sourcerer-Windows.zip (portable)
-          - macOS: Sourcerer-macOS-arm64.dmg (Apple silicon) or Sourcerer-macOS-x86_64.dmg (Intel)
-          - Linux: Sourcerer-x86_64.AppImage or Sourcerer-Linux.tar.gz (opens in your browser)
-          - With Python, any system, updates itself: Sourcerer.zip
-          NOTES
+          # What is new (the version's own section of the changelog), then what to download.
+          git show "$TAG:Sourcerer_files/docs/CHANGELOG.md" > changelog.md
+          python3 .github/release_notes.py "$TAG" changelog.md > notes.md
           git archive --format=zip -o Sourcerer.zip "$TAG"
           # The launchers must sit at the top -- that is the whole point of this file.
           unzip -l Sourcerer.zip | grep -q ' start-windows\.bat$'

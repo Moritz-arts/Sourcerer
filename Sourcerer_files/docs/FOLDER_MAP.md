@@ -103,6 +103,8 @@ Only in the repository, never in the ZIP (`export-ignore` in `.gitattributes`):
 │   ├─ workflows/release-zip.yml  attaches Sourcerer.zip to a published release
 │   ├─ workflows/publish.yml      on command (Run workflow): merges a branch's pull request,
 │   │                               raises the version, and if asked publishes the Stable release
+│   ├─ workflows/release-notes.yml on command: rewrites the notes of existing releases
+│   │                               (what's new + download table) with release_notes.py
 │   ├─ workflows/build-exe.yml    builds the standalone downloads on a Windows, a Linux and
 │   │                               two macOS runners, tests them, attaches them to a release;
 │   │                               also on pull requests
@@ -111,6 +113,7 @@ Only in the repository, never in the ZIP (`export-ignore` in `.gitattributes`):
 │   │                               exe/Sourcerer.ico / .icns / .png are the logo as icons
 │   ├─ bump_version.py            rewrites the number everywhere it is written
 │   ├─ changelog_entry.py         turns commit subjects into the changelog entry
+│   ├─ release_notes.py           a release's notes: that version's changelog bullets + download table
 │   └─ redefined.py               a check: names a module defines twice at its top level
 ├─ .gitattributes
 └─ .gitignore
