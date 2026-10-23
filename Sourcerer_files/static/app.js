@@ -1377,6 +1377,7 @@ function galSources(list) {
       : stored ? label + ": from the last look, the site is not asked here. Refresh all (F5) reads it" +
         (unlooked ? " · " + plural(unlooked, "account") + " not looked at yet" : "")
       : busy ? label + ": asking the site…" + (of.length > 1 ? " (" + of.filter(function (s) { return !s.loading; }).length + " of " + of.length + " accounts answered)" : "") : "Hide " + label + (G.all ? " (" + plural(of.length, "source") + ")" : "") +
+        (of.every(function (s) { return s.fresh; }) ? " · from a look a few minutes ago, asked again at the end of what is shown" : "") +
         (news ? " · " + plural(news, "new post") : "");
     // A spinner while the site is asked, green when it answered, orange when it did not.
     var state = busy ? '<i class="spin"></i>' : '<i class="dot ' + (bad.length ? "warn" : ready ? "ok" : "blank") + '"></i>';

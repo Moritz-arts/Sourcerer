@@ -518,8 +518,8 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   only a patch: what a site can bear is unknown and the account is what gets locked). A snapshot of such a source is shown up to 30 days old
   (`OFFLINE_AGE`; Patreon's thumbnail links expire: 7 days), a source without one shows nothing and its chip says "N accounts not looked at yet";
   the chip is hollow with the tooltip "from the last look ... Refresh all (F5) reads it". **Refresh all is what asks the sites** (mode `scan`,
-  half of the day: `net.scan_room`), and a finished sync opens the gallery again from the fresh snapshots. An artist opened on its own is read live as
-  ever. The better design for X (its Following timeline as one feed, `HomeLatestTimeline`, mapped to the cards by author) is not built.
+  half of the day: `net.scan_room`), and a finished sync opens the gallery again from the fresh snapshots. An artist opened on its own is read live -- unless its snapshot is fresh
+  (see *Browse opens from snapshots*). The better design for X (its Following timeline as one feed, `HomeLatestTimeline`, mapped to the cards by author) is not built.
 - **A sweep leaves a source alone for a while after it was read** (v0.45, `sync._cooling`, `sources.looked_at`): the user's idea -- an artist rarely
   posts every few hours, so a source read lately is not read again by a *sweep* (the automatic sync, the scan at start, **Refresh all** -- until v0.44
   only the automatic ones kept `MIN_HOURS`, and F5 read all 291 X cards every time). The gap grows with how long the artist has been quiet
@@ -1040,7 +1040,13 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   counts `SEED_PAGES` pages and then gives up) and **never slipped into the open
   gallery** -- the pictures would jump; the page offers "N new posts - show", which
   opens the gallery again from the refreshed snapshot. The live page is saved as the
-  source's snapshot as soon as it arrives.
+  source's snapshot as soon as it arrives. **A fresh snapshot stands in for the live check** (v0.50, `gallery.FRESH` 5 minutes, `FRESH_LOGIN` an
+  hour on a cookie login's site; `_Source.seed` sets `fresh` and `checked`, a look of any kind -- a sync, Refresh, an earlier opening -- stamps
+  `snapshots.Snap.fetched`): opening the same artist again, or a card a sweep just read, asks no site. The live listing starts only when the posts
+  of the snapshot are all shown (`_kick`; the prefetch of `more()` skips a fresh source while it has posts left, `not (s.fresh and s.buffer)`), from
+  its first page as ever -- what the artist posted meanwhile is counted as new then, a few minutes later than before, and *Refresh* on the artist reads
+  the site at once. The chip's tooltip says so (`fresh` in `state()`). Without this every opening cost one request per source, a logged-in one on
+  X, pixiv and Patreon.
 - Browse's state poll (`galPoll`) runs only while a source of the open gallery is loading
   (and once when a gallery comes back from aside), slows down, and reopens a gallery the server
   closed; every path that ends a gallery's loading (no cards, a failed open) must clear `G.loading`.
