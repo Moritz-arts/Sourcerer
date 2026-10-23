@@ -275,9 +275,15 @@ def main(argv=None):
                 if os.name == "nt":
                     server.WINDOW.events.shown += lambda: _custom_frame(server.WINDOW)
                     server.WINDOW.events.loaded += lambda: _custom_frame(server.WINDOW)       # once more if `shown` came too early
-                try:
-                    webview.start(icon=str(config.STATIC / "icon.png"))       # (Qt and GTK show it; Windows and macOS ignore it)
-                except TypeError:                             # a pywebview without the icon argument
+                # The icon argument is Qt's and GTK's (a PNG). On Windows pywebview builds a .NET Icon from it and a PNG is no icon: the
+                # restarted Sourcerer of the smoke test came up, logged its port and was gone (v0.55's first build); Windows gets its icon
+                # from the exe and from _window_icon.
+                if sys.platform.startswith("linux"):
+                    try:
+                        webview.start(icon=str(config.STATIC / "icon.png"))
+                    except TypeError:                         # a pywebview without the icon argument
+                        webview.start()
+                else:
                     webview.start()
                 return 0                                      # the window was closed
             except Exception as e:

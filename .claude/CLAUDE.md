@@ -39,6 +39,8 @@ window), `.github/exe/Sourcerer.ico` / `.icns` / `.png` (the installer, the exe,
 the 1280x640 social preview and the guide: kept out of the archive by `.gitattributes`). **The page's accent is Arcane Violet** (`--fill-accent` and
 its light/dark companions in `app.css`; the neutral surfaces stay as drawn in the mockups). A new icon size or variant is made from `logo.svg`
 (Chromium renders it; Pillow writes the `.icns`); the window's own icon on Windows is set by `desktop._window_icon` (WM_SETICON, best effort).
+**`webview.start(icon=...)` is for Qt and GTK only** (`desktop.main` passes it on Linux): handed a PNG on Windows, pywebview made a .NET icon of it and the
+process died right after logging its port -- the smoke test's Restart (the one start that opens a window on the runner) failed twice in a row, v0.55's first build.
 **GitHub's social preview cannot be set from here**: Settings > Social preview takes `docs/brand/social-preview.png`; the repository's description
 and topics are set there too.
 
