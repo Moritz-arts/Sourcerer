@@ -471,6 +471,9 @@ add the one that replaced it.
       picture of every member on it, so a member costs nothing beyond its page; a forum that does not put the member's name in the
       address (`members/90414`) is read the same way; a card whose picture a missing login kept from Sourcerer is looked for again
       within hours instead of after AVATAR_DAYS, and a login made lets every card of that site be looked at again at once
+- [x] A card made from a login's follows gets its first look (v0.54): the follow read asks for the cards it made and for the
+      ones a follow joined to an existing card, and a sweep takes a card that has never been read -- cards only listed are
+      otherwise in nobody's sweep, so a followed account sat empty until somebody noticed and pressed Sync
 
 ## Next
 
