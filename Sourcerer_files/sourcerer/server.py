@@ -66,8 +66,11 @@ def _artists():
         # One query for every source, not one per card: the page asks for all of this again and again while a
         # sync runs, and with a thousand follows three queries a card were most of the answer's time.
         mine = {}
+        # file_count: what is in the library; files_all: every file the source ever listed, a duplicate that was not kept included
+        # (it was posted all the same) -- the page's "images posted" counts from it.
         for r in con.execute("SELECT s.*, (SELECT COUNT(*) FROM files f WHERE f.source_id = s.id "
-                             "AND f.path IS NOT NULL) AS file_count FROM sources s ORDER BY s.artist_id, s.id"):
+                             "AND f.path IS NOT NULL) AS file_count, (SELECT COUNT(*) FROM files f WHERE f.source_id = s.id) AS files_all "
+                             "FROM sources s ORDER BY s.artist_id, s.id"):
             s = dict(r)
             s.pop("pending_keys", None)                       # up to 400 keys a source, only sync.pending_down reads them
             mine.setdefault(r["artist_id"], []).append(s)
@@ -84,6 +87,12 @@ def _artists():
             a["avatar"] = 1 if a.pop("avatar_url", None) else 0      # the page only needs to know there is one (/api/avatar)
             a.pop("avatar_headers", None)
     return artists
+
+
+def _apart():
+    """The pairs of cards the user said are not the same artist ([a, b], a < b): the merge dialogs leave them out."""
+    with db.connect() as con:
+        return [[r["a"], r["b"]] for r in con.execute("SELECT a, b FROM apart")]
 
 
 def _display_name(name):
@@ -352,7 +361,7 @@ def state():
                    fields=[{"label": label, "example": example, "logged_in": on.get(label, False)}
                            for label, example in sources.FIELDS],
                    logins=accounts.problems(rows), pauses=net.pauses(),
-                   artists=_artists(), sync=sync.status(), window=WINDOW is not None,
+                   artists=_artists(), apart=_apart(), sync=sync.status(), window=WINDOW is not None,
                    frame="custom" if CUSTOM_FRAME and WINDOW is not None else "native")
 
 
@@ -655,6 +664,30 @@ def merge_artist(artist_id):
     except (ValueError, sync.Busy) as e:
         return jsonify(error=str(e)), 400
     return jsonify(ok=True, moved=moved)
+
+
+@app.post("/api/apart")
+def set_apart():
+    """"These are not the same artist" ({pairs: [[a, b], ...], apart: true}), or taken back (apart: false); {clear: true} forgets all."""
+    body = _body()
+    with db.connect() as con:
+        if body.get("clear"):
+            con.execute("DELETE FROM apart")
+        else:
+            for pair in body.get("pairs") or []:
+                try:
+                    a, b = sorted(int(x) for x in pair)
+                except (TypeError, ValueError):
+                    return jsonify(error="Pick two cards."), 400
+                if a == b:
+                    continue
+                if body.get("apart", True):
+                    ok = all(con.execute("SELECT 1 FROM artists WHERE id = ?", (x,)).fetchone() for x in (a, b))
+                    if ok:
+                        con.execute("INSERT OR IGNORE INTO apart (a, b) VALUES (?, ?)", (a, b))
+                else:
+                    con.execute("DELETE FROM apart WHERE a = ? AND b = ?", (a, b))
+    return jsonify(ok=True, apart=_apart())
 
 
 @app.post("/api/sync/focus")

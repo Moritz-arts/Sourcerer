@@ -94,6 +94,13 @@ CREATE TABLE IF NOT EXISTS followed (
     headers  TEXT NOT NULL DEFAULT '',
     tried    INTEGER NOT NULL DEFAULT 0
 );
+-- Two cards the user said are NOT the same artist: the merge dialogs offer them no more (a < b). Gone with either card, so a
+-- row id that SQLite hands out again never inherits an answer; sync.merge moves a merged card's pairs to the card that stays.
+CREATE TABLE IF NOT EXISTS apart (
+    a  INTEGER NOT NULL REFERENCES artists(id) ON DELETE CASCADE,
+    b  INTEGER NOT NULL REFERENCES artists(id) ON DELETE CASCADE,
+    PRIMARY KEY (a, b)
+);
 CREATE TABLE IF NOT EXISTS settings (
     key    TEXT PRIMARY KEY,
     value  TEXT NOT NULL
@@ -142,6 +149,8 @@ COLUMNS = {
         "pending_keys": "TEXT",            # JSON: the remote_keys of those (at most sync.PENDING_KEYS), so a download from Browse can tell
         "latest": "TEXT",                  # when its newest post was made (UTC, "YYYY-MM-DD HH:MM:SS"), from the last look at it
         "looked_at": "TEXT",               # when it was last READ successfully (UTC): what a sweep's look gap counts from (sync._cooling)
+        "posted": "INTEGER",               # how many posts the SITE says the account has, where the answer carries it anyway (sources.note_total): pixiv's works, X's media
+        "seen": "INTEGER NOT NULL DEFAULT 0",   # the most posts of it any look has shown at once (the newest-posts snapshot): a floor for "images posted"
     },
     "files": {
         "phash": "TEXT",                  # imaging fingerprint; NULL for video

@@ -782,7 +782,7 @@ def _from_memory(media, ctype, data):
 
 # ---- the Artists view: the newest posts of a card, from what the looks saved ----------------------------------------------------
 
-OVERVIEW = 4                 # pictures an artist shows in the Artists view
+OVERVIEW = 8                 # pictures an artist shows in the Artists view
 SNAP_MEMORY = 40 << 20       # bytes of those small pictures kept in memory (never on disk)
 _snap = collections.OrderedDict()       # (source id, remote key) -> (content type, bytes)
 _snapped = [0]
@@ -790,7 +790,7 @@ _snap_flight = {}
 
 
 def overview(artist_ids):
-    """{artist id: [{"thumb", "post", "date"}]}: the newest OVERVIEW posts of each card across all its sources, from the snapshots
+    """{artist id: [{"thumb", "post", "date"}]}: the newest OVERVIEW (8) posts of each card across all its sources, from the snapshots
     the looks saved (nothing is asked of any site here), a picture of the library where the post is downloaded already, and --
     for an artist the looks never saw -- what the library has. A snapshot is not shown past the age its links keep good (the
     same as All artists: OFFLINE_AGE, Patreon's thumbnails SEED_AGE)."""

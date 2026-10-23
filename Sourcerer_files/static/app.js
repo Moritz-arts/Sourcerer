@@ -313,7 +313,7 @@ var lastLoad = 0, loadTimer = 0, LOAD_GAP = 4000;
 function load() {
   lastLoad = Date.now();
   return api("GET", "/api/state").then(function (d) {
-    S.artists = d.artists; S.sync = d.sync; S.library = d.library; S.window = d.window;
+    S.artists = d.artists; S.apart = apartSet(d.apart); S.sync = d.sync; S.library = d.library; S.window = d.window;
     S.frame = d.frame; applyFrame();
     S.sep = d.sep; S.sites = d.sites; S.fields = d.fields; S.settings = d.settings; S.logins = d.logins || []; S.pauses = d.pauses || [];
     $("version").textContent = "v" + d.version;
@@ -395,24 +395,29 @@ var M = { from: 0, picked: [], keep: 0, me: null, suggested: [], why: {} };
 // ("👹 青林檎テル" is "青林檎テル"). The base leaves out a "(handle)" at the end, which a card gets when another had its name.
 function nameKey(name) { return String(name || "").normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ""); }
 function baseKey(name) { return nameKey(String(name || "").replace(/\s*[(\[（【][^)\]）】]*[)\]）】]\s*$/, "")); }
-// Every name a card is known by: its own, which is the artist's @name, and what the sites show for its accounts (`alias`).
-// The list's search finds a card by its name or by what a site shows for any of its accounts.
+// Every name a card is known by, as keys: its own, which is the artist's @name, and what the sites show for its accounts (`alias`).
+// The list's search finds a card by any of them. `shown` (when given) keeps the text each key came from: the dialogs say why
+// two cards look alike in the artist's own words ("both go by «小也暁也»"), not in keys.
 function nameHit(a, q) {
   return a.name.toLowerCase().indexOf(q) >= 0 || a.sources.some(function (s) { return s.alias && String(s.alias).toLowerCase().indexOf(q) >= 0; });
 }
-function namesOf(a) {
+function namesOf(a, shown) {
   var out = [];
   [a.name].concat(a.sources.map(function (s) { return s.alias; })).forEach(function (n) {
-    [nameKey(n), baseKey(n)].forEach(function (k) { if (k.length >= 2 && out.indexOf(k) < 0) out.push(k); });
+    [nameKey(n), baseKey(n)].forEach(function (k) {
+      if (k.length >= 2 && out.indexOf(k) < 0) { out.push(k); if (shown && n) shown[k] = String(n).trim(); }
+    });
   });
   return out;
 }
+function shortUrl(u) { var t = String(u).replace(/^https?:\/\/(www\.)?/i, "").replace(/\/+$/, ""); return t.length > 44 ? t.slice(0, 43) + "…" : t; }
 // The account names in a card's links: "foo" in bsky.app/profile/foo.bsky.social, x.com/foo, mastodon.social/@foo and
 // foo.fanbox.cc -- what a display name is not (an artist known as "Mew" is @Mewnet). Numbers (pixiv's ids) and short ones
-// say nothing. (`follows.handle_key` does the same for the automatic combining, with a longer minimum.)
+// say nothing. (`follows.handle_key` does the same for the automatic combining, with a longer minimum.) `at` (when given)
+// keeps the address each came from.
 var HANDLE_KINDS = ["bluesky", "mastodon", "misskey", "x", "patreon", "fanbox", "xenforo"];
 var NOT_NAMES = ["index", "user", "users", "profile", "profiles", "members", "member", "u", "c", "media", "m", "creator"];     // follows._NOT_NAMES
-function handlesOf(a) {
+function handlesOf(a, at) {
   var out = [];
   a.sources.forEach(function (s) {
     if (HANDLE_KINDS.indexOf(s.kind) < 0) return;
@@ -424,15 +429,16 @@ function handlesOf(a) {
       last = /\.fanbox\.cc$/i.test(u.hostname) ? u.hostname.split(".")[0] : decodeURIComponent(where.replace(/\/+$/, "").split("/").pop());
     } catch (e) { return; }
     var h = nameKey(last.replace(/^@/, "").split("@")[0].split(".")[0]);
-    if (h.length >= 3 && !/^\d+$/.test(h) && NOT_NAMES.indexOf(h) < 0 && out.indexOf(h) < 0) out.push(h);
+    if (h.length >= 3 && !/^\d+$/.test(h) && NOT_NAMES.indexOf(h) < 0 && out.indexOf(h) < 0) { out.push(h); if (at) at[h] = shortUrl(s.url); }
   });
   return out;
 }
 // The same without the digits at the end: @Blackmoon, @blackmoon_77 and @BlackMoon1985 are one artist's accounts (the number is
 // whatever was free on each site). (`follows.stem_key`.)
+function stemOf(h) { return h.replace(/\d+$/, ""); }
 function stemsOf(handles) {
   var out = [];
-  handles.forEach(function (h) { var t = h.replace(/\d+$/, ""); if (t !== h && t.length >= 5 && out.indexOf(t) < 0) out.push(t); });
+  handles.forEach(function (h) { var t = stemOf(h); if (t !== h && t.length >= 5 && out.indexOf(t) < 0) out.push(t); });
   return out;
 }
 // The accounts a card's profiles name themselves (pixiv's declared twitter, a Mastodon field, Fanbox's links), lower-cased.
@@ -454,39 +460,107 @@ function mentionsOf(a) {
 function urlsOf(a) { return a.sources.map(function (s) { return String(s.url).toLowerCase(); }); }
 // Everything the evidence below needs of one card, made once.
 function profileOf(a) {
-  var handles = handlesOf(a);
-  return { a: a, key: nameKey(a.name), names: namesOf(a), handles: handles, stems: stemsOf(handles), links: linksOf(a), mentions: mentionsOf(a), urls: urlsOf(a) };
+  var shown = {}, at = {}, names = namesOf(a, shown), handles = handlesOf(a, at);
+  return { a: a, key: nameKey(a.name), names: names, shown: shown, handles: handles, at: at, stems: stemsOf(handles),
+           links: linksOf(a), mentions: mentionsOf(a), urls: urlsOf(a) };
 }
-// How likely two cards are one artist: 6 a profile names the other's account, 5.5 the bios name each other, 5 a name in common
-// (the name a site shows counts), 4.5 one bio names the other, 4 the same account name, 3 the same but for the digits at its end,
-// 2 a name that is the other's account name, 1 one name inside the other. 0: nothing.
-function likeness(p, q) {
-  var has = function (list) { return function (x) { return list.indexOf(x) >= 0; }; };
-  if (p.links.some(has(q.urls)) || q.links.some(has(p.urls))) return 6;
-  var pm = p.mentions.some(has(q.urls)), qm = q.mentions.some(has(p.urls));
-  if (pm && qm) return 5.5;
-  if (p.names.some(has(q.names))) return 5;
-  if (pm || qm) return 4.5;
-  if (p.handles.some(has(q.handles))) return 4;
-  if (p.stems.some(has(q.stems)) || p.stems.some(has(q.handles)) || p.handles.some(has(q.stems))) return 3;
-  if (p.names.some(has(q.handles)) || q.names.some(has(p.handles))) return 2;
+
+// ---- why two cards look like one artist ---------------------------------------------------
+// evidence(p, q) = {s, why}: how likely (6 a profile names the other's account, 5.5 the bios name each other, 5 a name in common --
+// the name a site shows counts --, 4.5 one bio names the other, 4 the same account name, 3 the same but for the digits at its end or
+// names a letter or two apart, 2 a name that is the other's account name or sits inside the other's name, 1 a similar card name; 0
+// nothing) and `why`, the reason in words with the names and addresses that caused it -- both dialogs show it under each card.
+var CJK = /[぀-ヿ㐀-鿿가-힯]/;
+function common(xs, ys) { for (var i = 0; i < xs.length; i++) if (ys.indexOf(xs[i]) >= 0) return xs[i]; return ""; }
+function quote(s) { return "«" + s + "»"; }
+function stemMatch(p, q) {
+  for (var i = 0; i < p.handles.length; i++) for (var j = 0; j < q.handles.length; j++) {
+    var x = p.handles[i], y = q.handles[j], sx = stemOf(x), sy = stemOf(y);
+    if (x !== y && (sx === sy || sx === y || x === sy) && Math.min(sx.length, sy.length) >= 5) return [x, y];
+  }
+  return null;
+}
+// A name that is another's with a letter or two more ("tinyshoya", "tinyshoyac": close = true), or one that sits inside another's
+// ("小也暁也" in "小也暁也 | commissions": close = false). The names of the cards' accounts count, not only the cards' own.
+function nameInside(p, q, close) {
+  for (var i = 0; i < p.names.length; i++) for (var j = 0; j < q.names.length; j++) {
+    var x = p.names[i], y = q.names[j], lo = x.length <= y.length ? x : y, hi = lo === x ? y : x, extra = hi.length - lo.length;
+    if (!extra || hi.indexOf(lo) < 0) continue;
+    var cjk = CJK.test(lo);
+    if (close ? !(extra <= 2 && lo.length >= 6) : !(lo.length >= (cjk ? 3 : 5) && lo.length * (cjk ? 3 : 2) >= hi.length)) continue;
+    var small = lo === x ? p : q, big = small === p ? q : p;
+    return close ? "the names are a letter or two apart: " + quote(small.shown[lo] || lo) + " and " + quote(big.shown[hi] || hi)
+      : quote(small.shown[lo] || lo) + " is part of " + quote(big.shown[hi] || hi);
+  }
+  return "";
+}
+function evidence(p, q) {
+  var A = quote(p.a.name), B = quote(q.a.name), u, k, st, w;
+  if ((u = common(p.links, q.urls))) return { s: 6, why: A + "'s own profile links to " + B + "'s account (" + shortUrl(u) + ")" };
+  if ((u = common(q.links, p.urls))) return { s: 6, why: B + "'s own profile links to " + A + "'s account (" + shortUrl(u) + ")" };
+  var pm = common(p.mentions, q.urls), qm = common(q.mentions, p.urls);
+  if (pm && qm) return { s: 5.5, why: "their bios name each other's accounts" };
+  if ((k = common(p.names, q.names))) return { s: 5, why: "both go by " + quote(p.shown[k] || q.shown[k] || k) };
+  if (pm || qm) return { s: 4.5, why: "the bio of " + (pm ? A : B) + " names the other's account (" + shortUrl(pm || qm) + ")" };
+  if ((k = common(p.handles, q.handles))) return { s: 4, why: "the same account name " + quote(k) + " (" + p.at[k] + " and " + q.at[k] + ")" };
+  if ((st = stemMatch(p, q))) return { s: 3, why: "the account names differ only by numbers: " + quote(st[0]) + " and " + quote(st[1]) };
+  if ((w = nameInside(p, q, true))) return { s: 3, why: w };
+  if ((k = common(p.names, q.handles))) return { s: 2, why: quote(p.shown[k] || k) + " is the account name of " + B + " (" + q.at[k] + ")" };
+  if ((k = common(q.names, p.handles))) return { s: 2, why: quote(q.shown[k] || k) + " is the account name of " + A + " (" + p.at[k] + ")" };
+  if ((w = nameInside(p, q, false))) return { s: 2, why: w };
   var lo = p.key.length < q.key.length ? p.key : q.key, hi = lo === p.key ? q.key : p.key;
-  return lo.length >= 3 && lo.length * 2 >= hi.length && hi.indexOf(lo) >= 0 ? 1 : 0;
+  return lo.length >= 3 && lo.length * 2 >= hi.length && hi.indexOf(lo) >= 0 ? { s: 1, why: "similar names" } : { s: 0, why: "" };
 }
-function sameness(b) { return likeness(M.me, profileOf(b)); }
-var WHY = { 6: "its profile names the other account", 5.5: "their bios name each other", 5: "the same name", 4.5: "a bio names the other account",
-            4: "the same account name", 3: "the same account name but for the numbers", 2: "a name that is the other's account name", 1: "a similar name" };
+
+// "These two are not the same artist" (/api/apart): kept in the database, never offered again. S.apart is a Set of "low,high" ids.
+function apartSet(list) { return new Set((list || []).map(function (p) { return p[0] + "," + p[1]; })); }
+function isApart(x, y) { return !!S.apart && S.apart.has(Math.min(x, y) + "," + Math.max(x, y)); }
+function markApart(pairs) {
+  return api("POST", "/api/apart", { pairs: pairs, apart: true }).then(function (d) { S.apart = apartSet(d.apart); });
+}
+function forgetApart() {
+  return api("POST", "/api/apart", { clear: true }).then(function (d) { S.apart = apartSet(d.apart); });
+}
+function apartNote(id) {
+  var n = S.apart ? S.apart.size : 0;
+  $(id).innerHTML = n ? plural(n, "pair") + " marked as not the same artist. <button type=\"button\" class=\"mini\" data-apart-clear>Offer them again</button>" : "";
+}
+// The sites a card has accounts on, as their marks (a site without one shows its name).
+function siteMarks(a) {
+  var seen = {}, out = "";
+  a.sources.forEach(function (s) {
+    var k = s.site || s.label;
+    if (!k || seen[k]) return;
+    seen[k] = 1;
+    out += siteLogo(k, s.kind, s.host) || '<span class="mk-name">' + esc(k) + "</span>";
+  });
+  return out;
+}
+// One card in a merge list: tick, picture, name with the sites it is on, the reason under it, and the buttons at the right.
+function mergeRow(a, on, why, acts) {
+  return '<div class="merge-row' + (on ? " on" : "") + '"><button type="button" class="br-item" data-id="' + a.id + '" aria-pressed="' + on + '">' +
+    '<span class="tick">' + (on ? icon("tick") : "") + "</span>" + avatarHtml(a) +
+    '<span class="merge-text"><span class="merge-top"><span class="br-name" title="' + esc(a.name) + '">' + esc(a.name) + "</span>" +
+    '<span class="merge-sites">' + siteMarks(a) + "</span></span>" + (why ? '<small class="why">' + esc(why) + "</small>" : "") + "</span>" +
+    '<span class="br-n">' + (a.sources.filter(function (s) { return s.supported; }).length || "") + "</span></button>" +
+    (acts ? '<span class="merge-acts">' + acts + "</span>" : "") + "</div>";
+}
+
+function suggest() {
+  var scored = S.artists.filter(function (b) { return b.id !== M.from && !isApart(M.from, b.id); })
+    .map(function (b) { return [evidence(M.me, profileOf(b)), b]; }).filter(function (x) { return x[0].s; })
+    .sort(function (x, y) { return y[0].s - x[0].s || x[1].name.localeCompare(y[1].name); }).slice(0, 10);
+  M.suggested = scored.map(function (x) { return x[1].id; });
+  M.why = {};
+  scored.forEach(function (x) { M.why[x[1].id] = x[0].why; });
+}
 function openMerge(a) {
   closeMenu();
   M = { from: a.id, picked: [], keep: 0, me: profileOf(a), suggested: [], why: {} };
-  var scored = S.artists.filter(function (b) { return b.id !== a.id; })
-    .map(function (b) { return [sameness(b), b]; }).filter(function (x) { return x[0]; })
-    .sort(function (x, y) { return y[0] - x[0] || x[1].name.localeCompare(y[1].name); }).slice(0, 10);
-  M.suggested = scored.map(function (x) { return x[1].id; });
-  scored.forEach(function (x) { M.why[x[1].id] = WHY[x[0]]; });
+  suggest();
   $("merge-title").textContent = "Merge " + a.name + " with…";
   $("merge-hint").textContent = "Tick the cards that are the same artist. They become one card: the one marked Stays keeps " +
-    "every source and downloaded file, the others go away.";
+    "every source and downloaded file, the others go away. Under a suggestion Sourcerer says why it thinks they belong together.";
   $("merge-search").value = "";
   renderMerge();
   $("dlg-merge").showModal();
@@ -498,12 +572,10 @@ function renderMerge() {
   var q = $("merge-search").value.trim().toLowerCase(), box = $("merge-list"), top = box.scrollTop;
   var keeper = mergeKeeper(), group = M.picked.length > 0;
   function row(a, fixed) {
-    var on = fixed || M.picked.indexOf(a.id) >= 0;
-    return '<div class="merge-row' + (on ? " on" : "") + '"><button type="button" class="br-item" data-id="' + a.id + '" aria-pressed="' + on + '">' +
-      '<span class="tick">' + (on ? icon("tick") : "") + "</span>" + avatarHtml(a) +
-      '<span class="br-name" title="' + esc(a.name) + '">' + esc(a.name) + (M.why && M.why[a.id] && !fixed ? ' <small class="why">' + esc(M.why[a.id]) + "</small>" : "") + "</span>" +
-      '<span class="br-n">' + (a.sources.filter(function (s) { return s.supported; }).length || "") + "</span></button>" +
-      (on && group ? (keeper === a.id ? '<span class="keeps">Stays</span>' : '<button type="button" class="keep" data-keep="' + a.id + '">Keep this one</button>') : "") + "</div>";
+    var on = fixed || M.picked.indexOf(a.id) >= 0, why = !fixed && M.why[a.id] || "";
+    return mergeRow(a, on, why,
+      (why ? '<button type="button" class="keep" data-apart="' + a.id + '" title="Do not offer these two again">Not the same</button>' : "") +
+      (on && group ? (keeper === a.id ? '<span class="keeps">Stays</span>' : '<button type="button" class="keep" data-keep="' + a.id + '">Keep this one</button>') : ""));
   }
   var me = artistById(M.from), others = S.artists.filter(function (a) { return a.id !== M.from && (!q || nameHit(a, q)); });
   var sug = M.suggested.map(artistById).filter(function (a) { return a && others.indexOf(a) >= 0; });
@@ -513,6 +585,7 @@ function renderMerge() {
     (rest.length ? (sug.length ? '<div class="br-group">All artists</div>' : "") + rest.map(function (a) { return row(a); }).join("") : "") +
     (others.length ? "" : '<p class="hint">No other artist.</p>');
   box.scrollTop = top;
+  apartNote("merge-apart");
   var n = M.picked.length, stay = artistById(keeper), gone = [M.from].concat(M.picked).filter(function (id) { return id !== keeper; }).map(function (id) { return (artistById(id) || {}).name; });
   $("merge-go").disabled = !n;
   $("merge-go").textContent = n ? "Merge " + plural(n + 1, "card") : "Merge";
@@ -521,7 +594,17 @@ function renderMerge() {
 }
 $("merge-search").addEventListener("input", renderMerge);
 $("merge-list").addEventListener("click", function (e) {
-  var k = e.target.closest("[data-keep]"), b = e.target.closest("[data-id]");
+  var k = e.target.closest("[data-keep]"), b = e.target.closest("[data-id]"), n = e.target.closest("[data-apart]");
+  if (n) {                                          // not the same artist: kept for good, and gone from the suggestions
+    var no = +n.dataset.apart;
+    markApart([[M.from, no]]).then(function () {
+      M.suggested = M.suggested.filter(function (id) { return id !== no; });
+      M.picked = M.picked.filter(function (id) { return id !== no; });
+      delete M.why[no];
+      renderMerge();
+    }).catch(fail);
+    return;
+  }
   if (k) M.keep = +k.dataset.keep;
   else if (b && +b.dataset.id !== M.from) {
     var id = +b.dataset.id, i = M.picked.indexOf(id);
@@ -529,6 +612,10 @@ $("merge-list").addEventListener("click", function (e) {
     if (M.keep === id) M.keep = 0;
   } else return;
   renderMerge();
+});
+$("merge-apart").addEventListener("click", function (e) {
+  if (!e.target.closest("[data-apart-clear]")) return;
+  forgetApart().then(function () { suggest(); renderMerge(); }).catch(fail);
 });
 $("merge-go").addEventListener("click", function () {
   var keep = mergeKeeper(), into = artistById(keep), ids = [M.from].concat(M.picked).filter(function (id) { return id !== keep; }), done = [];
@@ -550,13 +637,16 @@ $("merge-go").addEventListener("click", function () {
 });
 
 // ---- merge sources: every likely twin at once --------------------------------------------
-// The same evidence as above, over all cards: groups of cards that look like one artist, each with the card that stays and the
-// ones that go into it. Evidence of 4 and up (a profile or a bio names the other account, the same name or account name) is
-// ticked beforehand, weaker evidence is only offered, and nothing happens before the button. Two cards with an account on the
-// same site are never offered (two pixiv accounts are more likely two people, whatever their names say).
+// The same evidence as above, over all cards: groups of cards that look like one artist, each with the card that stays, the ones that
+// go into it and the reason for each. Evidence of 4 and up (a profile or a bio names the other account, the same name or account
+// name) is ticked beforehand, weaker evidence is only offered, and nothing happens before the button. Two cards with an account on
+// the same site (two pixiv accounts are more likely two people, whatever their names say) are offered too -- unticked, with that
+// said -- because a main and a second account of one artist look exactly so. *Open* shows an artist in Sourcerer to compare with
+// your own eyes (the dialog waits behind a button), *Not the same* is kept for good.
 var ONE_PER_SITE = ["bluesky", "x", "pixiv", "patreon", "fanbox", "fantia"];
+var KIND_NAMES = { bluesky: "Bluesky", x: "X", pixiv: "pixiv", patreon: "Patreon", fanbox: "Fanbox", fantia: "Fantia" };
 var TICKED_FROM = 4, MAX_SHARERS = 8;
-var C = { groups: [] };
+var C = { groups: [], parked: false };
 function oneKinds(a) { return a.sources.map(function (s) { return s.kind; }).filter(function (k) { return ONE_PER_SITE.indexOf(k) >= 0; }); }
 // Who stays: a card the user made over one that came with a list, then the one with most downloads, auto-download, most accounts.
 function stayRank(a) { return [a.listed ? 0 : 1, a.file_count || 0, a.auto_download ? 1 : 0, a.sources.length]; }
@@ -564,6 +654,29 @@ function stayOrder(x, y) {
   var rx = stayRank(x), ry = stayRank(y);
   for (var i = 0; i < rx.length; i++) if (rx[i] !== ry[i]) return ry[i] - rx[i];
   return x.name.localeCompare(y.name);
+}
+// Names that sit inside another card's name ("tinyshoya" in "tinyshoyac", "小也暁也" in "小也暁也 | commissions"): all names in one
+// string, each searched in it -- native indexOf, no walk over every pair of cards. A name many cards contain says nothing.
+function insidePairs(ps, pair) {
+  var big = "", starts = [], owner = [];
+  ps.forEach(function (p, i) { p.names.forEach(function (k) { starts.push(big.length); owner.push(i); big += k + "\n"; }); });
+  function whose(at) {
+    var lo = 0, hi = starts.length - 1;
+    while (lo < hi) { var mid = (lo + hi + 1) >> 1; if (starts[mid] <= at) lo = mid; else hi = mid - 1; }
+    return owner[lo];
+  }
+  ps.forEach(function (p, i) {
+    p.names.forEach(function (lo) {
+      if (lo.length < (CJK.test(lo) ? 3 : 5)) return;
+      var hits = [], at = big.indexOf(lo), steps = 0;
+      while (at >= 0 && hits.length <= MAX_SHARERS && steps++ < 400) {
+        var o = whose(at);
+        if (o !== i && hits.indexOf(o) < 0) hits.push(o);
+        at = big.indexOf(lo, at + 1);
+      }
+      if (hits.length <= MAX_SHARERS) hits.forEach(function (o) { pair(i, o); });
+    });
+  });
 }
 function findTwins() {
   var ps = S.artists.map(profileOf), at = Object.create(null), owner = Object.create(null), pairs = Object.create(null);
@@ -578,14 +691,17 @@ function findTwins() {
     if (ids.length < 2 || ids.length > MAX_SHARERS) return;              // a name many cards have says nothing
     for (var x = 0; x < ids.length; x++) for (var y = x + 1; y < ids.length; y++) pair(ids[x], ids[y]);
   });
+  insidePairs(ps, pair);
   ps.forEach(function (p, i) { p.links.concat(p.mentions).forEach(function (u) { if (u in owner) pair(i, owner[u]); }); });
   var edges = [], parent = ps.map(function (_, i) { return i; });
   function root(i) { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; }
   Object.keys(pairs).forEach(function (k) {
     var ij = k.split(","), i = +ij[0], j = +ij[1];
-    if (ps[i].kinds.some(function (x) { return ps[j].kinds.indexOf(x) >= 0; })) return;
-    var s = likeness(ps[i], ps[j]);
-    if (s >= 2) { edges.push({ i: i, j: j, s: s }); parent[root(i)] = root(j); }
+    if (isApart(ps[i].a.id, ps[j].a.id)) return;
+    var e = evidence(ps[i], ps[j]);
+    if (e.s < 2) return;
+    edges.push({ i: i, j: j, s: e.s, why: e.why, warn: ps[i].kinds.filter(function (x) { return ps[j].kinds.indexOf(x) >= 0; })[0] || "" });
+    parent[root(i)] = root(j);
   });
   var by = Object.create(null);
   edges.forEach(function (e) { (by[root(e.i)] = by[root(e.i)] || []).push(e); });
@@ -594,55 +710,88 @@ function findTwins() {
     es.forEach(function (e) { [e.i, e.j].forEach(function (i) { if (ids.indexOf(i) < 0) ids.push(i); }); });
     var cards = ids.map(function (i) { return ps[i].a; }).sort(stayOrder), keep = cards[0];
     var members = cards.slice(1).map(function (a) {
-      var mine = es.filter(function (e) { return ps[e.i].a === a || ps[e.j].a === a; }).sort(function (x, y) { return y.s - x.s; })[0];
+      var mine = es.filter(function (e) { return ps[e.i].a === a || ps[e.j].a === a; })
+        .sort(function (x, y) { return (x.warn ? 1 : 0) - (y.warn ? 1 : 0) || y.s - x.s; })[0];
       var other = ps[ps[mine.i].a === a ? mine.j : mine.i].a;
-      return { id: a.id, s: mine.s, on: mine.s >= TICKED_FROM, why: WHY[mine.s] + (other === keep ? "" : " (" + other.name + ")") };
+      return { id: a.id, s: mine.s, on: !mine.warn && mine.s >= TICKED_FROM, warn: mine.warn,
+        why: mine.why + (other === keep ? "" : " (to " + quote(other.name) + ")") +
+          (mine.warn ? ". Both have a " + KIND_NAMES[mine.warn] + " account, which is usually two people" : "") };
     }).sort(function (x, y) { return y.s - x.s; });
-    return { keep: keep.id, members: members, best: members.reduce(function (m, x) { return Math.max(m, x.s); }, 0) };
+    return { keep: keep.id, members: members, best: members.reduce(function (m, x) { return Math.max(m, x.warn ? 1 : x.s); }, 0) };
   }).sort(function (x, y) { return y.best - x.best || artistById(x.keep).name.localeCompare(artistById(y.keep).name); });
 }
 function openTwins() {
-  C = { groups: findTwins() };
+  if (C.parked) return resumeTwins();
+  C = { groups: findTwins(), parked: false };
   renderTwins();
   $("dlg-twins").showModal();
 }
+// Back from comparing an artist: what was merged or deleted meanwhile is gone from the groups, the ticks stay.
+function resumeTwins() {
+  C.parked = false;
+  C.groups = C.groups.filter(function (g) {
+    g.members = g.members.filter(function (m) { return artistById(m.id); });
+    return artistById(g.keep) && g.members.length;
+  });
+  renderTwins();
+  $("dlg-twins").showModal();
+}
+function twinsOpen(id) {
+  if (!artistById(id)) return;
+  C.parked = true;
+  $("dlg-twins").close();                            // (its close event shows the way back)
+  avOpen(id);
+}
 function renderTwins() {
   var box = $("twins-list"), top = box.scrollTop, n = 0, groups = 0;
-  function row(a, on, text, tail) {
-    return '<div class="merge-row' + (on ? " on" : "") + '"><button type="button" class="br-item" data-id="' + a.id + '" aria-pressed="' + on + '">' +
-      '<span class="tick">' + (on ? icon("tick") : "") + "</span>" + avatarHtml(a) +
-      '<span class="br-name" title="' + esc(a.name) + '">' + esc(a.name) + (text ? ' <small class="why">' + esc(text) + "</small>" : "") + "</span>" +
-      '<span class="br-n">' + (a.sources.filter(function (s) { return s.supported; }).length || "") + "</span></button>" + tail + "</div>";
-  }
+  var open = function (a) { return '<button type="button" class="keep" data-open="' + a.id + '" title="Look at this artist in Sourcerer, then come back here">Open</button>'; };
   box.innerHTML = C.groups.map(function (g, gi) {
     var stay = artistById(g.keep), ticked = g.members.filter(function (m) { return m.on; }).length;
     n += ticked; groups += ticked ? 1 : 0;
-    return '<div class="twin" data-g="' + gi + '">' + row(stay, true, "", '<span class="keeps">Stays</span>') +
+    return '<div class="twin" data-g="' + gi + '">' + mergeRow(stay, true, "", open(stay) + '<span class="keeps">Stays</span>') +
       g.members.map(function (m) {
         var a = artistById(m.id);
-        return row(a, m.on, m.why, '<button type="button" class="keep" data-keep="' + a.id + '">Keep this one</button>');
+        return mergeRow(a, m.on, m.why, open(a) + '<button type="button" class="keep" data-keep="' + a.id + '">Keep this one</button>' +
+          '<button type="button" class="keep" data-apart="' + a.id + '" title="Do not offer this card with these again">Not the same</button>');
       }).join("") + "</div>";
   }).join("") || '<p class="hint">No cards that look like one artist.</p>';
   box.scrollTop = top;
+  apartNote("twins-apart");
   $("twins-go").disabled = !n;
   $("twins-go").textContent = n ? "Merge " + plural(n, "card") : "Merge";
   $("twins-sum").textContent = C.groups.length ? (n ? plural(n, "card") + " into " + plural(groups, "artist") + " · " : "") + plural(C.groups.length, "group") + " found" : "";
 }
 $("twins-list").addEventListener("click", function (e) {
-  var g = e.target.closest("[data-g]"), k = e.target.closest("[data-keep]"), b = e.target.closest("[data-id]");
+  var g = e.target.closest("[data-g]"), k = e.target.closest("[data-keep]"), b = e.target.closest("[data-id]"),
+      o = e.target.closest("[data-open]"), no = e.target.closest("[data-apart]");
   if (!g) return;
   g = C.groups[+g.dataset.g];
+  if (o) { twinsOpen(+o.dataset.open); return; }
+  if (no) {                                          // this card is not one of these: kept for good, and out of the group
+    var id = +no.dataset.apart, was = artistById(id), others = [g.keep].concat(g.members.map(function (x) { return x.id; })).filter(function (x) { return x !== id; });
+    markApart(others.map(function (x) { return [id, x]; })).then(function () {
+      g.members = g.members.filter(function (x) { return x.id !== id; });
+      if (!g.members.length) C.groups.splice(C.groups.indexOf(g), 1);
+      renderTwins();
+      toast((was ? was.name : "The card") + " will not be offered with these again.");
+    }).catch(fail);
+    return;
+  }
   if (k) {                                           // another card stays: the old keeper takes its place among those that go
-    var id = +k.dataset.keep, was = g.keep, m = g.members.filter(function (x) { return x.id === id; })[0];
+    var kid = +k.dataset.keep, prev = g.keep, m = g.members.filter(function (x) { return x.id === kid; })[0];
     if (!m) return;
-    g.members[g.members.indexOf(m)] = { id: was, s: m.s, on: true, why: m.why };
-    g.keep = id;
+    g.members[g.members.indexOf(m)] = { id: prev, s: m.s, on: true, warn: m.warn, why: m.why };
+    g.keep = kid;
   } else if (b) {
     var m2 = g.members.filter(function (x) { return x.id === +b.dataset.id; })[0];
     if (!m2) return;
     m2.on = !m2.on;
   } else return;
   renderTwins();
+});
+$("twins-apart").addEventListener("click", function (e) {
+  if (!e.target.closest("[data-apart-clear]")) return;
+  forgetApart().then(function () { C.groups = findTwins(); renderTwins(); }).catch(fail);
 });
 $("twins-go").addEventListener("click", function () {
   var jobs = [], done = [], into = {}, failed = [];
@@ -662,11 +811,15 @@ $("twins-go").addEventListener("click", function () {
     lastKey = "";
     return load();
   }).then(function () {
+    C.parked = false;
     $("dlg-twins").close();
     if (done.length) toast(plural(done.length, "card") + " merged.");
     if (failed.length) toast(plural(failed.length, "card") + " not merged -- " + failed[0], true);
   });
 });
+$("dlg-twins").addEventListener("close", function () { $("twins-back").classList.toggle("hidden", !C.parked); });
+$("twins-back-go").addEventListener("click", function () { $("twins-back").classList.add("hidden"); resumeTwins(); });
+$("twins-back-x").addEventListener("click", function () { C.parked = false; $("twins-back").classList.add("hidden"); });
 $("br-combine").addEventListener("click", openTwins);
 
 function openFolder(a) { api("POST", "/api/open", { target: "artist", artist_id: a.id }).catch(fail); }
@@ -844,7 +997,7 @@ var BR_HIDDEN = "sourcerer.browse.hidden";
 var BR_FIT = "sourcerer.browse.fit", BR_SIZE = "sourcerer.browse.size", BR_FOLDED = "sourcerer.browse.folded";
 var BR_SORT = "sourcerer.browse.sort", BR_COUNT = "sourcerer.browse.count", BR_LAST = "sourcerer.browse.last";
 function brOrder(v) { return v === "logo" ? "source" : /^(activity|favorites|source)$/.test(v) ? v : "name"; }      // ("logo" was Source's twin; the numbers are the second choice's)
-function brNumber(v) { return v === "files" ? "images" : /^(images|downloads|percent)$/.test(v) ? v : "sources"; }
+function brNumber(v) { return v === "files" ? "images" : /^(images|downloads|percent|logos)$/.test(v) ? v : "sources"; }
 S.brArtist = 0; S.brFit = "square"; S.brSort = "name"; S.brCount = "sources";
 try {
   S.brSort = brOrder(localStorage.getItem(BR_SORT));
@@ -901,16 +1054,26 @@ function siteOf(a) {
   var s = siteSrc(a);
   return s ? s.site || s.label : "";
 }
-// The numbers an artist has: the images it has in all (downloaded and still to download, as the last look counted
-// them: a look reads the newest posts only, so a long history shows a "+"), the ones downloaded, and their share.
-function totalOf(a) { return (a.file_count || 0) + (a.pending || 0); }
+// The numbers an artist has: the images posted (per source: what the library has of it, a duplicate not kept included, and what the
+// last look found waiting -- at least what the newest posts showed, and what the site itself says where its answer carries it:
+// pixiv's works, X's media), the ones downloaded, and their share. A source that was never walked to its end has more behind
+// what is known, which a "+" says; one the site's own count covers, or a download walked all of, is exact.
+function srcTotal(s) { return Math.max((s.files_all || 0) + (s.pending || 0), s.seen || 0, s.posted || 0); }
+function srcExact(s) { return !!s.complete || ((s.posted || 0) > 0 && s.posted >= (s.files_all || 0) + (s.pending || 0) && s.posted >= (s.seen || 0)); }
+function supportedOf(a) { return a.sources.filter(function (s) { return s.supported; }); }
+function totalOf(a) {
+  var sum = 0;
+  supportedOf(a).forEach(function (s) { sum += srcTotal(s); });
+  return Math.max(sum, (a.file_count || 0) + (a.pending || 0));
+}
 function downloadsOf(a) { return a.file_count || 0; }
-function shareOf(a) { var t = totalOf(a); return t ? downloadsOf(a) / t : 0; }
-function cutOff(a) { return a.sources.some(function (s) { return (s.pending || 0) >= 120; }); }
+function shareOf(a) { var t = totalOf(a); return t ? Math.min(1, downloadsOf(a) / t) : 0; }
+function cutOff(a) { return supportedOf(a).some(function (s) { return !srcExact(s); }); }
 function countText(a) {
   if (S.brCount === "images") return totalOf(a) ? totalOf(a) + (cutOff(a) ? "+" : "") : "";
   if (S.brCount === "downloads") return downloadsOf(a) || "";
   if (S.brCount === "percent") return totalOf(a) ? Math.round(100 * shareOf(a)) + "%" : "";
+  if (S.brCount === "logos") return siteMarks(a);                 // the marks of the sites its accounts are on
   return a.sources.filter(function (s) { return s.supported; }).length || "";
 }
 // "All artists" gets the same number for the whole list: how many artists, how many images, how many downloaded, what share.
@@ -961,7 +1124,7 @@ function renderBrowseList() {
       if (g && !q && S.brFolded[g]) return head;
       return head + '<button type="button" class="br-item' + (S.brArtist === a.id ? " selected" : "") + '" data-id="' + a.id + '">' +
         avatarHtml(a) + '<span class="br-name" title="' + esc(a.name) + '">' + esc(a.name) + "</span>" +
-        '<span class="br-n">' + count(a) + "</span>" +
+        '<span class="br-n' + (S.brCount === "logos" ? " marks" : "") + '">' + count(a) + "</span>" +
         (a.auto_download ? '<span class="br-auto" title="Auto-download on">' + icon("cloud-down") + "</span>" : "") +
         (a.favorite ? '<span class="br-fav" title="Favorite">' + icon("star") + "</span>" : "") + "</button>";
     }).join("");
@@ -2855,9 +3018,9 @@ function renderRecommended() {
   $("rec-sites").textContent = on.length ? "Logged in now: " + on.join(", ") + "." : "No site is logged in yet (Manage Accounts).";
 }
 
-// One card per artist, wide, with the artist's four newest pictures. The list is built again only when what it shows changed
+// One card per artist, wide, with the artist's eight newest pictures. The list is built again only when what it shows changed
 // (its order, the names, the marks); the numbers beside a name are written in place, and a picture once asked for stays.
-var avKey = "", avPics = {}, avWant = new Set(), avTimer = 0, AV_AT_ONCE = 4, AV_BATCH = 24;
+var avKey = "", avPics = {}, avWant = new Set(), avTimer = 0, AV_AT_ONCE = 4, AV_BATCH = 24, AV_PICS = 8;      // (AV_PICS: gallery.OVERVIEW)
 var avQueue = [], avFlight = new Set();
 var avNear = new IntersectionObserver(function (entries) {
   entries.forEach(function (e) {
@@ -2877,24 +3040,29 @@ function avOrder() {
     return x.name.localeCompare(y.name);
   });
 }
-function avMeta(a) {
+// The artist's sites as big marks (one per site, its name on hover), and under them what is known of the artist in words.
+function avSites(a) {
   var seen = {}, marks = "";
   a.sources.forEach(function (s) {
     var k = s.site || s.label;
-    if (seen[k]) return;
+    if (!k || seen[k]) return;
     seen[k] = 1;
-    marks += siteLogo(k, s.kind, s.host) || "<span>" + esc(k) + "</span>";
+    marks += '<span class="av-site" title="' + esc(k) + '">' + (siteLogo(k, s.kind, s.host) || "<span>" + esc(k) + "</span>") + "</span>";
   });
-  var n = totalOf(a);
-  return marks + (n ? "<span>" + n + (cutOff(a) ? "+" : "") + " images</span>" : "") +
-    (a.auto_download ? '<span class="cloud" title="Auto-download on">' + icon("cloud-down") + "</span>" : "") +
-    (a.favorite ? '<svg class="ic star" role="img" aria-label="Favorite"><use href="#i-star"/></svg>' : "");
+  return marks;
+}
+function avMeta(a) {
+  var n = totalOf(a), bits = [];
+  if (n) bits.push("<span>" + n + (cutOff(a) ? "+" : "") + " images</span>");
+  if (a.auto_download) bits.push('<span class="cloud" title="Auto-download on">' + icon("cloud-down") + "</span>");
+  if (a.favorite) bits.push('<svg class="ic star" role="img" aria-label="Favorite"><use href="#i-star"/></svg>');
+  return bits.join("");
 }
 function avCard(a) {
   return '<article class="av-card" tabindex="0" role="button" data-id="' + a.id + '" aria-label="' + esc(a.name) + '">' +
     '<div class="av-who">' + avatarHtml(a, "lg") + '<div class="av-text"><div class="av-name" title="' + esc(a.name) + '">' + esc(a.name) +
-    '</div><div class="av-meta">' + avMeta(a) + "</div></div></div>" +
-    '<div class="av-pics"><span class="av-pic"></span><span class="av-pic"></span><span class="av-pic"></span><span class="av-pic"></span></div></article>';
+    '</div><div class="av-sites">' + avSites(a) + '</div><div class="av-meta">' + avMeta(a) + "</div></div></div>" +
+    '<div class="av-pics">' + new Array(AV_PICS + 1).join('<span class="av-pic"></span>') + "</div></article>";
 }
 function renderArtists() {
   if (S.view !== "artists") return;
@@ -2914,7 +3082,7 @@ function renderArtists() {
     return;
   }
   list.forEach(function (a) {                                    // the numbers and marks, in place
-    var c = $("av-list").querySelector('.av-card[data-id="' + a.id + '"] .av-meta');
+    var card = $("av-list").querySelector('.av-card[data-id="' + a.id + '"]'), c = card && card.querySelector(".av-meta");
     var html = avMeta(a);
     if (c && c.innerHTML !== html) c.innerHTML = html;
   });
@@ -2935,7 +3103,7 @@ function avAsk() {
 }
 function avFill(card, items) {
   var box = card.querySelector(".av-pics"), tiles = "";
-  for (var i = 0; i < 4; i++) {
+  for (var i = 0; i < AV_PICS; i++) {
     var it = items[i];
     tiles += it ? '<span class="av-pic" title="' + esc(it.date ? it.date.slice(0, 10) : "") + '"><img alt="" referrerpolicy="no-referrer" data-lazy="' + esc(it.thumb) + '"></span>'
       : '<span class="av-pic none">' + (!i ? "Nothing looked at yet: Refresh all (F5)" : "") + "</span>";
