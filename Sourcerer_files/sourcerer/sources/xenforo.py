@@ -53,8 +53,9 @@ def _parts(url):
 
 def match(url):
     p, m = _parts(url)
-    # A slug.id is XenForo's mark; other forum software names its pages differently.
-    return bool(m and re.search(r"\.\d+$", m.group(4)))
+    # A slug.id is XenForo's mark; other forum software names its pages differently. A forum that leaves the name out of
+    # the address (`members/90414`) is known by the member route alone -- its follow list names members so.
+    return bool(m and (re.search(r"\.\d+$", m.group(4)) or (m.group(3).lower() == "members" and m.group(4).isdigit())))
 
 
 def normalize(url):
