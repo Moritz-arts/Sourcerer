@@ -5,6 +5,10 @@ automatically -- one line per change, newest first. A release is drafted by hand
 from the tag of whichever version is judged ready, and this is the text to paste
 into it.
 
+## v0.48 — 2026-10-23
+
+- Merge sources: one button finds the cards that look like one artist, and bios are read for the accounts they name
+
 ## v0.47 — 2026-10-23
 
 - Three views beside the logo: Artists (big cards with each artist's newest four pictures), Gallery and Recommended (coming)
