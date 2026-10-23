@@ -48,6 +48,9 @@ log = logging.getLogger(__name__)
 # so an account with years of posts cannot keep a sync running for a day.
 MAX_PAGES = int(os.environ.get("SOURCERER_MAX_PAGES", "500"))
 AVATAR_DAYS = 7              # how often a profile picture is looked for again
+AVATAR_RETRY_HOURS = 6       # ... and how soon when a card has none: the reason is usually a login that is not there yet
+                             # (a forum behind a bot check shows its pages to nobody else) or a bot check, and both can
+                             # change within a day
 ACCOUNT_HOURS = (5, 9)       # how often the saved logins are checked, drawn anew each time
 CHECKED_HOURS = 12           # a login checked this recently is not asked again at a start
 # A sweep (the automatic sync, the scan at start, Refresh all) comes no closer than this to a site where an account can be
@@ -465,7 +468,8 @@ def backfill_avatars():
     rest learn it at their next sync. Cards of a follow list got both from the list."""
     with db.connect() as con:
         ids = [r[0] for r in con.execute("SELECT id FROM artists WHERE listed = 0 AND avatar_url IS NULL "
-                                         "AND avatar_checked IS NULL ORDER BY id")]
+                                         "AND (avatar_checked IS NULL OR avatar_checked < datetime('now', '-%d hours'))"
+                                         " ORDER BY id" % AVATAR_RETRY_HOURS)]
     for artist_id in ids:
         with db.connect() as con:
             rows = con.execute("SELECT id, url FROM sources WHERE artist_id = ? ORDER BY id", (artist_id,)).fetchall()
@@ -759,7 +763,9 @@ def refresh_avatar(artist_id, force=False):
     if not force and artist["avatar_checked"]:
         age = datetime.datetime.now(datetime.timezone.utc) - datetime.datetime.fromisoformat(
             artist["avatar_checked"]).replace(tzinfo=datetime.timezone.utc)
-        if age.days < AVATAR_DAYS:
+        # A card with no picture is not held for AVATAR_DAYS: what hid it is usually a login that has not been
+        # made yet, and that can change the same day (a card that has a picture is a picture that can change).
+        if age.total_seconds() < (AVATAR_DAYS if artist["avatar_url"] else AVATAR_RETRY_HOURS) * 3600:
             return
     for row in rows:
         try:
@@ -772,6 +778,19 @@ def refresh_avatar(artist_id, force=False):
             log.info("no profile picture from %s: %s", row["url"], net.reason(e))
     with db.connect() as con:
         con.execute("UPDATE artists SET avatar_checked = ? WHERE id = ?", (_now(), artist_id))
+
+
+def _login_made(key, how):
+    """A login made: every card of that site with no profile picture is looked for again at the next chance --
+    until now the site kept its pages from everybody, and the card's own `avatar_checked` would have held the
+    next look for AVATAR_RETRY_HOURS (AVATAR_DAYS for a card that has a picture)."""
+    if how in ("new", "renewed"):
+        with db.connect() as con:
+            con.execute("UPDATE artists SET avatar_checked = NULL WHERE avatar_url IS NULL AND id IN "
+                        "(SELECT artist_id FROM sources WHERE kind = ?)", (key.split(":", 1)[0],))
+
+
+accounts.CHANGED.append(_login_made)
 
 
 # ---- one artist ---------------------------------------------------------------

@@ -467,6 +467,10 @@ add the one that replaced it.
       name (`sources.mentions`) but only ever suggest -- the automatic combining never uses them
 - [x] Three views (v0.47): **Artists** (one long list of big cards with each artist's newest four pictures, from the snapshots --
       no site is asked; a click opens the artist in Gallery), **Gallery** (the Browse of before) and **Recommended** (a placeholder)
+- [x] XenForo (v0.54): the members a login follows become cards -- the follow list's own page gives the name and the profile
+      picture of every member on it, so a member costs nothing beyond its page; a forum that does not put the member's name in the
+      address (`members/90414`) is read the same way; a card whose picture a missing login kept from Sourcerer is looked for again
+      within hours instead of after AVATAR_DAYS, and a login made lets every card of that site be looked at again at once
 
 ## Next
 
@@ -493,7 +497,9 @@ add the one that replaced it.
 - [ ] Follows of Patreon (memberships: the endpoint of the page "Memberships" is not documented and needs a real
       login to read; nothing is guessed until then), and a home
       timeline ("Following") in Browse that shows the newest posts of everybody a login follows
-      with one request per page instead of one source per account.
+      with one request per page instead of one source per account. A forum has its own feed for this
+      (`whats-new/news-feed`: what the followed members posted, liked and commented -- the user, 2026-10-23, wants the
+      media of the members they follow), and it pages by `before_id` rather than by page number.
 - [ ] Standalone builds: an in-program update for macOS, the AppImage and the portable copies
       (an installed Windows copy has it), gallery-dl between releases (its wheel next to the
       program); look at the first real runs on all three systems; an app window on Linux (Qt?);
