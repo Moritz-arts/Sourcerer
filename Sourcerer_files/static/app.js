@@ -411,12 +411,12 @@ function removeArtist(a) {
 var M = { from: 0, picked: [], keep: 0, me: null, suggested: [], why: {} };
 
 // Two names are one when only what is no letter or digit differs: emoji, spaces, marks, width, case
-// ("👹 青林檎テル" is "青林檎テル"). The base leaves out a "(handle)" at the end, which a card gets when another had its name.
+// ("👹 Artist" is "Artist"). The base leaves out a "(handle)" at the end, which a card gets when another had its name.
 function nameKey(name) { return String(name || "").normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ""); }
 function baseKey(name) { return nameKey(String(name || "").replace(/\s*[(\[（【][^)\]）】]*[)\]）】]\s*$/, "")); }
 // Every name a card is known by, as keys: its own, which is the artist's @name, and what the sites show for its accounts (`alias`).
 // The list's search finds a card by any of them. `shown` (when given) keeps the text each key came from: the dialogs say why
-// two cards look alike in the artist's own words ("both go by «小也暁也»"), not in keys.
+// two cards look alike in the artist's own words ("both go by «Artist»"), not in keys.
 function nameHit(a, q) {
   return a.name.toLowerCase().indexOf(q) >= 0 || a.sources.some(function (s) { return s.alias && String(s.alias).toLowerCase().indexOf(q) >= 0; });
 }
@@ -431,7 +431,7 @@ function namesOf(a, shown) {
 }
 function shortUrl(u) { var t = String(u).replace(/^https?:\/\/(www\.)?/i, "").replace(/\/+$/, ""); return t.length > 44 ? t.slice(0, 43) + "…" : t; }
 // The account names in a card's links: "foo" in bsky.app/profile/foo.bsky.social, x.com/foo, mastodon.social/@foo and
-// foo.fanbox.cc -- what a display name is not (an artist known as "Mew" is @Mewnet). Numbers (pixiv's ids) and short ones
+// foo.fanbox.cc -- what a display name is not (an artist known as "Mew" is @artist). Numbers (pixiv's ids) and short ones
 // say nothing. (`follows.handle_key` does the same for the automatic combining, with a longer minimum.) `at` (when given)
 // keeps the address each came from.
 var HANDLE_KINDS = ["bluesky", "mastodon", "misskey", "x", "patreon", "fanbox", "xenforo"];
@@ -452,7 +452,7 @@ function handlesOf(a, at) {
   });
   return out;
 }
-// The same without the digits at the end: @Blackmoon, @blackmoon_77 and @BlackMoon1985 are one artist's accounts (the number is
+// The same without the digits at the end: @Artist, @artist_77 and @Artist1985 are one artist's accounts (the number is
 // whatever was free on each site). (`follows.stem_key`.)
 function stemOf(h) { return h.replace(/\d+$/, ""); }
 function stemsOf(handles) {
@@ -499,8 +499,8 @@ function stemMatch(p, q) {
   }
   return null;
 }
-// A name that is another's with a letter or two more ("tinyshoya", "tinyshoyac": close = true), or one that sits inside another's
-// ("小也暁也" in "小也暁也 | commissions": close = false). The names of the cards' accounts count, not only the cards' own.
+// A name that is another's with a letter or two more ("artist", "artistx": close = true), or one that sits inside another's
+// ("Artist" in "Artist | commissions": close = false). The names of the cards' accounts count, not only the cards' own.
 function nameInside(p, q, close) {
   for (var i = 0; i < p.names.length; i++) for (var j = 0; j < q.names.length; j++) {
     var x = p.names[i], y = q.names[j], lo = x.length <= y.length ? x : y, hi = lo === x ? y : x, extra = hi.length - lo.length;
@@ -675,7 +675,7 @@ function stayOrder(x, y) {
   for (var i = 0; i < rx.length; i++) if (rx[i] !== ry[i]) return ry[i] - rx[i];
   return x.name.localeCompare(y.name);
 }
-// Names that sit inside another card's name ("tinyshoya" in "tinyshoyac", "小也暁也" in "小也暁也 | commissions"): all names in one
+// Names that sit inside another card's name ("artist" in "artistx", "Artist" in "Artist | commissions"): all names in one
 // string, each searched in it -- native indexOf, no walk over every pair of cards. A name many cards contain says nothing.
 function insidePairs(ps, pair) {
   var big = "", starts = [], owner = [];
@@ -1063,7 +1063,7 @@ function siteOf(a) {
   var s = siteSrc(a);
   return s ? s.site || s.label : "";
 }
-// The sites an artist has an account on, one source for each (Source order lists the artist under every one of them: Avocado on X, pixiv and
+// The sites an artist has an account on, one source for each (Source order lists the artist under every one of them: Artist A on X, pixiv and
 // Mastodon stands in three groups). A card with no readable source stands once, where its main account is.
 function siteSources(a) {
   var from = supportedOf(a), seen = {};

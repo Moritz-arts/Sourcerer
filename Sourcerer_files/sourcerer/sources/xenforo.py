@@ -180,7 +180,7 @@ _LINK = re.compile(r"<a\b[^>]*>", re.I)
 _ID = re.compile(r'data-user-id="(\d+)"')
 _HREF = re.compile(r'href="([^"]+)"')
 # The login's own member id, from the account page: `members/<name>.<id>`, or `members/<id>` on a
-# forum that does not put the name in the address (shotaworld.com).
+# forum that does not put the name in the address (example.com).
 _ME = re.compile(r"members/([a-z0-9_.-]+\.\d+|\d+)", re.I)
 # A forum page is a forum page: it loads its own stylesheet and carries XenForo's own markers. The bot check
 # answers 200 with a page of its own -- a title of "<host> | Verification", no rows -- so nothing raises and an

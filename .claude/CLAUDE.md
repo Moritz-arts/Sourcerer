@@ -52,7 +52,7 @@ repository, never only in a chat:
 | File | What it holds | Who keeps it current |
 |---|---|---|
 | `.claude/CLAUDE.md` (this file) | rules, traps, house style, checks | whoever learns something |
-| `Sourcerer_files/docs/ROADMAP.md` | goal, sources, what is done and next | whoever finishes or decides something |
+| `Sourcerer_files/docs/ROADMAP.md` | goal, sites, decisions, done, next -- compact, no dates, no names | whoever finishes or decides something |
 | `Sourcerer_files/docs/FOLDER_MAP.md` | the layout, file by file | whoever moves or adds a file |
 | `Sourcerer_files/docs/CHANGELOG.md` | one line per change, per version | **the workflow — never by hand** |
 | commit bodies | the reasoning behind each change | every commit |
@@ -228,6 +228,12 @@ statement about what changed, in English, readable on its own.
 good: Mastodon: new posts of a followed artist are fetched with their media
 bad:  fix stuff / wip / address review
 ```
+
+**Short, plain, no names:** one sentence a user understands, no artist, account or site-specific
+example from a real person -- use a template ("Artist A", "@artist") in code comments, docs and
+commit text alike. `.github/release_notes.py` builds a release's notes from that version's
+changelog section (bullets + a download table); `publish.yml` uses it, and Actions > Release notes
+(`release-notes.yml`) rewrites the notes of releases that exist.
 
 The body is where the reasoning goes — as much as it deserves. It does not
 reach the changelog, and that is the point: the list stays short, the reasoning
@@ -460,27 +466,27 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   comes in with a followed list joins the card of the same artist when that card has no source on the same site; after every
   look (a login, the start, every 10-14 h) the *listed* cards that are twins of another card are merged into it
   (`sync.merge(..., auto=True)`: one summary line in the log, the result stays listed when both were). **A display name is
-  the weakest evidence** (an artist is "Mew" on one site and @Mewnet on all of them, or known by names in two scripts), so,
+  the weakest evidence** (an artist is "Mew" on one site and @artist on all of them, or known by names in two scripts), so,
   strongest first: (1) **what a profile names itself** (`sources.links`, filled by `sources.profile_links` from what the artist
   *declared*: pixiv's `social` and webpage (profile requests ask `full=1`), a Mastodon or Misskey field, Fanbox's `profileLinks` --
   never a bio or description, which names friends and collaborators as often as the artist; no request is made to read the
   links, only profile addresses of sites Sourcerer knows count, a pixiv work's link does not; Mastodon's, Misskey's and Fanbox's
   lists of follows carry them, `check_card` / `refresh_avatar` / `backfill_avatars` store them from the profile, and the lists were
   read to their end once more -- `follow_links_v1` -- so cards imported before learn theirs): an account that names a card's account, or is named by
-  one, is that card's; (2) **the account name in the address** (`follows.handle_text` / `handle_key`: @Mewnet on Mastodon, x.com/mewnet, Bluesky's
+  one, is that card's; (2) **the account name in the address** (`follows.handle_text` / `handle_key`: @artist on Mastodon, x.com/artist, Bluesky's
   handle without the domain, mewnet.fanbox.cc; at least 4 letters, never a number, only on sites whose address names the account --
   not a booru's `/posts`; `handlesOf` in app.js is its twin with a minimum of 3, for suggestions only); (3) the display name
   by `follows.name_key` (letters and digits only, NFKC, case-folded -- `nameKey` in `app.js` is its twin for the merge dialog's
   suggestions: keep them alike), at least 3 characters. Names and account names live in one index, so an account name matches a
   display name too. **The digits at the end of an account name are dropped for a second match, the weakest there is** (`follows.stem_of`,
-  `_Twins.by_stem`: @blackmoon and @blackmoon_77 are one artist -- the number is whatever was free on the other site; the
+  `_Twins.by_stem`: @artist and @artist_77 are one artist -- the number is whatever was free on the other site; the
   stem has at least 5 letters). It joins **only listed cards** (an automatic join cannot be undone, so never a card the
-  user made), **only when one of the two names is the plain stem or the display names say the same too** (@mochi1 and
-  @mochi2 are two people who each took a free number), **and only when exactly one card fits**. In the merge dialog
+  user made), **only when one of the two names is the plain stem or the display names say the same too** (@name1 and
+  @name2 are two people who each took a free number), **and only when exactly one card fits**. In the merge dialog
   (`stemsOf` in app.js) it is only a suggestion. **Every name a site showed stays with its account** (`sources.alias`, set when a
   card or a joined account comes in; v0.34 filled the first source from the card's name once, `aliases_v1`, for cards of one account only: a card of several does not say which account the name was), because a card is
-  named by its @name now and "Marimo" must still find the card whose Mastodon account is shown as Marimo (`_Twins.url_keys`,
-  `namesOf` in app.js, and the list's search). Where the accounts share no name at all (@Marimo, @manmosumario, a pixiv name in
+  named by its @name now and "Artist" must still find the card whose Mastodon account is shown as Artist (`_Twins.url_keys`,
+  `namesOf` in app.js, and the list's search). Where the accounts share no name at all (@artist, @other_name, a pixiv name in
   kanji) only a profile that names the other (1) or the merge dialog helps -- there is nothing more to compute.
   And **never on the same site twice**, whatever the evidence (two pixiv accounts are more likely two people, also
   when one names the other) -- a name shared by a listed card and two cards the user made is left alone. The user's own cards are
@@ -530,7 +536,7 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   follows `sourcerer/gdl_run.py` is gallery-dl's entry point (`SOURCERER_GDL_TRACE`): it writes the shape of X's answers to stderr
   (`[sourcerer][trace] Following {...}`, keys and kinds only), and reads users wherever X put them, page by page by the bottom cursor, when gallery-dl
   found none. The one-file build dispatches `--gallery-dl` through it (app.py); the plain run stays `python -m gallery_dl`.
-- **The wrong X account was the whole mystery** (v0.41, 2026-10-22: the login was @Moritz_Art, which follows nobody; after logging in as the account
+- **The wrong X account was the whole mystery** (v0.41, 2026-10-22: the login was an account that follows nobody; after logging in as the account
   that follows, `X: 329 followed accounts read: 291 new card, 38 joined an artist`). An account that follows nobody is final: no timeline fallback and no
   retry within hours (`RuntimeError.final`, `follows._retry_soon`). A list **cut off** by an error (`_gdl.LAST["cut"]`) is kept but is a note, so `_look`
   neither stamps it "read to its end" nor holds the next look back. A Mastodon `Link: rel=next` with `http://` on the host that was just reached over
@@ -637,11 +643,11 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   the button at the bottom is the confirmation (no `confirm()`), and the card marked *Stays* (the first
   ticked, or the one asked for with *Keep this one*) receives the rest through one `/merge` call each,
   in turn. At the top *Possibly the same artist* lists likely twins (`suggest` / `evidence` in `app.js`): same name
-  once everything but letters and digits is gone (`nameKey`: emoji, spaces, width, case -- "👹 青林檎テル"
-  is "青林檎テル"), same but for a trailing "(handle)", a shared account name in the links, one name inside
+  once everything but letters and digits is gone (`nameKey`: emoji, spaces, width, case -- "👹 Artist"
+  is "Artist"), same but for a trailing "(handle)", a shared account name in the links, one name inside
   the other. It is a suggestion only; nothing merges by itself. **Every suggestion says why, in the artist's own words**
-  (`evidence(p, q)` returns `{s, why}`: "both go by «小也暁也»", "«Kuroneko»'s own profile links to «kuro»'s account (x.com/kuro_art)",
-  "the names are a letter or two apart: «tinyshoya» and «tinyshoyac»"; `profileOf` keeps the text each name key came from, `shown`, and the
+  (`evidence(p, q)` returns `{s, why}`: "both go by «Artist»", "«Artist A»'s own profile links to «artist_b»'s account (x.com/artist_b)",
+  "the names are a letter or two apart: «artist» and «artistx»"; `profileOf` keeps the text each name key came from, `shown`, and the
   address each account name came from, `at`) in a wrapping line under the name -- the old reason sat in the name's ellipsis and was cut off.
   **"Not the same" is kept for good** (table `apart`, `/api/apart`, `S.apart`, `markApart`): a button on every suggestion in both dialogs
   (in *Merge sources* it takes that card out of the group against every other card of it); both dialogs offer *Offer them again*
@@ -650,10 +656,10 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   **Merge sources** (the button beside *Add artist*, `#dlg-twins`, `findTwins`) is the same evidence over all cards at once
   (`evidence(profileOf(a), profileOf(b))`): candidate pairs come from an index (names, account names, stems, the addresses a profile
   or a bio names; a name that more than `MAX_SHARERS` cards have is skipped -- no all-pairs walk over a thousand cards) **and from `insidePairs`**
-  (a name inside another's name, "tinyshoya" in "tinyshoyac", "小也暁也" in "小也暁也 | commissions": all names in one string, searched with the
+  (a name inside another's name, "artist" in "artistx", "Artist" in "Artist | commissions": all names in one string, searched with the
   native `indexOf`). Names count in all their forms (a card's own, every alias a site shows): until v0.49 only the card's own name was compared
   for "inside", and a pair with a weak sign (evidence 1) was never a candidate -- "I have the same artist three times and Sourcerer found two" was
-  `tinyshoyac` (evidence 3: names a letter or two apart, a minimum of 6 letters; 2: a name inside another, 5 letters or 3 CJK characters).
+  `artistx` (evidence 3: names a letter or two apart, a minimum of 6 letters; 2: a name inside another, 5 letters or 3 CJK characters).
   Pairs that share a one-account-per-artist site (`ONE_PER_SITE`: Bluesky, X, pixiv, Patreon, Fanbox, Fantia) were never offered; they are now,
   **with the warning** ("Both have a pixiv account, which is usually two people": a main and a second account of one artist look
   exactly so), after everything else. The groups are connected pairs of evidence 2 and up.
@@ -882,7 +888,7 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   `snapshots.save` from the posts' dates), else the last download or look; a card with nothing known goes
   last -- its `created` is the day it was imported, and as a sort key it put every imported follow first.
   *Source* groups under the site's mark, name, a line and a count; **an artist stands in every group whose site it has an account on**
-  (v0.55, `siteSources`: Avocado on X, pixiv and Mastodon is in three groups, one entry per site name -- two accounts on one server stand once; a
+  (v0.55, `siteSources`: Artist A on X, pixiv and Mastodon is in three groups, one entry per site name -- two accounts on one server stand once; a
   card with no readable source stands once, where its main account is; no source last). A group's count is its entries; **"All artists" is still
   the number of artists**, `S.brOrderIds` (Refresh all's order) holds each artist once, and the open artist is marked in one group only (`S.brAt`, the
   group clicked last, `data-site` on the items; Up/Down step through the entries as shown). **Images is the number *posted*, not what
