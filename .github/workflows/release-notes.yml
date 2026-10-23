@@ -30,7 +30,7 @@ jobs:
           tags="$TAG"
           [ -n "$tags" ] || tags=$(gh release list --limit 200 --json tagName --jq '.[].tagName')
           for t in $tags; do
-            python3 .github/release_notes.py "$t" > notes.md
+            ASSETS=$(gh release view "$t" --json assets --jq '.assets[].name') python3 .github/release_notes.py "$t" > notes.md
             gh release edit "$t" --notes-file notes.md
             echo "Rewrote the notes of $t" >> "$GITHUB_STEP_SUMMARY"
           done

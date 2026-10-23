@@ -1,8 +1,8 @@
 # The standalone downloads: Sourcerer with Python inside, for people without one.
 #
-#   Windows   Sourcerer-Setup.exe (installer) and Sourcerer-Windows.zip (portable)
+#   Windows   Sourcerer-Windows.exe (installer) and Sourcerer-Windows.zip (portable)
 #   macOS     Sourcerer-macOS-arm64.dmg and Sourcerer-macOS-x86_64.dmg
-#   Linux     Sourcerer-x86_64.AppImage and Sourcerer-Linux.tar.gz (portable)
+#   Linux     Sourcerer-Linux.AppImage and Sourcerer-Linux.tar.gz (portable)
 #
 # Built with PyInstaller, one runner per system (.github/exe/build.py), then each file is
 # started the way a user starts it (.github/exe/smoke.py) before anything is published.

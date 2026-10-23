@@ -2,8 +2,8 @@
 
     python .github/exe/smoke.py <asset> [--window]
 
-<asset> is what build.py made: Sourcerer-Windows.zip, Sourcerer-Setup.exe (installed silently),
-Sourcerer-Linux.tar.gz, Sourcerer-x86_64.AppImage or Sourcerer-macOS-<arch>.dmg.
+<asset> is what build.py made: Sourcerer-Windows.zip, Sourcerer-Windows.exe (installed silently),
+Sourcerer-Linux.tar.gz, Sourcerer-Linux.AppImage or Sourcerer-macOS-<arch>.dmg.
 
 What a source start never needed and the frozen one can get wrong: the static files and VERSION
 in the bundle, where Userdata lands, TLS certificates (the update check asks GitHub), gallery-dl
@@ -98,7 +98,7 @@ def unpack(asset, work, home):
             subprocess.call(["hdiutil", "detach", "-force", str(mount)])
         return (work / "app" / "Sourcerer.app" / "Contents" / "MacOS" / "Sourcerer",
                 home / "Library" / "Application Support" / "Sourcerer" / "Userdata", env)
-    if name.endswith("Setup.exe"):
+    if name.endswith(".exe"):
         target = work / "app"
         subprocess.check_call([str(asset), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER",
                                "/NOICONS", "/DIR=" + str(target), "/LOG=" + str(work / "setup.log")])
@@ -323,7 +323,7 @@ def main():
     home.mkdir()
     exe, data, env = unpack(asset, work, home)
     check(exe.is_file(), "%s unpacks to a program" % asset.name, str(exe))
-    if asset.name.endswith("Setup.exe"):
+    if asset.name.endswith(".exe"):
         update_over(asset, exe, data)
     logs = data / "Logs"
 
@@ -356,7 +356,7 @@ def main():
             try:
                 upd = json.loads(get("/api/update/check?channel=stable")[1])
                 # An installed Windows copy updates itself; every other standalone copy is updated by hand.
-                installed = asset.name.endswith("Setup.exe")
+                installed = asset.name.endswith(".exe")
                 check(upd.get("manual") is (not installed) and info["updatable"] is installed,
                       "update check reaches GitHub (TLS); %s" % ("updates itself" if installed else "updated by hand"),
                       str(upd.get("version")))
@@ -375,7 +375,7 @@ def main():
     finally:
         stop(app)
 
-    if asset.name.endswith("Setup.exe"):
+    if asset.name.endswith(".exe"):
         installer_update(asset, exe, data, start)
 
     if "--window" in sys.argv:

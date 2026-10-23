@@ -19,9 +19,9 @@ library works as it is) — each picture once, even if it is posted on several s
 
 | System | Installer | Portable |
 |---|---|---|
-| **Windows** | [Sourcerer-Setup.exe](https://github.com/Moritz-arts/Sourcerer/releases/latest) | [.zip](https://github.com/Moritz-arts/Sourcerer/releases/latest) |
-| **macOS** | [Apple silicon .dmg](https://github.com/Moritz-arts/Sourcerer/releases/latest) · [Intel .dmg](https://github.com/Moritz-arts/Sourcerer/releases/latest) | – |
-| **Linux** | [.AppImage](https://github.com/Moritz-arts/Sourcerer/releases/latest) | [.tar.gz](https://github.com/Moritz-arts/Sourcerer/releases/latest) (browser only) |
+| **Windows** | [Sourcerer-Windows.exe](https://github.com/Moritz-arts/Sourcerer/releases/latest) | [Sourcerer-Windows.zip](https://github.com/Moritz-arts/Sourcerer/releases/latest) |
+| **macOS** | [Sourcerer-macOS-arm64.dmg](https://github.com/Moritz-arts/Sourcerer/releases/latest) (Apple silicon) · [Sourcerer-macOS-x86_64.dmg](https://github.com/Moritz-arts/Sourcerer/releases/latest) (Intel) | – |
+| **Linux** | [Sourcerer-Linux.AppImage](https://github.com/Moritz-arts/Sourcerer/releases/latest) | [Sourcerer-Linux.tar.gz](https://github.com/Moritz-arts/Sourcerer/releases/latest) (browser only) |
 
 Nothing else to install. The files are not signed, so the first start shows a warning once:
 **Windows** – *More info › Run anyway*. **macOS** – Control-click the app › *Open* (macOS 15: *System Settings ›

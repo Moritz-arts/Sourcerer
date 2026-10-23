@@ -1,4 +1,4 @@
-; The Windows installer, compiled by build.py (Inno Setup 6): Sourcerer-Setup.exe.
+; The Windows installer, compiled by build.py (Inno Setup 6): Sourcerer-Windows.exe.
 ;
 ; Per user, no admin rights: it lands in %LOCALAPPDATA%\Programs\Sourcerer (or where the user says),
 ; which the user may write to. The program is ONE file, Sourcerer.exe; Userdata\ -- the user's cards,
@@ -29,7 +29,7 @@ MinVersion=10.0
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir={#OutputDir}
-OutputBaseFilename=Sourcerer-Setup
+OutputBaseFilename=Sourcerer-Windows
 SetupIconFile={#Icon}
 UninstallDisplayIcon={app}\Sourcerer.exe
 Compression=lzma2
