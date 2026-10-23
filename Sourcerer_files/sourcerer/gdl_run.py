@@ -167,15 +167,28 @@ def install():
 # One tile of a forum's media list, as gallery-dl cuts them (the same marker it splits the page at): the address of the picture's page,
 # then somewhere in the tile the time it was made as XenForo writes it, <time ... datetime="2020-05-01T12:00:00+0000">.
 TILE = '<div class="itemList-item js-inlineModContainer'
-TILE_LENGTH = 2500                                    # the last tile of a page runs on into the page's footer: its own time is near its start
+TILE_LENGTH = 2500                                    # a tile that never closes (broken markup) is read this far
 TIME = re.compile(r"<time\b[^>]*?\bdatetime=[\"']([^\"']+)[\"']", re.I)
 HREF = re.compile(r"href=[\"']([^\"']+)[\"']", re.I)
+DIV = re.compile(r"<(/?)div\b", re.I)
+
+
+def tile_of(text):
+    """What a tile holds: from the end of its marker to the </div> that closes it. The last tile of a page is followed by the page's own
+    furniture -- a footer, a "latest" box -- and its times (today's, mostly) were taken for the picture's: every last tile of a page got one."""
+    depth = 1                                           # the marker is the tile's opening <div>
+    for m in DIV.finditer(text, 0, TILE_LENGTH * 4):
+        depth += -1 if m.group(1) else 1
+        if not depth:
+            return text[:m.start()]
+    return text[:TILE_LENGTH]
 
 
 def tile_dates(page, dates):
-    """{slug: datetime text} of the tiles of a list page -- "title.123" is how gallery-dl names the picture (the last part of its address)."""
+    """{slug: datetime text} of the tiles of a list page -- "title.123" is how gallery-dl names the picture (the last part of its address).
+    A tile that shows no time of its own gives none."""
     for tile in page.split(TILE)[1:]:
-        tile = tile[:TILE_LENGTH]
+        tile = tile_of(tile)
         href, when = HREF.search(tile), TIME.search(tile)
         if href and when:
             dates[href.group(1).rstrip("/").rsplit("/", 1)[-1]] = when.group(1)

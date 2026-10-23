@@ -200,7 +200,9 @@ class _Source:
         self.seeded = True
         # A look of minutes ago is as good as asking again. The site is asked only when the posts of the snapshot run out (fill starts
         # from its first page then, and what the artist posted meanwhile is counted as new); Refresh on the artist reads it at once.
-        if not self.offline and time.time() - snap.fetched < (FRESH_LOGIN if self.login else FRESH):
+        # (A forum's snapshot made before its pictures had dates is not: the live page brings them, and sorting needs them.)
+        if not self.offline and time.time() - snap.fetched < (FRESH_LOGIN if self.login else FRESH) \
+                and not (self.kind == "xenforo" and any(not m.posted for m in snap.items)):
             self.fresh = self.checked = True
 
     def start_fill(self):
@@ -271,6 +273,7 @@ class _Source:
         if self.seeded:
             # The snapshot's posts are shown already; their links are renewed as they are handed out.
             self.live.update({m.remote_key: m for m in page if m.remote_key in self.known})
+            self._redate()
             if not self.met:
                 # The live pages have not reached a post the snapshot has: the posts before the first
                 # one it has are new -- counted, and kept out of the open gallery (they would push
@@ -297,6 +300,22 @@ class _Source:
             # hundred follows left that many behind. The window is reached: park it; "Load older" reopens and passes these pages.
             self._end()
             self.listing, self.skip = None, self.pages
+
+    def _redate(self):
+        """The snapshot's posts waiting here were sorted by the dates it had; the live page may know more (a forum's pictures had none
+        before): their times are taken from the live copies, so the posts are placed among the other sources' by their real time."""
+        if not any(self.live.get(m.remote_key) is not None and _when(self.live[m.remote_key].posted) != w
+                   for w, m in self.buffer):
+            return
+        last, out = None, collections.deque()
+        for _, m in list(self.buffer):
+            m = self.live.get(m.remote_key, m)
+            when = _when(m.posted)
+            last = when if when is not None else last
+            out.append((last, m))
+        self.buffer = out
+        if out:
+            self.last = last
 
     def _end(self):
         # Ends a gallery-dl process (and frees X's or a forum's turn for a sync).
@@ -596,8 +615,8 @@ def info(gallery_id, number):
             return ask(m)
     got = _once(gallery_id, (gallery_id, number, "info", ""), lambda: ("application/json", json.dumps(get()).encode()))
     data = json.loads(got[1])
-    if data.get("posted") and not m.posted:
-        m.posted = data["posted"]                    # the date is known now: the viewer and the item say so
+    if data.get("posted"):
+        m.posted = data["posted"]                    # the date is known now (the picture's own page: it wins over an estimate): the viewer and the item say so
     return data
 
 

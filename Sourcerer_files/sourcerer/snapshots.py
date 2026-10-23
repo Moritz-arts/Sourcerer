@@ -82,6 +82,11 @@ def save(source_id, items, merge=True):
         if merge:
             old = load(source_id)
             if old:
+                # A look that dates nothing (a sync of a forum: only a gallery pays for dates) does not take away what an earlier one found.
+                dated = {m.remote_key: m.posted for m in old.items if m.posted}
+                for m in items:
+                    if not m.posted and m.remote_key in dated:
+                        m.posted = dated[m.remote_key]
                 have = {m.remote_key for m in items}
                 deepest = max((i for i, m in enumerate(old.items) if m.remote_key in have), default=None)
                 carried = [m for m in old.items[deepest + 1:] if m.remote_key not in have] if deepest is not None else []

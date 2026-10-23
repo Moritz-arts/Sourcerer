@@ -638,6 +638,8 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   (`stayOrder`), or the one marked with *Keep this one*. **Every card is merged on its own button, "Merge into «keeper»", one pair at a time**
   (`twinsMerge`: one `/merge` call, then the list goes on without it; the user's rule, 2026-10-23: "so no mistake can happen") -- there are no
   ticks and no button that merges many (v0.48-v0.50 had both), a card that syncs says so and stays. A new button in this dialog must never act on more than the one card it sits on.
+  The buttons of a card sit in two columns (`.twin .merge-acts`, a grid): *Open* over *Not the same* (red: `--dot-bad`), *Stays* / *Keep this one* over *Merge into* --
+  the keeper has the first row only, so its *Open* and *Stays* line up with the members' *Open* and *Keep this one*.
 - **Logins are made in "Manage your accounts" (`#dlg-accounts`) and nowhere
   else**: one row per login that exists (saved, or being made in a window), one
   under the other (never side by side): dot and name, the fields in the middle,
@@ -700,9 +702,19 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   (before, a forum had no dates at all and its posts alternated with whatever else was waiting). **The hook is installed in `config.load`**:
   gallery-dl builds the pattern of the forums it answers for from `extractor.xenforo` when its extractor module is *imported*, so a module imported
   before the config is read knows none of ours ("Unsupported URL" for every forum -- found with a fake forum, `forum.test` in /etc/hosts and a
-  local server). A forum whose tiles show no time keeps `posted=""` as before. **Checked against a made-up page, not a real forum** -- the
-  tile markup (`itemList-item js-inlineModContainer`, a `<time datetime>` inside) is gallery-dl's marker plus a guess; the viewer's `info()` still
-  gives the date of a picture that has none. **Everything else the forum knows of a picture** (description, who, when, size, views) is asked when the viewer opens it
+  local server). **v0.51's first version read the time of the page's footer for every page's last tile**
+  (the tile ran on into the footer: `tile_of` now cuts a tile at the `</div>` that closes it, `tile_dates` takes a time only from inside) -- "pictures of
+  the 12th were mixed with the 23rd" was a footer's "today". **A tile with no time at all is dated from the picture's own page, but only for the ends**
+  (v0.52, `xenforo._fill_dates`, only where somebody waits -- `net.waiting()`, an artist's own gallery, never a sync): a forum numbers its media as it
+  goes, so the id is a clock that only runs forward; the lowest and highest id of a batch of twenty are read from their pages, then the middle of the
+  widest gap until it is under two days or `ASKS` (7) pages were read, and the pictures between are placed by id -- wrong by no more than the gap they sit
+  in. `_dated` remembers every date by (host, id), so the next listing asks nothing it knows. **A date the page knows later replaces nothing that was
+  exact** (`gallery.info` sets `Media.posted` from the picture's page always: exact wins over an estimate). **Dates must survive the places they pass:**
+  `snapshots.save` keeps a date the old snapshot had for a post when the new look has none (a sync does not date); a seeded source re-keys the posts waiting in
+  its buffer when the live page brings dates (`_Source._redate`: the sort key was fixed at the seed, from a snapshot without them); and a forum snapshot
+  with an undated post is never `fresh` (`seed`), or the live page that brings the dates would not be asked for an hour. A forum whose pages say nothing keeps
+  `posted=""` as before. **Checked against made-up pages, not a real forum** -- the tile markup (`itemList-item js-inlineModContainer`, a `<time datetime>` inside)
+  is gallery-dl's marker plus a guess; the viewer's `info()` still gives the date of a picture that has none. **Everything else the forum knows of a picture** (description, who, when, size, views) is asked when the viewer opens it
   (`xenforo.info`, `/api/gallery/info`, one request through the forum's lane, kept per gallery; a site gets this by having an `info(media)`;
   the date it finds is put on the item): gallery-dl's `metadata` would ask for every picture of a listing page.
 - **A Misskey looks like a Mastodon in the address** (`https://misskey.io/@user`) **and answers nothing a
