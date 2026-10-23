@@ -204,6 +204,47 @@ def index():
     return send_from_directory(config.STATIC, "index.html")
 
 
+# What the page keeps for itself (view, sort order, picture size, hidden sites, ...) lives in Userdata, not in the web view:
+# the window picks a free port at every start and the origin -- and with it localStorage -- changes with the port (pywebview
+# keeps none of it anyway), so every start and every update began with the page's defaults. The page puts its `sourcerer.*`
+# keys back from /api/ui.js before app.js runs and sends every change to /api/ui. Not in config.DEFAULTS: /api/settings never shows it.
+UI_KEY, UI_KEYS, UI_VALUE = "ui_prefs", 80, 8000
+_ui_lock = threading.Lock()
+
+
+def _ui_prefs():
+    try:
+        saved = json.loads(db.get_setting(UI_KEY, "{}"))
+    except ValueError:
+        return {}
+    return saved if isinstance(saved, dict) else {}
+
+
+@app.get("/api/ui.js")
+def ui_script():
+    resp = app.response_class("window.UI_PREFS = %s;" % json.dumps(_ui_prefs()).replace("<", "\\u003c"), mimetype="text/javascript")
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+@app.post("/api/ui")
+def ui_save():
+    sent = request.get_json(silent=True)
+    if not isinstance(sent, dict):
+        abort(400)
+    with _ui_lock:
+        saved = _ui_prefs()
+        for key, value in sent.items():
+            if not isinstance(key, str) or not key.startswith("sourcerer.") or len(key) > 80:
+                continue
+            if value is None:
+                saved.pop(key, None)
+            elif isinstance(value, str) and len(value) <= UI_VALUE and (key in saved or len(saved) < UI_KEYS):
+                saved[key] = value
+        db.set_setting(UI_KEY, json.dumps(saved))
+    return jsonify(ok=True)
+
+
 @app.get("/static/<path:name>")
 def static_file(name):
     return send_from_directory(config.STATIC, name)
@@ -243,7 +284,7 @@ def _same_origin():
 
 # What answers while the master password has not been given: the page itself, the launcher's ping and
 # focus, the lock's own calls, and the reset (the way out of a forgotten password).
-_OPEN = ("/", "/favicon.ico", "/api/ping", "/api/focus", "/api/lock", "/api/unlock", "/api/reset")
+_OPEN = ("/", "/favicon.ico", "/api/ui.js", "/api/ping", "/api/focus", "/api/lock", "/api/unlock", "/api/reset")
 
 
 @app.before_request

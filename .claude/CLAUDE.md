@@ -379,6 +379,14 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
 
 ### Program
 
+- **The page's own preferences live in Userdata, not in the web view** (v0.54; `server._ui_prefs`, `/api/ui.js`, `/api/ui`, the first lines of `app.js`):
+  the window listens on a free port picked at every start, so its origin -- and `localStorage` with it -- was new every time, and pywebview keeps
+  no storage at all in its default private mode: the view, the sort orders, the picture size, the hidden sites and the open artist were back to the
+  defaults at every start and so after every update. Every `sourcerer.*` key of `localStorage` is mirrored into the setting `ui_prefs` (not in
+  `config.DEFAULTS`, so `/api/settings` never shows it; at most 80 keys of 8000 characters): the server's copy is put back by `/api/ui.js` *before*
+  app.js runs (a script tag, so the reads at load see it), keys only the browser has are sent once, and `Storage.prototype.setItem` / `removeItem` send
+  every later change (400 ms debounce, flushed on `pagehide`). A new page preference needs nothing but a `sourcerer.`-prefixed key; one that must not
+  reach Userdata gets another prefix. Reset deletes it with the other settings. Checked with two ports and a fresh browser profile.
 - **The master password gates the server, not just the page** (`security.py`, `server._locked`): set in
   Settings > Security it is kept as a salted PBKDF2 hash in the settings table (a key outside
   `config.DEFAULTS`, so `/api/settings` never shows it); until somebody has unlocked, every call but
@@ -400,7 +408,7 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   `_add` takes either kind from either list), pixiv (`user/<id>/following`, public and private list), Fanbox
   (`creator.listFollowing` and `plan.listSupporting`: the second is a bonus, its failure is ignored), Fantia (the plans
   page `mypage/users/plans`, scraped like gallery-dl does; a fanclub the table `followed` knows costs no request for its
-  name) and X (gallery-dl `-j` on `x.com/id:<twid>/following`: **one go, the whole list**, so `FOLLOWS_HOURS` -- a module's
+  name) and XenForo (v0.54, `xenforo.following`: the forum's own page `index.php?members/<me>/following/`, name and picture of every row come from the page itself so a member costs no request; the login's member id is read from `index.php?account/` at every look and never kept; a page with fewer rows than the one before is the last; a bot check answers 200 with a page of its own, so `_wall` raises `SlowDown` when a page has neither the forum's stylesheet nor `data-xf-init`; **`xenforo.match` accepts `members/<digits>` -- a forum that leaves the name out of the address -- or `follows._add` drops every member of such a forum as "other site"**; written against two real forums, a nameless one not seen in the gallery yet) and X (gallery-dl `-j` on `x.com/id:<twid>/following`: **one go, the whole list**, so `FOLLOWS_HOURS` -- a module's
   minimum between two looks, X 23 h, Fanbox/Fantia 11 h -- keeps it to once a day; **written from gallery-dl's source, not run
   against a real X login**) hand out pages of `{url, name, avatar}`
   through `following(key)` -- it yields `(list name, pages)` -- and each account becomes a card once.
@@ -413,7 +421,10 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   with no trace. **A look that read no accounts does not hold the next one back** (`follows_seen:<key>`; gap `RETRY_HOURS` instead of
   `FOLLOWS_HOURS`): v0.34's silent empty look for X stamped a day and v0.35's fallback never ran.
   **A listed card is in no automatic sweep**: `enqueue(None)` (the automatic sync, the scan at start) skips `listed = 1`, because a
-  thousand pixiv follows read in the background are a thousand requests nobody asked for. **"All artists" (`gallery._Gallery`)
+  thousand pixiv follows read in the background are a thousand requests nobody asked for. **The one exception is a card never read at all** (`last_sync IS NULL`: v0.54): a sweep scans it once (mode `scan`, one page per source, within
+  `net.scan_room`'s half of the day), and so does the look that made it (`follows._look` -> `enqueue(asked, auto=True, mode="scan")`, also the cards a
+  follow joined to an existing card) -- v0.53's cards sat empty in the Artists view. Never a *refresh* (four pages of each) for hundreds of cards on a login:
+  the first version of this change did, and 291 new X cards would have spent X's whole day on the import. **"All artists" (`gallery._Gallery`)
   takes every card, listed ones too** (the user: "All artists" means all, and Patreon's five creators were missing in v0.36); the load is
   kept down by its time window and, since v0.43, by never asking a login site's accounts at all (it shows their snapshots; see *All artists
   never asks a login site*). Only **Refresh all** reaches them (`everyone`, only when the
