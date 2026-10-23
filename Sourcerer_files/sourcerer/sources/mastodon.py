@@ -192,7 +192,7 @@ def following(key):
                 log.warning("%s: the list of followed accounts was cut at %d pages", server, MAX_FOLLOW_PAGES)
             yield [{"url": a["url"], "name": re.sub(r":[\w+-]+:", "", a.get("display_name") or "").strip() or a.get("username", ""),
                     "avatar": "" if (a.get("avatar_static") or "").endswith("/missing.png") else a.get("avatar_static") or "",
-                    "links": _links(a)}
+                    "links": _links(a), "mentions": _mentions(a)}
                    for a in found if a.get("url")]
     yield "", pages()
 
@@ -202,6 +202,11 @@ def _links(account):
     friends and collaborators as often as itself."""
     from . import profile_links
     return profile_links([f.get("value") for f in account.get("fields") or []])
+
+
+def _mentions(account):
+    from . import bio_links
+    return bio_links(account.get("note"))
 
 
 def profile(url):
@@ -216,7 +221,7 @@ def profile(url):
             "handle": "@%s@%s" % (account.get("username", ""), server),
             # An account without a picture gets the server's placeholder.
             "avatar": "" if avatar.endswith("/missing.png") else avatar,
-            "links": _links(account)}
+            "links": _links(account), "mentions": _mentions(account)}
 
 
 _ids = None          # "server/user" -> the account's id, kept in the settings (mastodon_ids)

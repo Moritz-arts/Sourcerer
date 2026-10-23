@@ -155,6 +155,8 @@ input[type=range] { accent-color: var(--fill-accent); cursor: pointer; }
 .br-order select { min-width: 0; width: auto; padding: 3px 4px; font-size: 12px; }
 #br-sort { flex: 0 0 106px; }
 #br-count { flex: 1; }
+.br-foot { display: flex; flex-wrap: wrap; gap: 6px; flex: none; }
+.br-foot .br-add { flex: 1 1 110px; min-width: 0; white-space: nowrap; }
 .br-add { display: flex; align-items: center; justify-content: center; gap: 6px; flex: none; padding: 7px 8px; width: 100%;
   border: 1.5px dashed var(--border-strong); border-radius: var(--radius); background: transparent; color: var(--text-muted); font-size: 13px; }
 .br-add:hover:not(:disabled) { border-color: var(--fill-accent); color: var(--text-accent); background: transparent; }
@@ -639,3 +641,6 @@ details summary { cursor: pointer; margin: 12px 0 6px; }
 @media (max-width: 900px) { .av-card { grid-template-columns: 1fr; } }
 .rec-box { max-width: 520px; margin: 12vh auto 0; text-align: center; color: var(--text-secondary); padding: 0 20px; }
 .rec-box h2 { color: var(--text-primary); font-size: 17px; font-weight: 500; margin: 12px 0 6px; }
+
+.merge-list.twins { max-height: min(58vh, 520px); gap: 10px; }
+.twin { display: flex; flex-direction: column; gap: 2px; padding: 6px; border: .5px solid var(--border); border-radius: 8px; flex: none; }

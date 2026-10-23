@@ -389,7 +389,7 @@ function removeArtist(a) {
 // Accounts the sites did not show to be one artist (the follows come in as one card each): the open card and the ones
 // ticked here become one. The card marked "Stays" gets every source and file, the others are gone. There is no further
 // question -- the button at the bottom is the confirmation, so several cards go in one go.
-var M = { from: 0, picked: [], keep: 0, key: "", names: [], handles: [], stems: [], links: [], urls: [], suggested: [], why: {} };
+var M = { from: 0, picked: [], keep: 0, me: null, suggested: [], why: {} };
 
 // Two names are one when only what is no letter or digit differs: emoji, spaces, marks, width, case
 // ("👹 青林檎テル" is "青林檎テル"). The base leaves out a "(handle)" at the end, which a card gets when another had its name.
@@ -443,28 +443,42 @@ function linksOf(a) {
   });
   return out;
 }
+// The accounts a card's bios name (sources.bio_links), lower-cased: only a hint -- a bio names friends as often as the artist.
+function mentionsOf(a) {
+  var out = [];
+  a.sources.forEach(function (s) {
+    try { (JSON.parse(s.mentions || "[]") || []).forEach(function (u) { out.push(String(u).toLowerCase()); }); } catch (e) {}
+  });
+  return out;
+}
 function urlsOf(a) { return a.sources.map(function (s) { return String(s.url).toLowerCase(); }); }
-// How likely b is the open card's artist: 6 a profile names the other's account, 5 a name in common (the name a site shows
-// counts), 4 the same account name, 3 the same but for the digits at its end, 2 a name that is the other's account name,
-// 1 one name inside the other. 0: nothing.
-function sameness(b) {
-  var nb = namesOf(b), hb = handlesOf(b), sb = stemsOf(hb), kb = nameKey(b.name);
-  var theirs = urlsOf(b), mine = M.urls || [];
+// Everything the evidence below needs of one card, made once.
+function profileOf(a) {
+  var handles = handlesOf(a);
+  return { a: a, key: nameKey(a.name), names: namesOf(a), handles: handles, stems: stemsOf(handles), links: linksOf(a), mentions: mentionsOf(a), urls: urlsOf(a) };
+}
+// How likely two cards are one artist: 6 a profile names the other's account, 5.5 the bios name each other, 5 a name in common
+// (the name a site shows counts), 4.5 one bio names the other, 4 the same account name, 3 the same but for the digits at its end,
+// 2 a name that is the other's account name, 1 one name inside the other. 0: nothing.
+function likeness(p, q) {
   var has = function (list) { return function (x) { return list.indexOf(x) >= 0; }; };
-  if (M.links.some(has(theirs)) || linksOf(b).some(has(mine))) return 6;
-  if (M.names.some(has(nb))) return 5;
-  if (M.handles.some(has(hb))) return 4;
-  if (M.stems.some(has(sb)) || M.stems.some(has(hb)) || M.handles.some(has(sb))) return 3;
-  if (M.names.some(has(hb)) || nb.some(has(M.handles))) return 2;
-  var lo = M.key.length < kb.length ? M.key : kb, hi = lo === M.key ? kb : M.key;
+  if (p.links.some(has(q.urls)) || q.links.some(has(p.urls))) return 6;
+  var pm = p.mentions.some(has(q.urls)), qm = q.mentions.some(has(p.urls));
+  if (pm && qm) return 5.5;
+  if (p.names.some(has(q.names))) return 5;
+  if (pm || qm) return 4.5;
+  if (p.handles.some(has(q.handles))) return 4;
+  if (p.stems.some(has(q.stems)) || p.stems.some(has(q.handles)) || p.handles.some(has(q.stems))) return 3;
+  if (p.names.some(has(q.handles)) || q.names.some(has(p.handles))) return 2;
+  var lo = p.key.length < q.key.length ? p.key : q.key, hi = lo === p.key ? q.key : p.key;
   return lo.length >= 3 && lo.length * 2 >= hi.length && hi.indexOf(lo) >= 0 ? 1 : 0;
 }
-var WHY = { 6: "its profile names the other account", 5: "the same name", 4: "the same account name", 3: "the same account name but for the numbers",
-            2: "a name that is the other's account name", 1: "a similar name" };
+function sameness(b) { return likeness(M.me, profileOf(b)); }
+var WHY = { 6: "its profile names the other account", 5.5: "their bios name each other", 5: "the same name", 4.5: "a bio names the other account",
+            4: "the same account name", 3: "the same account name but for the numbers", 2: "a name that is the other's account name", 1: "a similar name" };
 function openMerge(a) {
   closeMenu();
-  M = { from: a.id, picked: [], keep: 0, key: nameKey(a.name), names: namesOf(a), handles: handlesOf(a), stems: stemsOf(handlesOf(a)), links: linksOf(a),
-        urls: urlsOf(a), suggested: [], why: {} };
+  M = { from: a.id, picked: [], keep: 0, me: profileOf(a), suggested: [], why: {} };
   var scored = S.artists.filter(function (b) { return b.id !== a.id; })
     .map(function (b) { return [sameness(b), b]; }).filter(function (x) { return x[0]; })
     .sort(function (x, y) { return y[0] - x[0] || x[1].name.localeCompare(y[1].name); }).slice(0, 10);
@@ -534,6 +548,126 @@ $("merge-go").addEventListener("click", function () {
     if (done.length) toast(plural(done.length, "card") + " merged into " + into.name + ".");
   });
 });
+
+// ---- merge sources: every likely twin at once --------------------------------------------
+// The same evidence as above, over all cards: groups of cards that look like one artist, each with the card that stays and the
+// ones that go into it. Evidence of 4 and up (a profile or a bio names the other account, the same name or account name) is
+// ticked beforehand, weaker evidence is only offered, and nothing happens before the button. Two cards with an account on the
+// same site are never offered (two pixiv accounts are more likely two people, whatever their names say).
+var ONE_PER_SITE = ["bluesky", "x", "pixiv", "patreon", "fanbox", "fantia"];
+var TICKED_FROM = 4, MAX_SHARERS = 8;
+var C = { groups: [] };
+function oneKinds(a) { return a.sources.map(function (s) { return s.kind; }).filter(function (k) { return ONE_PER_SITE.indexOf(k) >= 0; }); }
+// Who stays: a card the user made over one that came with a list, then the one with most downloads, auto-download, most accounts.
+function stayRank(a) { return [a.listed ? 0 : 1, a.file_count || 0, a.auto_download ? 1 : 0, a.sources.length]; }
+function stayOrder(x, y) {
+  var rx = stayRank(x), ry = stayRank(y);
+  for (var i = 0; i < rx.length; i++) if (rx[i] !== ry[i]) return ry[i] - rx[i];
+  return x.name.localeCompare(y.name);
+}
+function findTwins() {
+  var ps = S.artists.map(profileOf), at = Object.create(null), owner = Object.create(null), pairs = Object.create(null);
+  ps.forEach(function (p, i) {
+    p.kinds = oneKinds(p.a);
+    p.urls.forEach(function (u) { owner[u] = i; });
+    p.names.concat(p.handles, p.stems).forEach(function (k) { var l = at[k] || (at[k] = []); if (l.indexOf(i) < 0) l.push(i); });
+  });
+  function pair(i, j) { if (i !== j) pairs[Math.min(i, j) + "," + Math.max(i, j)] = 1; }
+  Object.keys(at).forEach(function (k) {
+    var ids = at[k];
+    if (ids.length < 2 || ids.length > MAX_SHARERS) return;              // a name many cards have says nothing
+    for (var x = 0; x < ids.length; x++) for (var y = x + 1; y < ids.length; y++) pair(ids[x], ids[y]);
+  });
+  ps.forEach(function (p, i) { p.links.concat(p.mentions).forEach(function (u) { if (u in owner) pair(i, owner[u]); }); });
+  var edges = [], parent = ps.map(function (_, i) { return i; });
+  function root(i) { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; }
+  Object.keys(pairs).forEach(function (k) {
+    var ij = k.split(","), i = +ij[0], j = +ij[1];
+    if (ps[i].kinds.some(function (x) { return ps[j].kinds.indexOf(x) >= 0; })) return;
+    var s = likeness(ps[i], ps[j]);
+    if (s >= 2) { edges.push({ i: i, j: j, s: s }); parent[root(i)] = root(j); }
+  });
+  var by = Object.create(null);
+  edges.forEach(function (e) { (by[root(e.i)] = by[root(e.i)] || []).push(e); });
+  return Object.keys(by).map(function (r) {
+    var es = by[r], ids = [];
+    es.forEach(function (e) { [e.i, e.j].forEach(function (i) { if (ids.indexOf(i) < 0) ids.push(i); }); });
+    var cards = ids.map(function (i) { return ps[i].a; }).sort(stayOrder), keep = cards[0];
+    var members = cards.slice(1).map(function (a) {
+      var mine = es.filter(function (e) { return ps[e.i].a === a || ps[e.j].a === a; }).sort(function (x, y) { return y.s - x.s; })[0];
+      var other = ps[ps[mine.i].a === a ? mine.j : mine.i].a;
+      return { id: a.id, s: mine.s, on: mine.s >= TICKED_FROM, why: WHY[mine.s] + (other === keep ? "" : " (" + other.name + ")") };
+    }).sort(function (x, y) { return y.s - x.s; });
+    return { keep: keep.id, members: members, best: members.reduce(function (m, x) { return Math.max(m, x.s); }, 0) };
+  }).sort(function (x, y) { return y.best - x.best || artistById(x.keep).name.localeCompare(artistById(y.keep).name); });
+}
+function openTwins() {
+  C = { groups: findTwins() };
+  renderTwins();
+  $("dlg-twins").showModal();
+}
+function renderTwins() {
+  var box = $("twins-list"), top = box.scrollTop, n = 0, groups = 0;
+  function row(a, on, text, tail) {
+    return '<div class="merge-row' + (on ? " on" : "") + '"><button type="button" class="br-item" data-id="' + a.id + '" aria-pressed="' + on + '">' +
+      '<span class="tick">' + (on ? icon("tick") : "") + "</span>" + avatarHtml(a) +
+      '<span class="br-name" title="' + esc(a.name) + '">' + esc(a.name) + (text ? ' <small class="why">' + esc(text) + "</small>" : "") + "</span>" +
+      '<span class="br-n">' + (a.sources.filter(function (s) { return s.supported; }).length || "") + "</span></button>" + tail + "</div>";
+  }
+  box.innerHTML = C.groups.map(function (g, gi) {
+    var stay = artistById(g.keep), ticked = g.members.filter(function (m) { return m.on; }).length;
+    n += ticked; groups += ticked ? 1 : 0;
+    return '<div class="twin" data-g="' + gi + '">' + row(stay, true, "", '<span class="keeps">Stays</span>') +
+      g.members.map(function (m) {
+        var a = artistById(m.id);
+        return row(a, m.on, m.why, '<button type="button" class="keep" data-keep="' + a.id + '">Keep this one</button>');
+      }).join("") + "</div>";
+  }).join("") || '<p class="hint">No cards that look like one artist.</p>';
+  box.scrollTop = top;
+  $("twins-go").disabled = !n;
+  $("twins-go").textContent = n ? "Merge " + plural(n, "card") : "Merge";
+  $("twins-sum").textContent = C.groups.length ? (n ? plural(n, "card") + " into " + plural(groups, "artist") + " · " : "") + plural(C.groups.length, "group") + " found" : "";
+}
+$("twins-list").addEventListener("click", function (e) {
+  var g = e.target.closest("[data-g]"), k = e.target.closest("[data-keep]"), b = e.target.closest("[data-id]");
+  if (!g) return;
+  g = C.groups[+g.dataset.g];
+  if (k) {                                           // another card stays: the old keeper takes its place among those that go
+    var id = +k.dataset.keep, was = g.keep, m = g.members.filter(function (x) { return x.id === id; })[0];
+    if (!m) return;
+    g.members[g.members.indexOf(m)] = { id: was, s: m.s, on: true, why: m.why };
+    g.keep = id;
+  } else if (b) {
+    var m2 = g.members.filter(function (x) { return x.id === +b.dataset.id; })[0];
+    if (!m2) return;
+    m2.on = !m2.on;
+  } else return;
+  renderTwins();
+});
+$("twins-go").addEventListener("click", function () {
+  var jobs = [], done = [], into = {}, failed = [];
+  C.groups.forEach(function (g) { g.members.forEach(function (m) { if (m.on) jobs.push([m.id, g.keep]); }); });
+  if (!jobs.length) return;
+  $("twins-go").disabled = true;
+  jobs.reduce(function (p, j) {                      // one after the other; a card that is syncing says so and the rest goes on
+    return p.then(function () {
+      return api("POST", "/api/artists/" + j[0] + "/merge", { into: j[1] }).then(function () { done.push(j[0]); into[j[0]] = j[1]; },
+        function (err) { failed.push((artistById(j[0]) || {}).name + ": " + (err.message || err)); });
+    });
+  }, Promise.resolve()).then(function () {
+    done.concat(done.map(function (id) { return into[id]; }), 0).forEach(galDrop);
+    if (G && !G.all && (done.indexOf(G.key) >= 0)) browseClose();
+    if (G && G.all) G.stale = true;
+    if (into[S.brArtist]) S.brArtist = into[S.brArtist];
+    lastKey = "";
+    return load();
+  }).then(function () {
+    $("dlg-twins").close();
+    if (done.length) toast(plural(done.length, "card") + " merged.");
+    if (failed.length) toast(plural(failed.length, "card") + " not merged -- " + failed[0], true);
+  });
+});
+$("br-combine").addEventListener("click", openTwins);
 
 function openFolder(a) { api("POST", "/api/open", { target: "artist", artist_id: a.id }).catch(fail); }
 

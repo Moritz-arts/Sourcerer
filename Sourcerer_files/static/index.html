@@ -141,7 +141,10 @@
         </select>
       </div>
       <div id="br-list" class="br-list"></div>
-      <button type="button" id="br-add" class="br-add" title="New card (Ctrl+N)"><svg class="ic"><use href="#i-plus"/></svg> Add artist</button>
+      <div class="br-foot">
+        <button type="button" id="br-add" class="br-add" title="New card (Ctrl+N)"><svg class="ic"><use href="#i-plus"/></svg> Add artist</button>
+        <button type="button" id="br-combine" class="br-add" title="Find cards that are the same artist and merge them"><svg class="ic"><use href="#i-merge"/></svg> Merge sources</button>
+      </div>
     </aside>
     <div class="br-main">
       <div class="br-head">
@@ -343,6 +346,24 @@
   <div class="dlg-foot">
     <span id="merge-sum" class="hint grow"></span>
     <button type="button" id="merge-go" class="primary" disabled>Merge</button>
+  </div>
+</dialog>
+
+<!-- Merge sources: the cards that look like one artist, found over all of them; the ticked ones go into the card that stays. -->
+<dialog id="dlg-twins" class="dlg">
+  <div class="dlg-head">
+    <span>Merge sources</span><span class="grow"></span>
+    <button type="button" class="icon flat" data-close aria-label="Close"><svg class="ic"><use href="#i-x"/></svg></button>
+  </div>
+  <div class="dlg-body">
+    <p class="hint">Cards that look like one artist: a profile or a bio names the other account, the same name, the same account name.
+      Ticked cards become one card with the one marked Stays; untick what is not the same artist. Two cards with an account on the same
+      site are never offered. Nothing merges before the button.</p>
+    <div id="twins-list" class="merge-list twins"></div>
+  </div>
+  <div class="dlg-foot">
+    <span id="twins-sum" class="hint grow"></span>
+    <button type="button" id="twins-go" class="primary" disabled>Merge</button>
   </div>
 </dialog>
 

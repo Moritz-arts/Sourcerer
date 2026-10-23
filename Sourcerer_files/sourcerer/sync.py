@@ -636,10 +636,15 @@ def _ordered_sources(con, artist):
 
 
 def _note_links(source_id, info):
-    """What the profile of a source names (sources.profile_links) -- combining cards uses it."""
-    if isinstance(info, dict) and "links" in info:
+    """What the profile of a source names (sources.profile_links) -- combining cards uses it -- and what its bio names
+    (sources.bio_links), which only the merge dialog suggests by."""
+    if not isinstance(info, dict):
+        return
+    cols = [c for c in ("links", "mentions") if c in info]
+    if cols:
         with db.connect() as con:
-            con.execute("UPDATE sources SET links = ? WHERE id = ?", (json.dumps(info["links"]) if info["links"] else None, source_id))
+            con.execute("UPDATE sources SET %s WHERE id = ?" % ", ".join(c + " = ?" for c in cols),
+                        [json.dumps(info[c]) if info[c] else None for c in cols] + [source_id])
 
 
 def _set_avatar(artist_id, url, headers=None):

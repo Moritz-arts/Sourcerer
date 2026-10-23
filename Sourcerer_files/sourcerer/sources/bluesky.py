@@ -213,14 +213,17 @@ def normalize(url):
 
 
 def profile(url):
+    from . import bio_links
     actor = _URL.match(url.strip()).group(1)
     p = _get("app.bsky.actor.getProfile", {"actor": actor})
     return {"name": p.get("displayName") or p.get("handle") or "",
-            "handle": "@" + p.get("handle", actor), "avatar": p.get("avatar") or ""}
+            "handle": "@" + p.get("handle", actor), "avatar": p.get("avatar") or "",
+            "mentions": bio_links(p.get("description"))}
 
 
 def following(key):
     """(list name, pages) of the accounts the login follows: [{"url", "name", "avatar"}], newest follow first."""
+    from . import bio_links
     did = (accounts.secrets("bluesky") or {}).get("did")
     if not did:
         return
@@ -231,7 +234,7 @@ def following(key):
             page = _get("app.bsky.graph.getFollows", {"actor": did, "limit": PAGE, "cursor": cursor})
             # "handle.invalid": an account whose handle no longer resolves has no profile address.
             yield [{"url": "https://bsky.app/profile/" + f["handle"], "avatar": f.get("avatar") or "",
-                    "name": f.get("displayName") or f["handle"]}
+                    "name": f.get("displayName") or f["handle"], "mentions": bio_links(f.get("description"))}
                    for f in page.get("follows") or [] if f.get("handle") and not f["handle"].endswith(".invalid")]
             # The list ends where the cursor does: a page can be empty (accounts left out after paging)
             # with more behind it. A cursor that repeats would never end.

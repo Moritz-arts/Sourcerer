@@ -3,8 +3,9 @@
     KIND, LABEL          the stored kind and its name on screen
     match(url) -> bool   whether a profile URL belongs to this site
     normalize(url)       the profile URL behind any page of it (a post, /media, ...)
-    profile(url)         {"name", "handle", "avatar", "links"}: who the account is; links (optional): the other
-                         accounts its own profile names -- see profile_links
+    profile(url)         {"name", "handle", "avatar", "links", "mentions"}: who the account is; links (optional): the other
+                         accounts its own profile names -- see profile_links; mentions (optional): the ones its bio
+                         names -- see bio_links
     pages(url)           yields lists of Media, newest first, one API page each
     MAX_NEW (optional)   at most this many new files per sync; the next carries on
     account_key(url)     the login (accounts.py) a source uses, if the site has logins
@@ -211,6 +212,37 @@ def profile_links(*things):
                 if url not in out:
                     out.append(url)
     return out[:MAX_LINKS]
+
+
+_TAG = re.compile(r"<[^>]*>")
+_HREF = re.compile(r"""href=["']([^"']+)["']""", re.I)
+# A bio writes "x.com/name" without the scheme and "@name@server" for the fediverse; both name an account all the same.
+_BARE = re.compile(r"(?<![\w@./:-])((?:www\.)?(?:x\.com|twitter\.com|bsky\.app|pixiv\.net|fantia\.jp|patreon\.com)/[^\s\"'<>)\]]+"
+                   r"|[\w-]+\.fanbox\.cc\b/?)", re.I)
+_FEDI = re.compile(r"(?<![\w@.])@([\w.-]{2,30})@((?:[\w-]+\.)+[a-z]{2,})\b", re.I)
+
+
+def bio_links(*things):
+    """The accounts a bio (its text or HTML) names: the weaker sign, next to profile_links. An artist often says where else they
+    are, but a bio names friends and collaborators as often -- so these only *suggest* (the merge dialog); nothing combines by
+    them. Same form as profile_links; things: strings (text or HTML), lists and dicts of them."""
+    texts, todo = [], list(things)
+    while todo:
+        t = todo.pop(0)
+        if isinstance(t, dict):
+            todo += list(t.values())
+        elif isinstance(t, (list, tuple)):
+            todo += list(t)
+        elif isinstance(t, str):
+            texts.append(t)
+    found = []
+    for t in texts:
+        found += _HREF.findall(t)                           # HTML: the address is in the href, the shown text may be cut short
+        plain = html.unescape(_TAG.sub(" ", t))
+        found.append(plain)
+        found += ["https://" + m.group(1) for m in _BARE.finditer(plain)]
+        found += ["https://%s/@%s" % (m.group(2), m.group(1)) for m in _FEDI.finditer(plain)]
+    return profile_links(found)
 
 
 _profiles = {}            # url -> (when, answer): the card dialog, Save and the avatar ask alike

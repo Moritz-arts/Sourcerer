@@ -461,8 +461,14 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   And **never on the same site twice**, whatever the evidence (two pixiv accounts are more likely two people, also
   when one names the other) -- a name shared by a listed card and two cards the user made is left alone. The user's own cards are
   never merged away; they only gain a source. The merge dialog's *Possibly the same artist* says why (`WHY`): 6 a profile names the
-  other account, 5 a name in common (the names the sites show count), 4 the same account name, 3 the same but for the numbers
-  at its end, 2 a name that is the other's account name, 1 a similar name.
+  other account, 5.5 the bios name each other, 5 a name in common (the names the sites show count), 4.5 one bio names the other,
+  4 the same account name, 3 the same but for the numbers at its end, 2 a name that is the other's account name, 1 a similar name.
+  **A bio only suggests, it never combines** (v0.48, `sources.bio_links`, column `sources.mentions`, filled with `links` by
+  `sync._note_links` and the follow lists: Mastodon `note`, Misskey `description`, Bluesky `description`, pixiv `comment` /
+  `userComment`, Fanbox `description`, X's description and its expanded links; Patreon and Fantia give none): a bio names friends
+  and collaborators as often as the artist, so `follows._Twins` never reads `mentions` -- only `likeness` in `app.js` does, for
+  the dialogs. A bio names an account by its address, without the scheme (`x.com/name`) or as `@name@server`; a bare `@name` is
+  not read (which site?). `follow_mentions_v1` reads the lists to their end once more so cards imported before learn theirs.
 - **A card is called by its @name** (`follows.card_name`, `rename_listed`): the account name in the address of its first account
   on a site that has one (order of `HANDLE_KINDS`: X, Bluesky, Mastodon, Misskey, Patreon, Fanbox, forum), without the digits at
   its end when two accounts agree on the name but for them; a card whose accounts have no @name (pixiv) keeps the name the site
@@ -610,6 +616,13 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   once everything but letters and digits is gone (`nameKey`: emoji, spaces, width, case -- "👹 青林檎テル"
   is "青林檎テル"), same but for a trailing "(handle)", a shared account name in the links, one name inside
   the other. It is a suggestion only; nothing merges by itself.
+  **Merge sources** (the button beside *Add artist*, `#dlg-twins`, `findTwins`) is the same evidence over all cards at once
+  (`likeness(profileOf(a), profileOf(b))`): candidate pairs come from an index (names, account names, stems, the addresses a profile
+  or a bio names; a name that more than `MAX_SHARERS` cards have is skipped -- no all-pairs walk over a thousand cards), pairs that
+  share a one-account-per-artist site (`ONE_PER_SITE`: Bluesky, X, pixiv, Patreon, Fanbox, Fantia) are never offered, the
+  rest become groups (connected pairs of evidence 2 and up). The card that stays is the user's own, then the one with most downloads
+  (`stayOrder`); a member is ticked beforehand from evidence 4 (`TICKED_FROM`), the rest is only offered. The button merges one card
+  after the other (`/merge`), goes on when one fails (a card that syncs) and says how many did not merge.
 - **Logins are made in "Manage your accounts" (`#dlg-accounts`) and nowhere
   else**: one row per login that exists (saved, or being made in a window), one
   under the other (never side by side): dot and name, the fields in the middle,
