@@ -41,6 +41,8 @@ OPTIONS = {"sleep-request": "2.0-5.0", "metadata": False, "tls12": False, "retri
 # none, says null).
 FIELDS = {"url": "{_url!j}", "id": "{id!j}", "title": "{filename!j}", "ext": "{extension!j}", "date": "{date!j}"}
 LOGIN = ("recommended", "Most forums show their media to members only.")
+FOLLOWS_HOURS = 11       # follows.py reads a forum's list of followed members at most this often (Fanbox's and Fantia's pace)
+MAX_FOLLOW_PAGES = 200   # 4 000 follows: a forum that never ends its list is the forum's fault
 
 
 def _parts(url):
@@ -160,6 +162,119 @@ def profile(url):
     avatar = re.search(r'<img src="([^"]+/avatars/[lmo]/[^"]+)"', text)
     return {"name": name, "handle": handle,
             "avatar": urllib.parse.urljoin(url, html.unescape(avatar.group(1))) if avatar else ""}
+
+
+# ---- the members this login follows ----------------------------------------------------------------
+
+# A follow list's rows: the link to a name and the link to that member's profile picture each carry
+# `data-user-id`, so a row is put together by that id and not by where the two sit on the page -- a theme moves
+# them apart, and a member without a picture has no picture link at all (the forum draws their initials). The
+# login's own name sits on the same page, in the account bar, so rows come from the `username` links and the
+# login's own id is left out.
+_LINK = re.compile(r"<a\b[^>]*>", re.I)
+_ID = re.compile(r'data-user-id="(\d+)"')
+_HREF = re.compile(r'href="([^"]+)"')
+# The login's own member id, from the account page: `members/<name>.<id>`, or `members/<id>` on a
+# forum that does not put the name in the address (shotaworld.com).
+_ME = re.compile(r"members/([a-z0-9_.-]+\.\d+|\d+)", re.I)
+# A forum page is a forum page: it loads its own stylesheet and carries XenForo's own markers. The bot check
+# answers 200 with a page of its own -- a title of "<host> | Verification", no rows -- so nothing raises and an
+# empty list would be read as "this account follows nobody".
+_FORUM = re.compile(r"css\.php\?css=public|data-xf-init", re.I)
+
+
+def _wall(text, host):
+    """Stop when the answer is the forum's guard instead of the page: the login ran out, or Sourcerer is being
+    checked. `net.get_text` cannot tell the two apart -- a check answers 200 with a page that has neither the
+    forum's stylesheet nor XenForo's markers."""
+    if not _FORUM.search(text):
+        raise net.SlowDown("%s answered with a page of its own instead of the forum's: a bot check, or a login "
+                           "that ran out" % host)
+
+
+def _row_name(text, after):
+    """The name inside a link: the template's tags off, the entities of a name with accents turned back."""
+    end = text.find("</a>", after)
+    return html.unescape(re.sub(r"<[^>]+>", "", text[after:end] if end > after else "")).strip()
+
+
+def _row_picture(window, base):
+    """The biggest profile picture a row links: XenForo puts the small one in `src` and a bigger one in `srcset` as
+    its 2x. A member without a picture has none, and there is nothing to store."""
+    found = re.search(r'srcset="([^"]+)"', window) or re.search(r'src="([^"]+)"', window)
+    if not found:
+        return ""
+    biggest = found.group(1).split(",")[-1].strip().split()          # the last entry of a srcset is the largest
+    return urllib.parse.urljoin(base, html.unescape(biggest[0])) if biggest else ""
+
+
+def _rows(text, base, mine):
+    """Every member a follow list names, in the order the page has them: [(profile address, name, picture)].
+    `mine` is the login's own id -- the account bar names it on the same page, and it is not a follow."""
+    named, picture = {}, {}
+    for link in _LINK.finditer(text):
+        tag = link.group(0)
+        who = _ID.search(tag)
+        if not who:
+            continue
+        uid = who.group(1)
+        end = text.find("</a>", link.end())
+        window = text[link.end():end] if end > link.end() else ""
+        if 'class="username' in tag:
+            href = _HREF.search(tag)
+            if href and uid not in named:
+                named[uid] = (urllib.parse.urljoin(base, html.unescape(href.group(1))),
+                              _row_name(text, link.end()))
+        elif 'class="avatar' in tag and uid not in picture:
+            picture[uid] = _row_picture(window, base)
+    return [(u, n, picture.get(uid, "")) for uid, (u, n) in named.items() if uid != mine]
+
+
+def _member_of_login(base, host):
+    """Which member the login is (`slug.id`): a follow list is a page of *someone's* follows, and a forum names the
+    login nowhere else. `index.php?account/` says it -- one request per look, and it is not kept, because the same
+    forum can be logged in as another account the next day and a kept id would then read that account's list."""
+    text, _final = net.get_text("%s/index.php?account/" % base)
+    who = _ME.search(text)
+    if not who:
+        _wall(text, host)
+        raise net.SlowDown("%s did not say which member the login is: log in again in Manage Accounts" % host)
+    return who.group(1)
+
+
+def following(key):
+    """(list name, pages) of the members this login follows: the page the follow list is on, the address a person
+    clicks (`index.php?members/<me>/following/`). A forum puts the route in the query and prints no pagination for
+    this list at all, so a page with fewer rows than the page before it is the last -- the forum's own end, not an
+    empty page -- and the walk has a page cap. A row costs no extra request: its name and its profile picture come
+    from the page it is listed on, and both are keyed by the id the row carries."""
+    base = ((accounts.load(key) or {}).get("base") or ("https://" + key.split(":", 1)[1])).rstrip("/")
+    host = urllib.parse.urlsplit(base).hostname or key
+
+    def pages():
+        me = _member_of_login(base, host)
+        mine = me.rsplit(".", 1)[-1]
+        full, seen = 0, set()
+        for page in range(1, MAX_FOLLOW_PAGES + 1):
+            # `&` before `page=`: the route lives in the query (`index.php?members/...`), the form every XenForo
+            # answers even when its links use friendly URLs (see _PATH).
+            url = "%s/index.php?members/%s/following/&" % (base, me)
+            if page > 1:
+                url += "page=%d" % page
+            text, _final = net.get_text(url)
+            rows = [r for r in _rows(text, base, mine) if r[0].lower() not in seen]
+            if not rows:
+                _wall(text, host)              # a challenge page has no rows: it does not mean "follows nobody"
+                break
+            seen.update(r[0].lower() for r in rows)
+            yield [{"url": u, "name": n, "avatar": p} for u, n, p in rows]
+            if full and len(rows) < full:
+                break                          # no pagination printed: a page shorter than the one before is the last
+            full = max(full, len(rows))
+            if page == MAX_FOLLOW_PAGES:
+                log.warning("%s: the list of followed members was cut at %d pages", host, MAX_FOLLOW_PAGES)
+
+    yield ("following", pages())
 
 
 def info(media):
