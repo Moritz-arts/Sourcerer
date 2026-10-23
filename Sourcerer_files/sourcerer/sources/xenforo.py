@@ -362,14 +362,15 @@ ASKS = 7                  # pages a batch of twenty may cost for its dates: the 
 CLOSE = 2 * 86400         # a gap between two known times this narrow (seconds) is not asked into: the id between them is good enough
 
 
-def _fill_dates(host, batch):
+def _fill_dates(host, batch, ordered=False):
     """Dates for the pictures of a batch whose tile showed none (the list page of many forums shows no time at all). A picture's page has
     the exact time -- one request each, which a gallery of hundreds cannot ask for. A forum numbers its media as it goes, so the id is a
     clock that only runs forward: the time of the batch's lowest and highest id is read from their own pages, then of the middle one of the
     widest gap between two known times, until the gaps are under two days or ASKS pages were read; the pictures between are placed by their
     id, which cannot be wrong by more than the gap they sit in. Done only where somebody waits (an artist's gallery: net.waiting) and never
-    for a sync, nor when the forum is the gallery's only source (net.sole: its pictures are ordered among themselves by the forum's own
-    order, and the first page used to wait for up to seven page requests -- the viewer still shows the exact time when a picture opens); whatever is known is kept (_dated) and the next listing asks for nothing it knows. Any trouble -- the forum rests, wants a
+    for a sync, nor when the forum is the gallery's only source *and* lists its pictures newest first by id (`ordered`, checked page by
+    page in pages(): the ids only run forward, so the forum's own order is the order of their dates -- the first page used to wait for up to
+    seven page requests; the viewer still shows the exact time when a picture opens). A forum that lists in another order is dated as ever; whatever is known is kept (_dated) and the next listing asks for nothing it knows. Any trouble -- the forum rests, wants a
     login, says no time -- leaves the pictures as they are (undated, or estimated from what was read)."""
     rows = []
     for f in batch:
@@ -384,7 +385,7 @@ def _fill_dates(host, batch):
             f["date"] = _dated[(host, n)]
         else:
             rows.append((n, f))
-    if not rows or not net.waiting() or net.sole():
+    if not rows or not net.waiting() or (net.sole() and ordered):
         return
     known = _anchors(host)
     for n, f in rows:
@@ -464,6 +465,7 @@ def pages(url):
     host = _host(url)
     net._stopped(url)
     listing = _gdl.items(url, None, _options(url), FIELDS, lock="xenforo:" + host, trace="xenforo")
+    last = None                                    # the id of the last picture of the page before
     while True:
         try:
             batch = next(listing)
@@ -484,7 +486,11 @@ def pages(url):
                 raise LoginRequired("this forum shows it to members only") from e
             raise
         batch = [f for f in batch if f.get("id") and f.get("url")]
-        _fill_dates(host, batch)
+        ids = [int(f["id"]) for f in batch if str(f["id"]).isdigit()]
+        seq = ([last] if last is not None else []) + ids
+        ordered = len(ids) == len(batch) and all(a > b for a, b in zip(seq, seq[1:]))      # newest first, by id, across the pages too
+        last = ids[-1] if ids else last
+        _fill_dates(host, batch, ordered)
         yield [Media(remote_key="xenforo:%s:%s" % (host, f["id"]), url=f["url"],
                      post_url=_post(f),
                      # the title is the file name's last resort and what a tile says (the forum's own name for the file

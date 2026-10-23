@@ -1388,10 +1388,11 @@ function tileHtml(it, i) {
 
 // One chip per site the open gallery has a source of: switching it off hides its posts and
 // stops asking it; the choice is kept for the next artist.
+var galChipKey = "";
 function galSources(list) {
   var sites = [];
   list.forEach(function (s) { if (sites.indexOf(s.label) < 0) sites.push(s.label); });
-  $("gal-sources").innerHTML = sites.map(function (label) {
+  var rows = sites.map(function (label) {
     var of = list.filter(function (s) { return s.label === label; });
     var bad = of.filter(function (s) { return s.error; }), off = !!G.hidden[label];
     var busy = of.some(function (s) { return s.loading; });
@@ -1408,8 +1409,20 @@ function galSources(list) {
     // A spinner while the site is asked, green when it answered, orange when it did not.
     var state = busy ? '<i class="spin"></i>' : '<i class="dot ' + (bad.length ? "warn" : ready ? "ok" : "blank") + '"></i>';
     var mark = siteLogo(label, of[0].kind, of[0].host);
-    return '<button type="button" class="chip' + (mark ? " logo" : "") + (off ? " off" : "") + '" data-galsrc="' + esc(label) +
-      '" title="' + esc(tip) + '">' + (mark ? '<span class="mark">' + mark + state + "</span>" : state + esc(label)) + "</button>";
+    return { label: label, tip: tip, cls: "chip" + (mark ? " logo" : "") + (off ? " off" : ""), state: state, mark: mark };
+  });
+  // The chips are rebuilt only when one changed what it shows. All artists asks hundreds of accounts and the state is polled all the
+  // while: a chip built anew at every poll started its spinner's turn from the beginning and made the ring stutter and the marks flicker
+  // (and a mark under the pointer lost its hover). A tooltip that only counts "17 of 40 accounts answered" is changed in place.
+  var key = rows.map(function (r) { return [r.label, r.cls, r.state, r.mark].join("\u0001"); }).join("\u0002"), box = $("gal-sources");
+  if (key === galChipKey && box.children.length === rows.length) {
+    rows.forEach(function (r, i) { if (box.children[i].title !== r.tip) box.children[i].title = r.tip; });
+    return;
+  }
+  galChipKey = key;
+  box.innerHTML = rows.map(function (r) {
+    return '<button type="button" class="' + r.cls + '" data-galsrc="' + esc(r.label) + '" title="' + esc(r.tip) + '">' +
+      (r.mark ? '<span class="mark">' + r.mark + r.state + "</span>" : r.state + esc(r.label)) + "</button>";
   }).join("");
 }
 
