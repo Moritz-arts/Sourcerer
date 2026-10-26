@@ -188,6 +188,9 @@ def profile(url):
 _LINK = re.compile(r"<a\b[^>]*>", re.I)
 _ID = re.compile(r'data-user-id="(\d+)"')
 _HREF = re.compile(r'href="([^"]+)"')
+_IMG = re.compile(r"<img\b[^>]*>", re.I)
+# a theme that hangs the row's picture on a class instead of a data-user-id: `class="avatar-u2273-s"`
+_AVATAR_UID = re.compile(r'class="avatar-u(\d+)[-_]', re.I)
 # The login's own member id, from the account page: `members/<name>.<id>`, or `members/<id>` on a
 # forum that does not put the name in the address (example.com).
 _ME = re.compile(r"members/([a-z0-9_.-]+\.\d+|\d+)", re.I)
@@ -241,6 +244,14 @@ def _rows(text, base, mine):
                               _row_name(text, link.end()))
         elif 'class="avatar' in tag and uid not in picture:
             picture[uid] = _row_picture(window, base)
+    # a theme that hangs the picture on a class rather than a data-user-id (`class="avatar-u12-s"`)
+    for img in _IMG.finditer(text):
+        tag = img.group(0)
+        if 'class="avatar' not in tag:
+            continue
+        who = _ID.search(tag) or _AVATAR_UID.search(tag)
+        if who and not picture.get(who.group(1)):
+            picture[who.group(1)] = _row_picture(tag, base)
     return [(u, n, picture.get(uid, "")) for uid, (u, n) in named.items() if uid != mine]
 
 
