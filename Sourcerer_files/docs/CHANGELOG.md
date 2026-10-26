@@ -3,6 +3,14 @@
 Newest first. Each entry is made from the commit subjects when a version is made, so a subject is one short,
 plain sentence.
 
+## v0.58 — 2026-10-26
+
+- XenForo: a forum without a media gallery is listed from its attachment browser, its files dated by their posts
+- XenForo follows: a member's picture that a theme hangs on a class is found
+- Notes: the attachment browser of a forum without a media gallery
+- XenForo attachment browser: files dated by the forum's post clock, every request a guess lane, addresses built from ids
+- XenForo attachment browser: simpler code, and the viewer's post time comes from the forum's clock
+
 ## v0.57 — 2026-10-23
 
 - A bigger Sourcerer mark in the header and on the start pages, and the code review's fixes for stability and speed
