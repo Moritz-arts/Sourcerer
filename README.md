@@ -69,7 +69,7 @@ Full list: *Settings › Keyboard & mouse*.
 | **Pixiv** | for R-18 works |
 | **Patreon**, **Fanbox**, **Fantia** | yes |
 | **X** | yes |
-| **XenForo** forums (media gallery, albums, threads) | usually yes |
+| **XenForo** forums (media gallery, attachment browser, albums, threads) | usually yes |
 | **Boorus** – Danbooru, e621, Gelbooru, Rule 34, yande.re, Konachan … (an artist's tag search) | API key for some |
 
 Logins open the site's own login page inside Sourcerer. Sourcerer keeps cookies or read-only tokens in
