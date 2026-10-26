@@ -766,15 +766,15 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   extension; no text at all, the id names it); `remote_key` is `xenforo:<host>:a<id>` (the `a` keeps it apart from a gallery's); `preview_headers={}` makes the gallery fetch
   even the small copies with the login; a video is known by the extension. **Every request of this path is a guess lane** (`_get`: `net.guess()`) -- a 403 on an address worked
   out here says nothing about the login. **An attachment id is not a clock** (a later post can carry files uploaded earlier), but **a post id is**, so files are dated by
-  their posts through the media gallery's own placer (`_fill_dates(<host>/posts, posts, ordered, _post_times)`: a clock of its own, kept as the setting
-  `xenforo_clock:<host>/posts`): the tile shows no time, a post's page shows it above its files (`_read_times`: XenForo prints each post twice, the first anchor is the one,
+  their posts through the media gallery's own placer (`_fill_dates(_post_clock(host), posts, ordered, _post_times)`: a clock of its own, kept as the setting
+  `xenforo_clock:<host>/posts`; only the batch's own posts go into `_dated`, the neighbours a page carries are anchors): the tile shows no time, a post's page shows it above its files (`_read_times`: XenForo prints each post twice, the first anchor is the one,
   the page's opening datetime dates the thread), and one read of a post's address -- it answers with the thread page -- dates every post on that page, each an anchor.
   Only where somebody waits (`net.waiting()`), never in a sync, nor when the forum is the gallery's only source and the posts run newest first. **The walk never ends on
   a short page** (a tile that is no picture has other markup, so pages hold fewer readable tiles without being the last): it ends on a 404 or a page that brings nothing
   new (a page past the end answers with the last one); a page with no tiles goes through `_wall` **on every page, not only the first** -- a bot check in the middle is a
   `SlowDown` and the forum rests, never "the end" (sync would mark the source complete and the rest would never come). No page cap of its own: sync's `MAX_PAGES` counts the
-  batches. The viewer's `info()` gives such a file only its post's own time (the thread's title, author and counts are not the file's), and a media item is never given a
-  guessed time (`_fill_dates` keeps what it reads there as an anchor). A follow list's picture may hang on a class (`avatar-u<id>-s`) instead of a `data-user-id` (`_rows`).
+  batches. The viewer's `info()` gives such a file (told by its key, `xenforo:<host>:a<id>`: `_is_attachment`) only its post's own time -- from the clock when that post was read, else
+  one read that teaches the clock (the thread's title, author and counts are not the file's) -- and a media item is never given a guessed time (`_fill_dates` keeps what it reads there as an anchor). A follow list's picture may hang on a class (`avatar-u<id>-s`) instead of a `data-user-id` (`_rows`).
   Written from a handoff of a live test on one real forum and checked here only against a made-up one: markup of another addon version or theme may not match `_tiles`.
   A thread's attachments still go through gallery-dl.
 - **A Misskey looks like a Mastodon in the address** (`https://misskey.io/@user`) **and answers nothing a
