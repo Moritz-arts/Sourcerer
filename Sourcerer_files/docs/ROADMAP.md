@@ -19,7 +19,7 @@ drops every new file, de-duplicated across sources, into a [TrackImage](https://
 | Patreon | works | originals; patron posts with a login |
 | Fanbox, Fantia | works | cookie login |
 | X | works with a login | listed by gallery-dl, originals |
-| XenForo forums | works | media gallery, albums, threads; login per forum; forums behind a guard or in a folder work |
+| XenForo forums | works | media gallery or attachment browser, albums, threads; login per forum; forums behind a guard or in a folder work |
 | Boorus | works | Danbooru, e621, Gelbooru, Rule 34, yande.re, Konachan and more: an artist's tag search |
 | DeviantArt | not started | |
 

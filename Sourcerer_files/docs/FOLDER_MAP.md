@@ -33,7 +33,7 @@ Sourcerer/                        <- what Sourcerer.zip unpacks to; move it free
     │   │   ├─ x.py               X, listed by gallery-dl, logged in
 │   │   ├─ fanbox.py          Fanbox, listed by gallery-dl, cookie login (FANBOXSESSID)
 │   │   ├─ fantia.py          Fantia fanclubs, listed by gallery-dl, cookie login (the page says who is in)
-    │   │   ├─ xenforo.py         XenForo forums (media gallery, albums, threads)
+    │   │   ├─ xenforo.py         XenForo forums (media gallery or attachment browser, albums, threads)
     │   │   ├─ booru.py           boorus: Danbooru / e621, Gelbooru 0.2, Moebooru; API keys
     │   │   └─ _gdl.py            gallery-dl as a separate process: lists, never downloads
     │   ├─ sync.py                sync queue, scan then download, dedupe, folders,
