@@ -17,7 +17,6 @@ a post's page shows its time above its files, the tile shows none.
 Many forums sit behind a bot check that lets only browsers through. The
 login window is one: its cookies -- Cloudflare's pass among them -- and its
 User-Agent go along with every request to the forum (accounts.py).
-
 """
 import datetime
 import html
@@ -39,8 +38,7 @@ LABEL = "XenForo"
 # What a XenForo link points at, below the forum's base (which may be a folder): the base, the route's
 # "index.php?" when the link has it, the kind and the slug.id. A forum behind a guard that lets only "/"
 # and "index.php?*" through answers the friendly path with a bare 403, so a link keeps the route it came with.
-# (A member's attachment browser, `.../attachment-browser`, is the same member: the suffix is matched and dropped.)
-_PATH = re.compile(r"^(.*?)/(index\.php\?)?(media/users|members|media/albums|threads)/([^/?#]+?)(?:/attachment-browser)?(?=[/?#]|$)", re.I)
+_PATH = re.compile(r"^(.*?)/(index\.php\?)?(media/users|members|media/albums|threads)/([^/?#]+)", re.I)
 # tls12: off, so gallery-dl shakes hands with TLS 1.3 only, as net.py does --
 # VerticalScope's forums answered its usual handshake with 409 (see net._Tls13).
 # retries: 0 -- gallery-dl would answer a 429 with four more requests, with the login.
@@ -64,13 +62,12 @@ def _parts(url):
 def match(url):
     p, m = _parts(url)
     # A slug.id is XenForo's mark; other forum software names its pages differently. A forum that leaves the name out of
-    # the address (`members/90414`) is known by the member route alone -- its follow list names members so.
+    # the address (`members/12`) is known by the member route alone -- its follow list names members so.
     return bool(m and (re.search(r"\.\d+$", m.group(4)) or (m.group(3).lower() == "members" and m.group(4).isdigit())))
 
 
 def normalize(url):
-    """A member's media gallery for a member's link -- and for its attachment browser, which some
-    forums put in front of it (_attachment_pages); albums and threads as they are."""
+    """A member's media gallery for a member's link; albums and threads as they are."""
     p, m = _parts(url)
     kind = m.group(3).lower()
     if kind == "members":
@@ -189,7 +186,7 @@ _LINK = re.compile(r"<a\b[^>]*>", re.I)
 _ID = re.compile(r'data-user-id="(\d+)"')
 _HREF = re.compile(r'href="([^"]+)"')
 _IMG = re.compile(r"<img\b[^>]*>", re.I)
-# a theme that hangs the row's picture on a class instead of a data-user-id: `class="avatar-u2273-s"`
+# a theme that hangs the row's picture on a class instead of a data-user-id: `class="avatar-u12-s"`
 _AVATAR_UID = re.compile(r'class="avatar-u(\d+)[-_]', re.I)
 # The login's own member id, from the account page: `members/<name>.<id>`, or `members/<id>` on a
 # forum that does not put the name in the address (example.com).
@@ -305,14 +302,16 @@ def following(key):
 def info(media):
     """What the forum knows of one picture -- its title, description, who and when, size, views -- from the picture's own page: one
     request, asked when the viewer opens it (a listing page holds a title only; gallery-dl's `metadata` would ask for every
-    picture of it). {} when the page says nothing. A file of an attachment browser is known by the post it sits in:
-    that post's own time is what the viewer should show, not the thread's opening the page's JSON-LD dates."""
-    post = getattr(media, "post_url", "") or (media if isinstance(media, str) else "")
-    found = re.search(r"/posts/(\d+)", post)
-    return _page_info(post, found.group(1) if found else "")
+    picture of it). {} when the page says nothing. A file of an attachment browser sits in a post of someone's thread, whose title,
+    author and counts are not the file's: only the post's own time is given."""
+    post = re.search(r"\bposts/(\d+)", media.post_url or "")
+    if post:
+        when = _post_times({"url": media.post_url}).get(post.group(1))
+        return {"posted": when} if when else {}
+    return _page_info(media.post_url)
 
 
-def _page_info(post_url, post_id=""):
+def _page_info(post_url):
     text, _final = net.get_text(post_url)
     schema = _jsonld(text)
     main = schema.get("mainEntity") or schema
@@ -328,15 +327,9 @@ def _page_info(post_url, post_id=""):
             if word in kind:
                 stats[key] = st.get("userInteractionCount")
     author = main.get("author")
-    # (+0000 is not an ISO offset to every parser)
-    posted = re.sub(r"([+-]\d\d)(\d\d)$", r"\1:\2", main.get("dateCreated") or "")
-    if post_id:
-        # a file of an attachment browser: its post address answers with the thread page that holds it, whose JSON-LD
-        # dates the *thread* -- the time printed under that post is the one to show. (Never a guess for a media item:
-        # _fill_dates keeps what it reads here as an anchor of the forum's clock.)
-        posted = _read_times(text)[0].get(post_id) or posted
     out = {"title": html.unescape(main.get("name") or ""), "description": html.unescape(main.get("description") or ""),
-           "posted": posted, "author": html.unescape((author.get("name") if isinstance(author, dict) else author) or ""),
+           # (+0000 is not an ISO offset to every parser)
+           "posted": re.sub(r"([+-]\d\d)(\d\d)$", r"\1:\2", main.get("dateCreated") or ""), "author": html.unescape((author.get("name") if isinstance(author, dict) else author) or ""),
            "size": main.get("contentSize") or "", "width": number(main.get("width")), "height": number(main.get("height"))}
     out.update(stats)
     return {k: v for k, v in out.items() if v not in ("", 0, None)}
@@ -398,14 +391,7 @@ def _iso(t):
 ASKS = 7                  # pages a batch of twenty may cost for its dates: the ends, then the middle of the widest gap
 CLOSE = 2 * 86400         # a gap between two known times this narrow (seconds) is not asked into: the id between them is good enough
 
-# what a forum without a media gallery says about when: a post and the files it carries, kept from the pages that were read
-_post_time = {}                  # (host, post id) -> the time that post was made
-_att_time = {}                   # (host, attachment id) -> the time its file was attached
-MAX_POST_TIME = 4000             # post pages remembered: more are dropped from the front
-_page_reads = {}                 # post address -> (what one read of its page gave: {post id: time}, {attachment id: time})
-
-
-def _fill_dates(host, batch, ordered=False):
+def _fill_dates(host, batch, ordered=False, times=None):
     """Dates for the pictures of a batch whose tile showed none (the list page of many forums shows no time at all). A picture's page has
     the exact time -- one request each, which a gallery of hundreds cannot ask for. A forum numbers its media as it goes, so the id is a
     clock that only runs forward: the time of the batch's lowest and highest id is read from their own pages, then of the middle one of the
@@ -414,7 +400,9 @@ def _fill_dates(host, batch, ordered=False):
     for a sync, nor when the forum is the gallery's only source *and* lists its pictures newest first by id (`ordered`, checked page by
     page in pages(): the ids only run forward, so the forum's own order is the order of their dates -- the first page used to wait for up to
     seven page requests; the viewer still shows the exact time when a picture opens). A forum that lists in another order is dated as ever; whatever is known is kept (_dated) and the next listing asks for nothing it knows. Any trouble -- the forum rests, wants a
-    login, says no time -- leaves the pictures as they are (undated, or estimated from what was read)."""
+    login, says no time -- leaves the pictures as they are (undated, or estimated from what was read). `host` names the clock: a forum
+    whose files hang in posts is dated by the posts' own ids, a clock of its own (`<host>/posts`). `times(item)` says what asking about one
+    item tells -- {id: time}, its own and any other the page carries -- where the item's page is not the media item's."""
     rows = []
     for f in batch:
         try:
@@ -445,18 +433,24 @@ def _fill_dates(host, batch, ordered=False):
         hi = min((b for b in anchors if b > n), default=None)
         return lo is not None and hi is not None and abs(anchors[hi] - anchors[lo]) <= CLOSE
 
+    by_id = dict(rows)
+
     def ask(n, f):
         try:
-            when = _when(_page_info(_post(f)).get("posted"))
+            told = times(f) if times else {str(n): _page_info(_post(f)).get("posted")}
         except Exception as e:
             log.info("%s: no date for picture %s: %s", host, n, net.reason(e))
             return False
         asked[0] += 1
-        if not when or _epoch(when) is None:
-            return False
-        f["date"] = _dated[(host, n)] = when
-        anchors[n] = learned[n] = _epoch(when)
-        return True
+        for k, v in told.items():                # (the page of one post carries its neighbours' times too: each one is an anchor)
+            when, k = _when(v), int(k)
+            if not when or _epoch(when) is None:
+                continue
+            _dated[(host, k)] = when
+            anchors[k] = learned[k] = _epoch(when)
+            if k in by_id:
+                by_id[k]["date"] = when
+        return bool(f.get("date"))
 
     working = True                       # (a forum that rests or shows no time is not asked again)
     for n, f in (rows[:1] + rows[-1:] if len(rows) > 1 else rows):
@@ -505,288 +499,159 @@ def _when(text):
 
 # The tile of an attachment browser links to the post the file sits in and shows a small copy; the file itself is
 # `/attachments/<id>/`, which answers the raw original with no Content-Disposition, so the tile's alt text -- the
-# uploader's own file name -- is what names the download. The tile shows no time; the post it links to carries one
-# above every file it holds, which is where _post_dates reads them from. Attributes are read one by one, never in
-# one fixed order: a theme puts `class` first, or `alt` before `src`.
+# uploader's own file name -- is what names the download. The tile shows no time; the post carries one above every
+# file it holds. Attributes are read one by one, never in one fixed order: a theme puts `class` first, or `alt` before `src`.
+# Nothing a page says is an address Sourcerer goes to: the post and the file are worked out from their ids, and only
+# the small copy is taken from the page (_thumb).
 _TILE = re.compile(r'<a\b([^>]*)>\s*<img\b([^>]*)>', re.I)
-_TILE_POST = re.compile(r'href="([^"]*?\bposts/(\d+)/?)"', re.I)
+_TILE_POST = re.compile(r'href="[^"]*?\bposts/(\d+)/?"', re.I)
 _TILE_FILE = re.compile(r'src="([^"]*?/attachments/\d+/(\d+)-[^"]+)"', re.I)
 _TILE_ALT = re.compile(r'alt="([^"]*)"', re.I)
+_POST_TIME = re.compile(r'id="post-(\d+)"|datetime="([^"]+)"', re.I)
+_EXT = re.compile(r"\.(?=[a-z0-9]*[a-z])[a-z0-9]{2,5}$", re.I)       # "a.jpg", not "v2.5": the uploader's name, or a title with a dot
+_VIDEO_EXT = re.compile(r"\.(mp4|webm|mov|m4v)$", re.I)             # the browser gives no content type
 ATT_PAGE = 20                  # files per page handed to sync, as a media listing's PAGE
-MAX_ATT_PAGES = 200            # 20 000 files: a browser that never ends is the forum's fault
-# the browser gives no content type, so a file is known to be a video by the name its uploader gave it
-_VIDEO_EXT = re.compile(r"\.(mp4|webm|mov|m4v)$", re.I)
-_gallery_route = {}            # host -> whether its media gallery answers (only what was settled is kept)
-
-_DT_OR_ATT = re.compile(r'id="post-(\d+)"|datetime="([^"]+)"|id="attachment-(\d+)"', re.I)
+_gallery_route = {}            # host -> whether its media gallery exists (only what was settled is kept)
+_public_hosts = {}             # host -> whether it is a public one (net.public_https), for the run
 
 
-def _tiles(text):
-    """[(post address as the page wrote it, post id, small copy, attachment id, the uploader's file name)] of a browser page."""
-    out = []
-    for link, img in _TILE.findall(text):
-        post, file = _TILE_POST.search(link), _TILE_FILE.search(img)
-        if post and file:
-            alt = _TILE_ALT.search(img)
-            out.append((html.unescape(post.group(1)), post.group(2), html.unescape(file.group(1)), file.group(2),
-                        html.unescape(alt.group(1)).strip() if alt else ""))
-    return out
-
-
-def _site_url(base, href):
-    """A link of a forum page as an address. Root-relative hrefs resolve against the origin, not against a base that
-    already carries the forum's folder; a page that left the folder out of its links gets it back in front."""
-    parts = urllib.parse.urlsplit(base)
-    if not href.startswith("/"):
-        return urllib.parse.urljoin(base + "/", href)
-    folder = parts.path.rstrip("/")
-    if folder and not href.lower().startswith(folder.lower() + "/"):
-        href = folder + href
-    return "%s://%s%s" % (parts.scheme, parts.netloc, href)
-
-
-def _att_url(base, member, page, indexphp):
-    """A page of a member's attachment browser: `page-N` behind the friendly route, `&page=N` in the query for a
-    forum that answers only `index.php?` -- the same second way pages() tries a media gallery."""
-    if indexphp:
-        return "%s/index.php?members/%s/attachment-browser/%s" % (
-            base, member, ("&page=%d" % page) if page > 1 else "")
-    return "%s/members/%s/attachment-browser/%s" % (
-        base, member, ("page-%d" % page) if page > 1 else "")
+def _get(url):
+    """A forum page at an address Sourcerer worked out itself (the gallery's front page, the attachment browser, a post): a 403 on
+    it says nothing about the login (net.guess), so it is not counted as a refused one."""
+    with net.guess():
+        return net.get_text(url)
 
 
 def _not_found(e):
     return e.response is not None and e.response.status_code == 404
 
 
+def _tiles(text):
+    """[(post id, small copy, attachment id, the uploader's file name)] of a browser page."""
+    out = []
+    for link, img in _TILE.findall(text):
+        post, file = _TILE_POST.search(link), _TILE_FILE.search(img)
+        if post and file:
+            alt = _TILE_ALT.search(img)
+            out.append((post.group(1), html.unescape(file.group(1)), file.group(2), html.unescape(alt.group(1)).strip() if alt else ""))
+    return out
+
+
+def _thumb(base, src):
+    """A tile's small copy as an address: the forum's own, or a public host's (a CDN) -- a page never sends Sourcerer into this
+    machine or its network. "" when it would."""
+    url = urllib.parse.urljoin(base + "/", src)
+    host = urllib.parse.urlsplit(url).hostname or ""
+    if host != urllib.parse.urlsplit(base).hostname:
+        if host not in _public_hosts:
+            _public_hosts[host] = net.public_https(url)
+        if not _public_hosts[host]:
+            return ""
+    return url
+
+
+def _name(alt, att_id):
+    """(name, filename) of a file by the name its uploader gave it. One with no extension (a title, "v2.5") names no file: it is
+    the name's stem and the content type says the extension; with no name at all the id does."""
+    ext = _EXT.search(alt)
+    return ((alt[:ext.start()] if ext else alt) or att_id), (alt if ext else "")
+
+
+def _att_url(base, member, page, indexphp):
+    """A page of a member's attachment browser: `page-N` behind the friendly route, `&page=N` in the query for a
+    forum that answers only `index.php?` -- the same second way pages() tries a media gallery."""
+    if indexphp:
+        return "%s/index.php?members/%s/attachment-browser/%s" % (base, member, ("&page=%d" % page) if page > 1 else "")
+    return "%s/members/%s/attachment-browser/%s" % (base, member, ("page-%d" % page) if page > 1 else "")
+
+
 def _uses_media_gallery(url):
-    """Whether this member's media is in a Media Gallery -- false where the forum has none. The probe is the very
-    address gallery-dl would be pointed at, so a forum that has the gallery costs one request, once. A 404 there is
-    this member's alone until the gallery's front page 404s too: only then is "no gallery" kept for the forum (a
-    gallery forum is never switched away by one member it does not know). A forum that cannot be reached, or rests,
-    is left to gallery-dl as before and asked again next time."""
+    """Whether the forum has a Media Gallery at all: its front page, which a forum without the addon does not have (XenForo
+    answers an unknown route with a 404). Asked once per forum -- for the forum, not for a member: a member the gallery does not
+    know must never switch a gallery forum away -- and only a settled answer is kept: a forum that rests or cannot be reached
+    raises, as any request does, and is asked again next time; any other answer (a refusal, an error page) means the gallery
+    route exists and is left to gallery-dl as before."""
     host = _host(url)
-    if host in _gallery_route:
-        return _gallery_route[host]
-    p, m = _parts(url)
-    base = "%s://%s%s" % (p.scheme, p.netloc.lower(), m.group(1).rstrip("/"))
-    try:
-        net.get_text("%s/index.php?%s/%s" % (base, m.group(3).lower(), m.group(4)))
-        _gallery_route[host] = True
-        return True
-    except requests.HTTPError as e:
-        if not _not_found(e):
-            return True
-    except Exception:
-        return True
-    try:
-        net.get_text(base + "/index.php?media/")
-    except requests.HTTPError as e:
-        if _not_found(e):
-            _gallery_route[host] = False
-    except Exception:
-        pass
-    return False
+    if host not in _gallery_route:
+        p, _m = _parts(url)
+        try:
+            _get(urllib.parse.urlunsplit((p.scheme, p.netloc.lower(), _m.group(1).rstrip("/") + "/index.php", "media/", "")))
+            _gallery_route[host] = True
+        except requests.HTTPError as e:
+            _gallery_route[host] = not _not_found(e)
+    return _gallery_route[host]
 
 
 def _read_times(text):
-    """What a thread or post page says about when: ({post id: time}, {attachment id: time}, the page's leading
-    datetime, the time of the last post it shows). XenForo prints each post twice -- an anchor and the message
-    itself -- and the post's time between the two, and a page's leading datetime belongs to no post of it (it
-    dates the thread); the files of a post come after its time and belong to it."""
-    posts, atts, lead, last, cur, when, pending, seen = {}, {}, "", "", "", "", False, set()
-    for m in _DT_OR_ATT.finditer(text):
+    """{post id: time} of a thread or post page. XenForo prints each post twice -- an anchor and the message itself -- and the
+    post's own time after the first; the datetime a page opens with dates the thread and belongs to no post, and the times
+    that follow (an edit, a reaction) are not the post's."""
+    times, cur, seen = {}, "", set()
+    for m in _POST_TIME.finditer(text):
         if m.group(1):
             if m.group(1) not in seen:
-                cur, pending, when = m.group(1), True, ""
-            seen.add(m.group(1))
-        elif m.group(2):
-            if pending:
-                posts[cur] = last = when = _when(m.group(2))
-                pending = False
-            elif not cur:
-                lead = lead or _when(m.group(2))
-        elif cur and when:
-            atts.setdefault(m.group(3), when)
-    return posts, atts, lead, last
+                seen.add(m.group(1))
+                cur = m.group(1)
+        elif cur:
+            times[cur], cur = _when(m.group(2)), ""
+    return {k: v for k, v in times.items() if v}
 
 
-def _post_dates(post_url, post_id):
-    """The time of one post, of every attachment it carries and of every other post on the page it answers with:
-    (the post's time or "", {attachment id: time}, {post id: time}). XenForo prints each file under its post's
-    `<time>`, so the first datetime that follows an `id="post-<id>"` is that post's own and the files that come
-    after it belong to it -- the attachment browser's tile shows none. A post address answers by redirecting to the
-    thread page that holds it, which carries the other posts of that page too: their times come along for nothing,
-    and so do their files. A page is read once (a post it does not show, or a page with no time, would otherwise be
-    asked for again at every listing)."""
-    key = post_url.split("#")[0]
-    hit = _page_reads.get(key)
-    if hit is None:
-        try:
-            text, _final = net.get_text(post_url)
-        except requests.HTTPError as e:
-            _members_only(e, post_url)
-            raise
-        posts, atts, _lead, _last = _read_times(text)
-        if len(_page_reads) > MAX_POST_TIME:
-            for k in list(_page_reads)[:MAX_POST_TIME // 2]:
-                _page_reads.pop(k, None)
-        hit = _page_reads[key] = (posts, atts)
-    return hit[0].get(post_id, ""), hit[1], hit[0]
+def _post_times(post):
+    """{post id: time} of what a post's address answers with: the thread page that holds it, so the post and its neighbours on that
+    page -- one request dates them all. `post` is the item of _fill_dates: its `url` is the address."""
+    return _read_times(_get(post["url"])[0])
 
 
-def _fill_att_dates(host, batch, ordered=False):
-    """Dates for the files of a page of the attachment browser, whose tiles show none. An attachment id is *not*
-    a clock here the way a media id is: a forum numbers files as they are uploaded, and a post made later can
-    carry files made earlier -- the browser's own order, post by post, is what runs forward in time. So the page
-    is taken as its posts (a post's files were all attached at the time of that post, and one read of a post's page
-    dates the posts around it on the same thread page, which is why the asks go to posts and not to files): the
-    first and the last post are read, then the middle post of the widest gap between two known times, until the
-    gaps are under two days or ASKS pages were read; the posts between are placed by their place in the listing,
-    which cannot be off by more than the gap they sit in. Asked only where somebody waits (an artist's gallery:
-    net.waiting) and never for a sync, which leaves them undated as a media listing does -- nor when the forum is
-    the gallery's only source *and* the browser lists post by post newest first (`ordered`): then the browser's
-    order is the order of the dates. Whatever is known is kept (_post_time, _att_time) and the next listing asks
-    for nothing it knows. Any trouble -- the forum rests, wants a login, a post it does not show -- leaves the
-    files as they are (undated, or placed between what was read)."""
-    groups = []                                  # [(post id, post address, [files])]: the posts of the page in its order
-    for f in batch:
-        key = str(f.get("post_id") or "")
-        if groups and groups[-1][0] == key:
-            groups[-1][2].append(f)
-        else:
-            groups.append((key, f["post"], [f]))
-    for key, _post_address, files in groups:
-        hit = _post_time.get((host, key))
-        if hit:
-            for f in files:
-                f["date"] = _att_time[(host, str(f.get("id")))] = hit
-    if all(f.get("date") for f in batch) or not net.waiting() or (net.sole() and ordered):
-        return
-    times = [_post_time.get((host, key)) or "" for key, _, _ in groups]
-    times = [t if _epoch(t) is not None else "" for t in times]
-    asked = [0]
-
-    def ask(i):
-        """Read the page of the i-th post: its time and that of every other post the page carries come along, and
-        with them the files of all of those. False when the post is not on what the address answered (a thread
-        that has moved on) or shows no time -- then nothing was learned about it."""
-        key, address, files = groups[i]
-        try:
-            own, got, page = _post_dates(address, key)
-        except Exception as e:
-            log.info("%s: no date for the post of attachment %s: %s", host, files[0].get("id"), net.reason(e))
-            return False
-        asked[0] += 1
-        for pid, iso in page.items():
-            if iso and _epoch(iso) is not None:
-                _post_time[(host, pid)] = iso
-        for att, iso in got.items():
-            if _epoch(iso) is not None:
-                _att_time[(host, att)] = iso
-        if not own or _epoch(own) is None:
-            return False
-        times[i] = own
-        for f in files:
-            f["date"] = _att_time[(host, str(f.get("id")))] = own
-        return True
-
-    def bracket(i):
-        """The nearest posts with a known time before and after post i, or None where one side is missing -- nothing
-        to place it between."""
-        lo = max((j for j in range(i) if times[j]), default=None)
-        hi = min((j for j in range(i + 1, len(times)) if times[j]), default=None)
-        return None if lo is None or hi is None else (lo, hi)
-
-    def span(b):
-        return abs(_epoch(times[b[1]]) - _epoch(times[b[0]]))
-
-    for i in (0, len(groups) - 1):
-        if not times[i] and not (bracket(i) and span(bracket(i)) <= CLOSE) and not ask(i):
-            break
-    while asked[0] < ASKS:
-        gaps = {}
-        for i in range(len(groups)):
-            b = None if times[i] else bracket(i)
-            if b:
-                gaps.setdefault(b, []).append(i)
-        if not gaps:
-            break
-        b = max(gaps, key=span)
-        if span(b) <= CLOSE or not ask(gaps[b][len(gaps[b]) // 2]):
-            break
-    for i, (_key, _address, files) in enumerate(groups):
-        b = None if times[i] else bracket(i)
-        if not b:
-            continue                         # never beyond the known times, as with a media listing
-        lo, hi = b
-        when = _epoch(times[lo]) + (_epoch(times[hi]) - _epoch(times[lo])) * (i - lo) / (hi - lo)
-        for f in files:
-            f["date"] = _att_time[(host, str(f.get("id")))] = _iso(when)
-    if len(_post_time) > MAX_DATED or len(_att_time) > MAX_DATED:
-        _post_time.clear()
-        _att_time.clear()
-
-
-def _listed_by_time(rows):
-    """Whether an attachment browser's own order is the order of the files' dates: the browser lists whole posts
-    newest first and keeps a post's files together, and post ids run forward like media ids do -- so the newest
-    file of the newest post heads the page. Within a post the files may come in any order, which matters to nothing:
-    they were all attached at the time of that post. True lets a sync trust that order instead of asking post pages
-    for times, as pages() does for a media gallery that lists its pictures by id."""
-    posts = []
-    for f in rows:
-        if not posts or posts[-1] != f["post_id"]:
-            if f["post_id"] in posts:
-                return False                        # a post split across the page: the order is not by post
-            posts.append(f["post_id"])
-    return all(int(a) > int(b) for a, b in zip(posts, posts[1:]))
-
-
-def _attachment_pages(base, member, host):
-    """A member's attachments, page by page, post by post newest first -- the whole media of a forum that has no
-    media gallery. Each page of the browser is read for its tiles (the post a file sits in, its id, the small copy,
-    the uploader's file name), dated by _fill_att_dates, then handed on in batches of ATT_PAGE as Media. The route
-    is settled on the first page (the friendly one, else `index.php?` for a forum that answers only that) and kept.
-    The browser prints no end-of-list marker, so the walk ends on a page the forum does not know (a 404) or one that
-    brings nothing new (a page past the end answers with the last one) -- never on a short page: a tile that is no
-    picture (a zip, a video) has other markup, and the pages hold fewer of the tiles read here without being the last."""
+def _attachment_pages(base, member, host, indexphp):
+    """A member's attachments, page by page, post by post newest first -- the whole media of a forum that has no media gallery.
+    A page of the browser is read for its tiles (the post a file sits in, its id, the small copy, the uploader's file name), the
+    posts dated by _fill_dates -- post ids run forward like media ids, so their times are anchors of the forum's clock, kept like a
+    media gallery's -- and the files handed on in batches of ATT_PAGE. The route is the one the link was pasted with (the
+    friendly one, else `index.php?` for a forum that answers only that; the other is tried once on the first page). The browser
+    prints no end-of-list marker, so the walk ends on a 404 or a page that brings nothing new (a page past the end answers with the last
+    one) -- never on a short page: a tile that is no picture (a zip, a video) has other markup, so pages hold fewer of the tiles read
+    here without being the last. Sync's own page cap bounds a forum that never ends."""
     from . import Media
-    indexphp, page, seen = False, 1, set()
-    while page <= MAX_ATT_PAGES:
+    clock, page, seen, last, swapped = host + "/posts", 1, set(), None, False
+    while True:
         try:
-            text, _final = net.get_text(_att_url(base, member, page, indexphp))
+            text, _final = _get(_att_url(base, member, page, indexphp))
         except requests.HTTPError as e:
-            if page == 1 and not indexphp and _not_found(e):
-                indexphp = True                          # the guard answers the friendly route with a 404: its other way
+            if page == 1 and not swapped and e.response is not None and e.response.status_code in (403, 404):
+                indexphp, swapped = not indexphp, True      # the guard answers the friendly route with a bare 403/404: its other way
                 continue
             if _not_found(e):
-                return                                   # no such page: the end (or a member with no attachments)
+                return                                      # no such page: the end (or a member with no attachments)
             _members_only(e, base)
             raise
-        new = []
-        for href, post_id, thumb, att_id, alt in _tiles(text):
-            if att_id in seen:
-                continue
-            seen.add(att_id)
-            new.append({"post": _site_url(base, href), "post_id": post_id, "id": att_id, "thumb": thumb,
-                        "url": "%s/%sattachments/%s/" % (base, "index.php?" if indexphp else "", att_id),
-                        "name": alt or "%s.jpg" % att_id, "date": _att_time.get((host, att_id), "")})
+        new = [tile for tile in _tiles(text) if tile[2] not in seen]
         if not new:
-            if page == 1:
-                _wall(text, host)                        # a bot check answers 200 with no tiles: not "no attachments"
+            try:
+                _wall(text, host)                           # a guard's page has no tiles either: that is no end of the list
+            except net.SlowDown:
+                net.pause(base, 6 * 3600, "it let only a browser through")
+                raise
             return
-        _fill_att_dates(host, new, ordered=_listed_by_time(new))
+        seen.update(tile[2] for tile in new)
+        route = "index.php?" if indexphp else ""
+        posts = {}                                          # post id -> its item for _fill_dates, in the page's order
+        for post_id, _thumb_src, _att, _alt in new:
+            posts.setdefault(post_id, {"id": post_id, "url": "%s/%sposts/%s/" % (base, route, post_id), "date": ""})
+        ids = [int(i) for i in posts]
+        seq = ([last] if last is not None and last != ids[0] else []) + ids       # (a post may continue on the next page)
+        _fill_dates(clock, list(posts.values()), all(a > b for a, b in zip(seq, seq[1:])), _post_times)
+        last = ids[-1]
         for i in range(0, len(new), ATT_PAGE):
-            yield [Media(remote_key="xenforo:%s:a%s" % (host, f["id"]), url=f["url"],
-                         post_url=f["post"], posted=f.get("date") or "",
-                         name=f["name"].rsplit(".", 1)[0] or f["id"],
-                         filename=f["name"] if "." in f["name"] else "",
-                         # the forum shows its files to members only: the gallery fetches even the small copies through
-                         # Sourcerer, with the login -- and an address of the forum's own, not a root-relative link of a page
-                         thumb=_site_url(base, f["thumb"]), preview_headers={},
-                         video=bool(_VIDEO_EXT.search(f["name"])), large=f["url"])
-                   for f in new[i:i + ATT_PAGE]]
+            batch = []
+            for post_id, thumb_src, att_id, alt in new[i:i + ATT_PAGE]:
+                url, (name, filename) = "%s/%sattachments/%s/" % (base, route, att_id), _name(alt, att_id)
+                batch.append(Media(remote_key="xenforo:%s:a%s" % (host, att_id), url=url, large=url, name=name, filename=filename,
+                                   post_url=posts[post_id]["url"], posted=_when(posts[post_id]["date"]),
+                                   # the forum shows its files to members only: the gallery fetches even the small copies through
+                                   # Sourcerer, with the login
+                                   thumb=_thumb(base, thumb_src), preview_headers={}, video=bool(_VIDEO_EXT.search(alt))))
+            yield batch
         page += 1
 
 
@@ -797,7 +662,7 @@ def pages(url):
     p, m = _parts(url)
     # a forum without the Media Gallery addon: its member pages 404 and a member's media is its attachment browser
     if m.group(3).lower() in ("members", "media/users") and not _uses_media_gallery(url):
-        yield from _attachment_pages("%s://%s%s" % (p.scheme, p.netloc.lower(), m.group(1).rstrip("/")), m.group(4), host)
+        yield from _attachment_pages("%s://%s%s" % (p.scheme, p.netloc.lower(), m.group(1).rstrip("/")), m.group(4), host, bool(m.group(2)))
         return
     if not _gdl.available():
         raise RuntimeError("Forums need gallery-dl, which did not install: Settings > Repair")
