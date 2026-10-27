@@ -90,6 +90,15 @@ INTERACTIVE_PACE = 0.5      # ... when somebody waits for the answer (interactiv
 JITTER = (1.0, 1.6)         # every gap times this, drawn anew: longer, never shorter
 READ_EVERY = (20, 40)       # a logged-in site gets a break after this many requests ...
 READ_BREAK = (15, 60)       # ... of this many seconds
+# A forum that let FRIENDLY_AFTER requests with the login through without a word is read at FORUM_PACE and rests less often
+# (_friendly): a forum has no daily budget and most ask for nothing like pixiv's care, so the careful lane made a list of
+# followed members take twice as long as a person clicking through it. Any word from the forum -- a refusal, a pause, a bot
+# check -- ends it for FRIENDLY_REST (_unfriendly), and only forums can earn it: pixiv, X & co. keep the careful lane always.
+FORUM_PACE = 1.0
+FRIENDLY_AFTER = 12
+FRIENDLY_REST = 24 * 3600
+FORUM_READ_EVERY = (40, 80)
+FORUM_READ_BREAK = (6, 20)
 # Requests a day carrying a login, per site -- real HTTP requests, counted one by one (X, Fanbox and Fantia: what gallery-dl asked,
 # read from its log, _gdl.items(site=); until v0.42 they counted the files of a page, ~10 times what the site was asked, and the
 # 1500 of X were spent by "All artists" long before X had seen that many requests). None of the sites publishes a number for
@@ -180,6 +189,7 @@ def pause(url, seconds, why):
         _store("paused")
     _flush()
     log.info("%s paused for %d min: %s", site, seconds // 60, why)
+    _unfriendly(url)
     for fn in PAUSED:
         try:
             fn(site, until, why)
@@ -197,11 +207,52 @@ def lift(url):
     site = site_of(url)
     with _lock:
         _refused.pop(site, None)
+        _clean.pop(site, None)
+        _fast.discard(site)
+        if _stored("unfriendly").pop(site, None):          # (a login made anew starts the forum's count of quiet requests afresh)
+            _store("unfriendly")
         pauses = _stored("paused")
         entry = pauses.get(site)
         if entry and any(w in entry[1] for w in LOGIN_PAUSES):
             del pauses[site]
             _store("paused")
+    _flush()
+
+
+_clean = {}                 # forum -> requests with its login that went through without a word
+_fast = set()               # forums read at FORUM_PACE now
+
+
+def _forum(url):
+    return (accounts.account_for(url) or "").startswith("xenforo:")
+
+
+def _friendly(url):
+    """One more request with a forum's login that went through. The FRIENDLY_AFTER-th makes the forum a fast lane -- unless it
+    said a word less than FRIENDLY_REST ago."""
+    if not _forum(url):
+        return
+    site, now = site_of(url), time.time()
+    with _lock:
+        if site in _fast or _stored("unfriendly").get(site, 0) > now:
+            return
+        _clean[site] = _clean.get(site, 0) + 1
+        if _clean[site] < FRIENDLY_AFTER:
+            return
+        _fast.add(site)
+    log.info("%s: %d requests went through without a word: Sourcerer reads it a page a second now", site, FRIENDLY_AFTER)
+
+
+def _unfriendly(url):
+    """A forum said a word (a refusal, a pause, a bot check): back to the careful lane, and no fast one for FRIENDLY_REST."""
+    if not _forum(url):
+        return
+    site = site_of(url)
+    with _lock:
+        _clean.pop(site, None)
+        _fast.discard(site)
+        _stored("unfriendly")[site] = time.time() + FRIENDLY_REST
+        _store("unfriendly")
     _flush()
 
 
@@ -621,8 +672,9 @@ class _Polite:
         own = _own(self.host)
         with _lock:
             limit, pace = min(_limits["per_host"], own[0]), max(_limits["pace"], own[1])
+            fast = self.login and site_of(self.url) in _fast          # (a forum that has been quiet: _friendly)
             if self.login:                       # Settings can make this gentler, never faster
-                limit, pace = 1, max(pace, LOGIN_PACE)
+                limit, pace = 1, max(pace, FORUM_PACE if fast else LOGIN_PACE)
                 if self.first:                   # somebody waits: the gap of a person browsing, not of a scan
                     pace = max(_limits["pace"], min(own[1], 1.0), INTERACTIVE_PACE)
             elif self.token:
@@ -657,8 +709,9 @@ class _Polite:
                 if self.login:
                     entry["count"] += 1
                     if entry["count"] >= entry["break"] and not self.first:
-                        entry["count"], entry["break"] = 0, random.randint(*READ_EVERY)
-                        reading_break = random.uniform(*READ_BREAK)
+                        every, rest = (FORUM_READ_EVERY, FORUM_READ_BREAK) if fast else (READ_EVERY, READ_BREAK)
+                        entry["count"], entry["break"] = 0, random.randint(*every)
+                        reading_break = random.uniform(*rest)
                 now = time.monotonic()
                 entry["start"] = max(at + reading_break, now)
             if at > now:
@@ -825,8 +878,10 @@ def _get(url, params=None, stream=False, headers=None, method="GET", data=None, 
             if login and code in (401, 403):
                 if not (code == 403 and getattr(_local, "guess", False)):
                     _refusal(url, False)
+                    _unfriendly(url)
             elif login and code < 400:
                 _refusal(url, True)
+                _friendly(url)
             resp.raise_for_status()
             return resp
         except (requests.ConnectionError, requests.Timeout) as e:
