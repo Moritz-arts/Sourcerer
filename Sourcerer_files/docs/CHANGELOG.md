@@ -3,6 +3,11 @@
 Newest first. Each entry is made from the commit subjects when a version is made, so a subject is one short,
 plain sentence.
 
+## v0.59 — 2026-10-27
+
+- XenForo: a forum that leaves the member's name out of its addresses is recognised again, and a wrong login base is repaired
+- A forum that stayed quiet is read a page a second, and goes back to the careful lane at its first word
+
 ## v0.58 — 2026-10-26
 
 - XenForo: a forum without a media gallery is listed from its attachment browser, its files dated by their posts
