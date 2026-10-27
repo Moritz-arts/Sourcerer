@@ -57,11 +57,16 @@ def _parts(url):
     return (p, m) if m and p.hostname else (p, None)
 
 
+NUMBERED = ("members", "media/users", "media/albums")      # routes that stand for XenForo's alone, with the slug left out
+
+
 def match(url):
     p, m = _parts(url)
     # A slug.id is XenForo's mark; other forum software names its pages differently. A forum that leaves the name out of
-    # the address (`members/12`) is known by the member route alone -- its follow list names members so.
-    return bool(m and (re.search(r"\.\d+$", m.group(4)) or (m.group(3).lower() == "members" and m.group(4).isdigit())))
+    # the address (`members/12`) is known by the member route alone -- its follow list names members so -- and so is the
+    # form normalize() writes for it (`media/users/12`): if match() refused its own output the stored source was "unsupported"
+    # on the next read (kind_of() looks at the address every time). A thread has no such form: `threads/12` says nothing.
+    return bool(m and (re.search(r"\.\d+$", m.group(4)) or (m.group(3).lower() in NUMBERED and m.group(4).isdigit())))
 
 
 def normalize(url):
@@ -254,15 +259,27 @@ def _rows(text, base, mine):
 
 
 def _member_of_login(base, host):
-    """Which member the login is (`slug.id`): a follow list is a page of *someone's* follows, and a forum names the
+    """(`slug.id`, base) of the member the login is: a follow list is a page of *someone's* follows, and a forum names the
     login nowhere else. `index.php?account/` says it -- one request per look, and it is not kept, because the same
-    forum can be logged in as another account the next day and a kept id would then read that account's list."""
-    text, _final = net.get_text("%s/index.php?account/" % base)
+    forum can be logged in as another account the next day and a kept id would then read that account's list.
+    The base is the folder the login window was opened from; one taken from an add-on's page (`example.com/watched`) is
+    no folder of the forum and every route below it 404s, so the host's root is tried once and the base that answered is
+    handed back for the caller to keep."""
+    top = "https://" + urllib.parse.urlsplit(base).netloc
+    for at in ([base, top] if base != top else [base]):
+        try:
+            text, _final = net.get_text("%s/index.php?account/" % at)
+        except requests.HTTPError as e:
+            if _status(e) == 404 and at != top:
+                continue
+            raise
+        base = at
+        break
     who = _ME.search(text)
     if not who:
         _wall(text, host)
         raise net.SlowDown("%s did not say which member the login is: log in again in Manage Accounts" % host)
-    return who.group(1)
+    return who.group(1), base
 
 
 def following(key):
@@ -275,17 +292,19 @@ def following(key):
     host = urllib.parse.urlsplit(base).hostname or key
 
     def pages():
-        me = _member_of_login(base, host)
+        me, here = _member_of_login(base, host)
+        if here != base:
+            accounts.update(key, base=here)            # (what worked is what the login keeps: the next look, and still_logged_in, start there)
         mine = me.rsplit(".", 1)[-1]
         full, seen = 0, set()
         for page in range(1, MAX_FOLLOW_PAGES + 1):
             # `&` before `page=`: the route lives in the query (`index.php?members/...`), the form every XenForo
             # answers even when its links use friendly URLs (see _PATH).
-            url = "%s/index.php?members/%s/following/&" % (base, me)
+            url = "%s/index.php?members/%s/following/&" % (here, me)
             if page > 1:
                 url += "page=%d" % page
             text, _final = net.get_text(url)
-            rows = [r for r in _rows(text, base, mine) if r[0].lower() not in seen]
+            rows = [r for r in _rows(text, here, mine) if r[0].lower() not in seen]
             if not rows:
                 _wall(text, host)              # a challenge page has no rows: it does not mean "follows nobody"
                 break
@@ -628,12 +647,15 @@ def _attachment_media(base, root, host, tile, post):
 
 def _attachment_pages(url):
     """A member's attachments, page by page, whole posts newest first. A page's posts are dated by _fill_dates, its files handed on in
-    batches of `_gdl.PAGE`. The route is the link's own; after a 403 or 404 on page 1 the other is tried once. There is no end-of-list
+    batches of `_gdl.PAGE`. The route is the link's own; after a 403 or 404 on page 1 the other is tried once, and then -- for a link
+    with a folder in front of the member (`example.com/watched/members/...`, which a follow list read from a wrong base wrote) -- both
+    again from the host's root. There is no end-of-list
     marker: the walk ends on a 404 or a page with nothing new (past the end the forum answers with the last page), never on a short one --
     a tile that is no picture has other markup. Sync's own page cap bounds a forum that never ends."""
     p, m = _parts(url)
     base, host, member, indexphp = _base(url), _host(url), m.group(4), bool(m.group(2))
-    page, seen, last, swapped = 1, set(), None, False
+    top = "%s://%s" % (p.scheme, p.netloc.lower())
+    page, seen, last, swapped, rooted = 1, set(), None, False, base == top
     while True:
         root = _root(base, indexphp)
         try:
@@ -641,6 +663,9 @@ def _attachment_pages(url):
         except requests.HTTPError as e:
             if page == 1 and not swapped and _status(e) in (403, 404):
                 indexphp, swapped = not indexphp, True      # the guard answers the friendly route with a bare 403/404: its other way
+                continue
+            if page == 1 and not rooted and _status(e) in (403, 404):
+                base, rooted, indexphp, swapped = top, True, bool(m.group(2)), False
                 continue
             if _status(e) == 404:
                 return                                      # no such page: the end (or a member with no attachments)
