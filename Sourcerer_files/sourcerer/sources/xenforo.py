@@ -43,9 +43,9 @@ _PATH = re.compile(r"^(.*?)/(index\.php\?)?(media/users|members|media/albums|thr
 OPTIONS = {"sleep-request": "2.0-5.0", "metadata": False, "tls12": False, "retries": 0}
 OPEN_SLEEP = "1.5-3.0"   # ... while somebody waits for the page (an artist's gallery): faster, but a forum is no X (no daily budget, bot checks): never under 1.5 s
 # The title is the picture's alt text in the listing, which gallery-dl cuts into filename and extension ("IMG_1234.jpg"): no request.
-# The date is the time of its tile in the page (gdl_run.py's "xenforo" mode adds it; a gallery-dl without it, or a page that shows
-# none, says null).
-FIELDS = {"url": "{_url!j}", "id": "{id!j}", "title": "{filename!j}", "ext": "{extension!j}", "date": "{date!j}"}
+# The date is the time of its tile in the page, and thumb the tile's small picture (gdl_run.py's "xenforo" mode adds both; a gallery-dl without
+# them, or a page that shows none, says null).
+FIELDS = {"url": "{_url!j}", "id": "{id!j}", "title": "{filename!j}", "ext": "{extension!j}", "date": "{date!j}", "thumb": "{thumb!j}"}
 LOGIN = ("recommended", "Most forums show their media to members only.")
 FOLLOWS_HOURS = 11       # follows.py reads a forum's list of followed members at most this often (Fanbox's and Fantia's pace)
 MAX_FOLLOW_PAGES = 200   # 4 000 follows: a forum that never ends its list is the forum's fault
@@ -368,6 +368,16 @@ MAX_DATED = 20000
 
 def _post(f):
     return f["url"].rsplit("/full", 1)[0] + "/" if "/full" in f["url"] else f["url"]
+def _tile_thumb(base, f):
+    """A media gallery tile's small picture as an address -- the forum's own or a public host's (_thumb) -- or "" : the grid then makes its own from
+    the original, which is the file itself and a thousand times the bytes. It must be the picture's own (XenForo names it `<media id>-<hash>`):
+    an avatar or an icon the page puts first in the tile is not."""
+    small = f.get("thumb")
+    if not small or not re.search(r"[/.]%s-" % re.escape(str(f.get("id"))), small):
+        return ""
+    return _thumb(base, small)
+
+
 
 
 def _epoch(text):
@@ -729,7 +739,7 @@ def pages(url):
         last = ids[-1] if ids else last
         _fill_dates(host, batch, ordered)
         yield [Media(remote_key="xenforo:%s:%s" % (host, f["id"]), url=f["url"],
-                     post_url=_post(f),
+                     post_url=_post(f), thumb=_tile_thumb(base, f),
                      # the title is the file name's last resort and what a tile says (the forum's own name for the file
                      # comes with the download, and wins)
                      posted=_when(f.get("date")), name=_title(f),
@@ -737,3 +747,4 @@ def pages(url):
                      # them through Sourcerer, with the login, and makes its own small copy.
                      large=f["url"], preview_headers={})
                for f in batch]
+        base = _base(url)
