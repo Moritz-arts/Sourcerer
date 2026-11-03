@@ -70,7 +70,7 @@ def freeze(out, onefile):
             args += ["--collect-all", pkg]
     elif onefile:
         # The tar.gz's one file unpacks itself on every start: ~600 MB of Qt each time. It stays
-        # browser-only (desktop._window_ok finds no Qt and says so); the AppImage has the window.
+        # browser-only (desktop._window_problem finds no Qt and says so); the AppImage has the window.
         args += ["--exclude-module", "PyQt6", "--exclude-module", "qtpy"]
     else:
         # The AppImage: pywebview's Qt backend (GTK cannot be carried). qtpy picks PyQt6 at run time

@@ -49,7 +49,8 @@ Sourcerer/                        <- what Sourcerer.zip unpacks to; move it free
     │   │                           the reset to a fresh install
     │   ├─ updater.py             updates and repair: Sourcerer.zip, the helper
     │   ├─ server.py              Flask: /api/* and the page
-    │   └─ desktop.py             main(): server thread, window or browser
+    │   ├─ desktop.py             main(): server thread, window or browser; the Windows window's frame, WebView2 and Linux checks
+    │   └─ window_probe.py        the child that asks whether Qt can open a window (Linux); imports Qt only
     ├─ static/                    the page: index.html, app.css, app.js,
     │                               logo.svg, logo-small.svg (filled, <= 24 px), favicon.ico, icon.png (the brand, see CLAUDE.md),
     │                               icons-LICENSE.txt (inline icons after Tabler, site logos from Simple Icons)
