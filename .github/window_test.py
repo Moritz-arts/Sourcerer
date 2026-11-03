@@ -3,7 +3,7 @@
     python .github/window_test.py [path\\to\\Sourcerer.exe]
 
 Run by .github/workflows/window-test.yml (Windows only): starts Sourcerer -- from source, or the frozen exe it is given --, waits
-until the page is drawn (the page is asked through WebView2's debugging port), then presses the page's own bar with injected mouse
+until the page is drawn (the page is asked through the debugging port SOURCERER_DEBUG_PORT opens), then presses the page's own bar with injected mouse
 events and reads where the window is: the bar moves the window, a drag to the screen's edge docks it (half, quarter, maximized), a
 drag out of a docked window gives it its size back, a double-click maximizes, and all of it works under a dialog.
 A failing check starts with FAIL; WINDOW_TEST_STRICT=1 makes the exit code say so. The logs of the run are kept in ./window-test.
@@ -157,7 +157,7 @@ def events(page):
 def main():
     OUT.mkdir(exist_ok=True)
     exe = pathlib.Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else None
-    env = dict(os.environ, PYTHONUNBUFFERED="1", WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=%d" % CDP_PORT)
+    env = dict(os.environ, PYTHONUNBUFFERED="1", SOURCERER_DEBUG_PORT=str(CDP_PORT))
     if exe:
         data, cmd, cwd = exe.parent / "Userdata", [str(exe)], str(exe.parent)
     else:
@@ -201,8 +201,8 @@ def run(data):
     check(hwnd is not None, "the app window opens (%.1f s)" % (time.time() - started))
     if not hwnd:
         return
-    page = None
-    for _ in range(180):                                       # until the page is drawn and has dressed the bar
+    page, last, until = None, None, time.time() + 60
+    while time.time() < until:                                 # until the page is drawn and has dressed the bar
         try:
             page = page or Page()
             if page.run("typeof S !== 'undefined' && S.frame === 'custom' && document.readyState === 'complete'"):
@@ -252,6 +252,23 @@ def tests(port, hwnd, page, wa):
         say("drag %d: moved by (%d, %d); page events %s" % (attempt, dx, dy, events(page)))
         check(abs(dx - 150) <= 14 and abs(dy - 60) <= 14, "the bar moves the window with the pointer (%d)" % attempt)
 
+    # 1b. an empty part of the bar moves the window too, not only the brand mark (needs the page: it knows where the empty parts are)
+    if page:
+        normal(hwnd)
+        spot = page.run("(function () { var w = document.documentElement.clientWidth; for (var x = 220; x < w - 170; x += 4) { "
+                        "var e = document.elementFromPoint(x, 5); if (e && e.id === 'toolbar') return [x, 5]; } return null; })()")
+        say("an empty spot of the bar: %s" % (spot,))
+        if spot:
+            before = rect_of(hwnd)
+            cx, cy = client_origin(hwnd)
+            start = (cx + spot[0], cy + spot[1])
+            drag(start, (start[0] + 150, start[1] + 60))
+            after = rect_of(hwnd)
+            say("drag from the empty spot: moved by (%d, %d); page events %s" % (after[0] - before[0], after[1] - before[1], events(page)))
+            check(abs(after[0] - before[0] - 150) <= 14 and abs(after[1] - before[1] - 60) <= 14, "an empty part of the bar moves the window")
+        else:
+            check(False, "an empty part of the bar was found")
+
     # 2. dock left, then pull out
     normal(hwnd)
     drag(bar_point(hwnd), (0, wa[1] + 300))
@@ -259,7 +276,7 @@ def tests(port, hwnd, page, wa):
     say("dock left: %s %s" % (r, flags(page, hwnd)))
     check(abs(r[0] - wa[0]) <= 2 and abs(r[1] - wa[1]) <= 2 and abs(r[3] - wa[3]) <= 8 and r[2] - r[0] <= 780 and not zoomed(hwnd),
           "a drag to the left edge docks the window there (full height, narrower than 780)")
-    start = bar_point(hwnd, dx=200)
+    start = bar_point(hwnd)
     drag(start, (start[0] + 120, start[1] + 150))
     r = rect_of(hwnd)
     say("pulled out of the left dock: %s %s" % (r, flags(page, hwnd)))
@@ -280,7 +297,7 @@ def tests(port, hwnd, page, wa):
     say("dock top: %s zoomed=%s %s" % (r, zoomed(hwnd), flags(page, hwnd)))
     check(zoomed(hwnd) and abs(r[0] - wa[0]) <= 2 and abs(r[2] - wa[2]) <= 2 and abs(r[3] - wa[3]) <= 2,
           "a drag to the top edge maximizes the window into the work area")
-    start = bar_point(hwnd, dx=400)
+    start = bar_point(hwnd)
     drag(start, (start[0] + 60, start[1] + 200))
     r = rect_of(hwnd)
     say("pulled out of the maximized window: %s zoomed=%s %s" % (r, zoomed(hwnd), flags(page, hwnd)))
