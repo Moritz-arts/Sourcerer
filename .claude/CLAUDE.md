@@ -992,18 +992,21 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   polled `/api/sync`, so the page learns it even when `_custom_frame` finishes after the first load), and the page draws minimize / maximize /
   close at its right edge. If anything fails the native bar stays and nothing is doubled; what follows the style change (fit to the screen,
   maximized bounds) fails on its own and never flips `CUSTOM_FRAME` back. macOS and Linux keep their native bars, and none of this runs there.
-  **The bar moves the window through the system's own move loop, never through pywebview's script drag** (v0.60): pywebview's drag region
-  (`pywebviewMoveWindow`) is a `SetWindowPos` per mouse move, so Windows never docks the window at the screen's edges, never restores it when it
-  is pulled down from maximized, and a maximized window was just displaced. A press on the bar is `POST /api/window {action: "drag"}` ->
-  `server.begin_drag`: on the window's own thread `ReleaseCapture` + `PostMessage(WM_NCLBUTTONDOWN, HTCAPTION)` (what Qt, Tauri and every
-  borderless WinForms window send), then `GetGUIThreadInfo` says whether the thread is in a move loop (`GUI_INMOVESIZE`). **The loop ends at the
-  button's release, so it is not started when the button is already up** (`GetAsyncKeyState`, the *physical* button: `SM_SWAPBUTTON`) -- one that
-  starts then sticks the window to the pointer until the next click; a release that races the start is undone with `WM_CANCELMODE`. **A loop
-  refused twice with the button held (or an exception) switches the bar to the script drag for good** (`NATIVE_DRAG`, `drag: "script"` in
-  `window_state`; the page adds the `pywebview-drag-region` class then -- never while `drag` is native, or both would move the window): the user
-  keeps a window that moves. The loop swallows the release, so the page never sees a double-click: `mousedown` detail / two presses within 500 ms
-  maximize. Written from the Win32 documentation and pywebview's source, tested here with a fake user32 and in Chromium; **not yet seen on a real
-  Windows desktop** -- watch the log line "window: the bar starts the system's move loop" (docking works) or the warning that says it did not.
+  **The bar is pywebview's drag region; the docking is ours**: pywebview moves the window while the bar is dragged (a `SetWindowPos` per mouse
+  move, driven from the page: `.pywebview-drag-region` on `DRAG_ZONE`, `DRAG_REGION_DIRECT_TARGET_ONLY`, `pywebview>=6.1`). That never enters Windows'
+  move loop, so Windows does not dock -- and a maximized window was displaced instead of restored. What Windows does at the screen's edge is done from the
+  pointer's place when the button is let go (`POST /api/window {action: "drop"}` 120 ms after `mouseup`; `server.drop` -> `snap_zone`, `snap_to`): the
+  side (2 px) takes half of the work area of that monitor, a corner (80 px) a quarter, the top maximizes (an edge with another monitor beyond it is no
+  edge); a window its minimum size makes wider than half is moved back by what it overflows. `SNAP` holds the rect it was given and the one it had before;
+  `_snapped()` is "still exactly there" (any resize or move ends the dock). **A press on a docked or maximized window is held back** (the capture handler
+  stops it) until the pointer has moved 4 px; then `tearoff` gives the window its normal size under the pointer (`server.tear_off`) and the page hands
+  pywebview a synthetic `mousedown` at the pointer's place in the restored window (`arm`): pywebview binds its drag at `mousedown`, so it may see the press
+  only once the right window exists. **v0.60 gave the press to the system's own move loop instead** (`PostMessage(WM_NCLBUTTONDOWN, HTCAPTION)`): it
+  moved the window on the CI runner and not at all on the user's desktop (the cause was not found), so nothing here depends on it any more.
+  **`.github/window_test.py` is the check** (a Windows runner, the real mouse through `mouse_event`, the page read through `SOURCERER_DEBUG_PORT` -- pywebview's
+  `REMOTE_DEBUGGING_PORT`; `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` opened no port there): moves, docks left / right / top / corner, pulls out of a dock and
+  of a maximized window, double-click, a drag under a modal dialog. **A test presses the brand mark or a spot the page names as empty**: at x=200 and
+  x=400 the bar is the view switch and Sync all, and a press on a button is no drag (the first version "failed" its pull-outs there).
   **A modal `<dialog>` makes the whole page inert**: a press on the bar reaches the dialog's backdrop (`event.target` is the dialog) and its window
   buttons cannot be clicked -- the page's `mousedown` handler (capture, `barHit`) therefore hit-tests the bar by geometry and passes a press on a
   *backdrop* (not on the dialog's box, which may reach into the bar's rows) to the bar. **The lock screen and the update overlay start below the bar**
