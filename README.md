@@ -27,6 +27,14 @@ Nothing else to install. The files are not signed, so the first start shows a wa
 **Windows** – *More info › Run anyway*. **macOS** – Control-click the app › *Open* (macOS 15: *System Settings ›
 Privacy & Security › Open Anyway*). **Linux** – `chmod +x` the AppImage; it needs `libfuse2`.
 
+**Linux window:** the app window is Qt's and needs a few system libraries. On Debian/Ubuntu:
+
+```bash
+sudo apt install libegl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-xkb1 libxcb-util1
+```
+
+Without them Sourcerer opens in your browser instead, and Activity names the library that is missing (other systems: the packages that provide those libraries).
+
 <details>
 <summary>With Python instead (<b>Sourcerer.zip</b>, updates itself)</summary>
 

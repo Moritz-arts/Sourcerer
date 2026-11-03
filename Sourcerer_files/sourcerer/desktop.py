@@ -17,6 +17,7 @@ import logging
 import logging.handlers
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -197,37 +198,79 @@ def _custom_frame(window):
             log.info("window set-up step failed: %s", e)
 
 
-def window_check():
-    """The child of `_window_ok`: exit 0 only if Qt can open a window here."""
-    from qtpy.QtWidgets import QApplication
-    from qtpy.QtWebEngineWidgets import QWebEngineView  # noqa: F401 -- Qt wants it before the application
-    QApplication([])
-    return 0
+# The library a minimal Linux lacks, as the loader names it -> the Debian/Ubuntu package that has it. Qt stops at the first one it
+# cannot find, so the user learns them one start at a time unless README lists them all.
+_QT_LIBS = {"libEGL.so.1": "libegl1", "libxkbcommon-x11.so.0": "libxkbcommon-x11-0", "libxcb-cursor.so.0": "libxcb-cursor0",
+            "libxcb-icccm.so.4": "libxcb-icccm4", "libxcb-image.so.0": "libxcb-image0", "libxcb-keysyms.so.1": "libxcb-keysyms1",
+            "libxcb-render-util.so.0": "libxcb-render-util0", "libxcb-xkb.so.1": "libxcb-xkb1", "libxcb-util.so.1": "libxcb-util1"}
 
 
-def _window_ok():
-    """Whether pywebview can open a window. Only Linux needs asking: its Qt does not raise when it
-    cannot start (no display, no xcb-cursor library) -- it aborts the process, server included.
-    So a child tries first, and the browser is the answer when it dies."""
-    if not sys.platform.startswith("linux") or importlib.util.find_spec("gi"):
-        return True                                         # GTK from the system, as ever
-    if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
-        return False
-    cmd = [sys.executable, "--window-check"] if config.FROZEN else \
-        [sys.executable, "-c", "import sys; from sourcerer import desktop; sys.exit(desktop.window_check())"]
+def _webview2_problem():
+    """Windows: why pywebview would not use WebView2, or None. pywebview does not fail without the runtime -- it opens the page in
+    MSHTML, Internet Explorer's engine, which cannot run it and which the browser fallback below never gets to replace. This is the
+    look pywebview itself makes (winforms._is_chromium): .NET Framework 4.6.2 and a WebView2 version in the registry."""
     try:
-        done = subprocess.run(cmd, cwd=None if config.FROZEN else str(config.ROOT),
-                              capture_output=True, text=True, timeout=30)
+        import platform as _platform
+        import winreg
+        import webview
+        if webview.settings.get("WEBVIEW2_RUNTIME_PATH"):
+            return None
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full") as net:
+            if winreg.QueryValueEx(net, "Release")[0] < 394802:
+                return "it needs .NET Framework 4.6.2 or newer"
+        for guid in ("{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}", "{2CD8A007-E189-409D-A2C8-9AF4EF3C72AA}",
+                     "{0D50BFEC-CD6A-4F9A-964C-C7416E3ACB10}", "{65C35B14-6C1D-4122-AC46-7148CC9D6497}"):     # runtime, beta, dev, canary
+            for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+                wow = "" if _platform.machine() == "x86" or hive == winreg.HKEY_CURRENT_USER else "WOW6432Node\\"
+                try:
+                    with winreg.OpenKey(hive, r"SOFTWARE\%sMicrosoft\EdgeUpdate\Clients\%s" % (wow, guid)) as key:
+                        if int(str(winreg.QueryValueEx(key, "pv")[0]).split(".")[0]) >= 86:
+                            return None
+                except (OSError, ValueError):
+                    pass
+        return "the Microsoft Edge WebView2 Runtime is not installed (free from Microsoft; Windows 11 has it)"
+    except OSError:
+        return "it needs .NET Framework 4.6.2 or newer"
+    except Exception:
+        return None                                            # cannot be told: let pywebview try
+
+
+def _window_problem():
+    """None when pywebview can open a window here, else (why, tell): a sentence for the log, and whether the user can do something
+    about it (then the activity log says so too -- a browser tab that opens without a word looks like a program that has no window).
+    Linux: Qt does not raise when it cannot start (no display, a library missing) -- it aborts the process, server included -- so a
+    child tries first, and the browser is the answer when it dies."""
+    if os.name == "nt":
+        why = _webview2_problem()
+        return (why, True) if why else None
+    if not sys.platform.startswith("linux") or importlib.util.find_spec("gi"):
+        return None                                             # GTK from the system, as ever
+    if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+        return "no display (DISPLAY and WAYLAND_DISPLAY are not set)", False
+    cmd = [sys.executable, "--window-check"] if config.FROZEN else \
+        [sys.executable, "-c", "import sys; from sourcerer import window_probe; sys.exit(window_probe.main())"]
+
+    def probe(debug):
+        # (QT_DEBUG_PLUGINS makes Qt name the library a platform plugin lacks -- and fills stderr with what it is not interested in)
+        return subprocess.run(cmd, cwd=None if config.FROZEN else str(config.ROOT), capture_output=True, text=True, timeout=30,
+                              env=dict(os.environ, QT_DEBUG_PLUGINS="1") if debug else None)
+    try:
+        done = probe(True)
+        if done.returncode:
+            lib = re.search(r"(lib[\w.+-]+\.so[\w.]*): cannot open shared object file", done.stderr or "")
+            if lib:
+                package = _QT_LIBS.get(lib.group(1))
+                return "Qt needs %s%s -- README lists everything the Linux window needs" % (
+                    lib.group(1), " (Debian/Ubuntu: %s)" % package if package else ""), True
+            done = probe(False)                                 # something else: its own words, without the debug noise
     except (OSError, subprocess.SubprocessError) as e:
-        log.info("Window check did not run: %s", e)
-        return False
+        return "the window check did not run: %s" % e, False
     if done.returncode:
-        lines = (done.stderr or "").strip().splitlines()
-        log.info("Qt cannot open a window here (%s)", lines[-1] if lines else "code %s" % done.returncode)
-        return False
+        lines = [line for line in (done.stderr or "").strip().splitlines() if line.strip()]
+        return "Qt cannot open a window here (%s)" % (lines[-1] if lines else "code %s" % done.returncode), False
     if os.geteuid() == 0:                                   # Chromium refuses to start as root otherwise
         os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS", "--no-sandbox")
-    return True
+    return None
 
 
 def _serve_until_idle():
@@ -274,8 +317,11 @@ def main(argv=None):
     try:
         if not (args.browser or args.no_open):
             try:
-                if not _window_ok():
-                    raise RuntimeError("no Qt or GTK window possible")
+                problem = _window_problem()
+                if problem:
+                    if problem[1]:
+                        sync.event("warn", "No app window: %s. Sourcerer opens in your browser instead." % problem[0])
+                    raise RuntimeError(problem[0])
                 import webview
                 if os.name == "nt":
                     webview.settings["DRAG_REGION_DIRECT_TARGET_ONLY"] = True     # a drag starts on the bar itself, not on its buttons
@@ -287,10 +333,14 @@ def main(argv=None):
                 # The icon argument is Qt's and GTK's (a PNG). On Windows pywebview builds a .NET Icon from it and a PNG is no icon: the
                 # restarted Sourcerer of the smoke test came up, logged its port and was gone (v0.55's first build); Windows gets its icon
                 # from the exe and from _window_icon.
-                if sys.platform.startswith("linux") and "icon" in inspect.signature(webview.start).parameters:
-                    webview.start(icon=str(config.STATIC / "icon.png"))
-                else:
-                    webview.start()
+                options = {}
+                if sys.platform.startswith("linux"):
+                    parameters = inspect.signature(webview.start).parameters
+                    if "icon" in parameters:
+                        options["icon"] = str(config.STATIC / "icon.png")
+                    if "gui" in parameters and not importlib.util.find_spec("gi"):
+                        options["gui"] = "qt"       # without it pywebview tries GTK first and every start logs "GTK cannot be loaded" with a traceback
+                webview.start(**options)
                 return 0                                      # the window was closed
             except Exception as e:
                 server.WINDOW = None

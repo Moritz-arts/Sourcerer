@@ -65,6 +65,10 @@ the same artist on several sites is combined; merge dialogs with reasons, *Merge
 **Browse** — three views (Artists, Gallery, Recommended placeholder); artists on the left, posts on the right; *All artists* with a time window;
 site chips, Squares / Full layout, viewer with zoom, download one / several / whole artist, GIFs and ugoira play; settings of the page are kept across restarts.
 
+**The window** — on Windows the page's own bar is the title bar and the system moves the window: it docks at the screen's edges, comes back from maximized
+when pulled down, and keeps working on the lock screen and under dialogs; a second start brings it forward without changing its state; Linux names the
+system library that is missing; a missing WebView2 runtime opens the browser. The first real run of the docking on Windows is still to be seen.
+
 **Speed and safety** — snapshots, one cached listing per artist, a pooled picture session, indexes on the file table; request counting per site,
 look gaps for sources read lately, rate-limit windows respected, three artists on different sites at once.
 

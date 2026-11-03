@@ -120,9 +120,18 @@ Traps:
   `requirements.txt`; the venv has no GTK). Without it the log says "GTK cannot be loaded" and the page
   greys every window/OAuth login (`server.WINDOW is None`) -- v0.25 and before, in the launcher and
   the AppImage alike. **Qt aborts the process when it cannot start** (no display, no `libxcb-cursor0`
-  or other xcb library -- an `except` never sees it), so `desktop._window_ok` first runs a child
-  (`window_check`; frozen: `--window-check`, dispatched in `app.py`) and falls back to the browser when
-  it dies. Root needs `--no-sandbox` for QtWebEngine (set there). The AppImage bundles Qt (`build.py`:
+  or other xcb library -- an `except` never sees it), so `desktop._window_problem` first runs a child
+  (`window_probe.main`: Qt and nothing of Sourcerer, 0.2 s -- importing `desktop` there cost another 0.5 s; frozen: `--window-check`, dispatched in
+  `app.py`) and falls back to the browser when it dies. **A minimal system lacks more than `libxcb-cursor0`** (checked on Ubuntu 24.04 with PyQt6
+  6.12: `libEGL.so.1` fails the import of any Qt module; the xcb plugin wants `libxkbcommon-x11`, `libxcb-cursor`, `-icccm`, `-image`, `-keysyms`,
+  `-render-util`, `-xkb` and `-util`): README lists the Debian/Ubuntu packages, and `QT_DEBUG_PLUGINS=1` in the child makes Qt name the library
+  it stopped at, which the activity log then says (`_QT_LIBS` maps the known ones to their package) -- a browser tab that opens without a word looks
+  like a program that has no window. `webview.start(gui="qt")` where `gi` is absent: without it pywebview tries GTK first and logs
+  "GTK cannot be loaded" with a traceback at every start. Root needs `--no-sandbox` for QtWebEngine (set there).
+  **On Windows pywebview does not fail without the WebView2 runtime** -- it opens the page in MSHTML (Internet Explorer's engine), which cannot run
+  it, and the browser fallback never gets to replace it: `desktop._webview2_problem` makes pywebview's own registry look first.
+  **`pywebview>=6.1`**: 5.3-6.0 bind the drag regions once, at injection, to the elements that carry the class at that moment (the page adds it later,
+  never before an unlock), and have no `DRAG_REGION_DIRECT_TARGET_ONLY`. The AppImage bundles Qt (`build.py`:
   ~600 MB unpacked, ~240 MB gzip); the **tar.gz (one file) excludes it** -- it would unpack that on
   every start -- and stays browser-only (`SOURCERER_DETACHED`: the page's Quit, or 15 minutes
   without a page). Checked: bundle under Xvfb reports `window: true`.
