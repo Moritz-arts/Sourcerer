@@ -327,6 +327,10 @@ def main(argv=None):
                 import webview
                 if os.name == "nt":
                     webview.settings["DRAG_REGION_DIRECT_TARGET_ONLY"] = True     # a drag starts on the bar itself, not on its buttons
+                if os.environ.get("SOURCERER_DEBUG_PORT", "").isdigit():
+                    # The page's DevTools protocol on that port: .github/window_test.py reads the page through it
+                    # (WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS opened no port on the runner).
+                    webview.settings["REMOTE_DEBUGGING_PORT"] = int(os.environ["SOURCERER_DEBUG_PORT"])
                 server.WINDOW = webview.create_window(
                     "Sourcerer v%s" % config.VERSION, url, width=1280, height=860, min_size=(760, 520))
                 if os.name == "nt":
