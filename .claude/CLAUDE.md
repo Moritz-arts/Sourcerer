@@ -774,7 +774,7 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   still drawn at random, 1.0-1.6 s) -- the careful lane made a list of followed members take twice as long as clicking through it (41.7 s -> 22.1 s for 119 rows).
   **Any word from the forum ends it for 24 h** (setting `unfriendly`, survives a restart): a counted refusal (401, a 403 that is no guess), and every `pause()`
   (a bot check, a 429, a 409, three refusals, the budget); a new login (`lift`) starts the count afresh. Only `xenforo:` logins can earn it -- pixiv, X, Patreon,
-  Fanbox and Fantia keep the careful lane always. Gallery-dl's own reads of a forum (`sleep-request`) are not part of it. Measured on one real forum only.
+  Fanbox and Fantia keep the careful lane for lists and pages (their *files* follow `login_pace`, below). Gallery-dl's own reads of a forum (`sleep-request`) are not part of it. Measured on one real forum only.
 - **A forum without the Media Gallery addon is listed from its attachment browser** (`xenforo._attachment_pages`; its member pages 404, so gallery-dl has
   nothing to list). `pages()` first asks **the forum's front page `index.php?media/`**, once per forum (`_uses_media_gallery`): XenForo answers an unknown route
   with a 404, so a 404 means "no gallery" and anything else -- an answer, a refusal, an error page -- means the gallery route exists and the card goes to gallery-dl as
@@ -1094,6 +1094,20 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   follow at once), every gap times a random `JITTER`, a `READ_BREAK` every
   `READ_EVERY` requests, a daily `BUDGETS` count per site. Regular timing
   is what bot detection looks for -- never make a gap fixed again.
+- **Files and pictures on a login's lane have a pace of their own** (`net.BULK`, `net.BROWSE`; Settings > Sites & network *Files from a site with a cookie
+  login*, `login_pace`: careful / **normal, the default** / fast): a sync's activity bar read "Downloading 123 / 424 ... 15 KB/s" -- one file every 2-3 s and a
+  rest of 15-60 s every 20-40 files on a forum's, Fanbox's or Fantia's lane, and a gallery page of sixty thumbnails the same (a forum has no small pictures: its
+  thumbnails are the attachments). **A file download** (`net.download` -> `_Polite(bulk=True)`) takes `BULK[login_pace]` (`net._rhythm`): normal 1.0 s (times
+  `JITTER`) and a rest of 6-20 s every 40-80 files, fast 0.5 s and none, careful the lane above, the quiet forum's included. **A listing, a page, an API
+  request keep the careful lane whatever is chosen** -- those are what an account is flagged for, a file is a file; `first` / `interactive()` requests keep
+  `INTERACTIVE_PACE`. **A site that said a word is read carefully for `FRIENDLY_REST` whatever is chosen** (`_calm`: a counted refusal, any `pause()` --
+  `_unfriendly` keeps its stamp for every site now; only the quiet *forum* lane of v0.59 stays the forums'). The daily budgets are untouched (`spend()` counts
+  every request). **The pictures somebody looks at** -- the grid, the Artists overview, avatars: `fetch_picture` without `first`; the large view keeps
+  its lane -- **from a site that wants the login go through `_Polite(browse=True)`**: a lane of their own (`_hosts` keys have a fifth element),
+  `BROWSE` = 3 at once and 0.3 s apart (start to start, as the preview lane; not end to start), no reading rest, and the host's own limits still hold
+  (`HOSTS`: Fanbox's file host is two at 0.6 s) -- the way a browser loads a page of them, where sixty attachments took minutes. Timing checked with a test of
+  the lanes (made-up host, shrunk constants), **not measured against a real site**: 'normal' is the pace the quiet forum measured in v0.59; 'fast' and BROWSE are
+  the user's choice, made from the screenshot.
 - **A site that objects rests, all of it** (`net.pause`, saved in the
   setting `paused`): a 429 on a login, a bot check, three refused logins,
   X's ratelimit or lock (gallery-dl `ratelimit: abort`, `_run`). A site is

@@ -71,7 +71,8 @@ lock screen and under dialogs; a Windows test moves and docks the real window wi
 without changing its state; Linux names the system library that is missing; a missing WebView2 runtime opens the browser. Not yet seen on a real desktop.
 
 **Speed and safety** — snapshots, one cached listing per artist, a pooled picture session, indexes on the file table; request counting per site,
-look gaps for sources read lately, rate-limit windows respected, three artists on different sites at once.
+look gaps for sources read lately, rate-limit windows respected, three artists on different sites at once; files from a site with a cookie login come at a pace
+Settings chooses (normal by default) and the pictures you look at from such a site load like in a browser.
 
 **Downloads and updates** — Sourcerer-Windows.exe and portable zip, .dmg for both Mac types, AppImage and tar.gz, built and started by CI before they are attached;
 in-app update for the Python version and the installed Windows copy; *Actions › Publish* merges and releases.

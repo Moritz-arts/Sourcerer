@@ -34,7 +34,7 @@ DEDUPES = ("keep_all", "best", "master")
 CHOICES = {"filenames": ("original", "dated"), "theme": ("system", "light", "dark"),
            "auto_sync": ("0", "1"), "import_follows": ("0", "1"), "channel": ("stable", "beta"),
            "tile_logo": ("0", "1"), "scan_on_start": ("0", "1"), "grid_quality": ("best", "fast"),
-           "login_gap": ("careful", "normal", "fast"),
+           "login_gap": ("careful", "normal", "fast"), "login_pace": ("careful", "normal", "fast"),
            "browse_window": ("0", "7", "14", "30", "90")}
 RANGES = {"card_size": (160, 800), "auto_hours": (1, 168), "parallel": (1, 64),
           "per_host": (1, 32), "pace_ms": (0, 5000)}
@@ -1325,7 +1325,7 @@ def save_settings():
     if clean.get("import_follows") == "1":
         # Switched on just now: every list is read, not held back by the time of an earlier look.
         follows.look_async(follows.keys() if follows_was != "1" else None)
-    net.configure(per_host=db.setting_int("per_host", 1, 32), pace_ms=db.setting_int("pace_ms", 0, 5000))
+    net.apply_settings()
     return get_settings()
 
 

@@ -307,7 +307,7 @@ def main(argv=None):
     # made in memory now, and the copies are only clutter.
     shutil.rmtree(config.USERDATA / "Thumbs", ignore_errors=True)
     _after_update()
-    net.configure(per_host=db.setting_int("per_host", 1, 32), pace_ms=db.setting_int("pace_ms", 0, 5000))
+    net.apply_settings()
     sync.scheduler()
     follows.start()
     httpd = make_server("127.0.0.1", args.port, server.app, threaded=True)

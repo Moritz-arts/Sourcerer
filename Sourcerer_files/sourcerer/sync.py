@@ -992,7 +992,7 @@ def _sync_artist(artist_id, auto=False, only=None, mode=None):
     unsettled = collections.defaultdict(set)                                  # ... and which
     for src, _site, m in todo:
         unsettled[src["id"]].add(m.remote_key)
-    net.configure(per_host=db.setting_int("per_host", 1, 32), pace_ms=db.setting_int("pace_ms", 0, 5000))
+    net.apply_settings()
 
     def one(job):
         src, site, media = job

@@ -19,7 +19,9 @@ What keeps a logged-in account safe (an account can be locked, not just a
 page refused):
   - a request that carries a login goes alone, at least LOGIN_PACE apart,
     whatever Settings say, and every gap is drawn at random (JITTER) with a
-    longer reading break now and then -- a metronome is the easiest robot to spot;
+    longer reading break now and then -- a metronome is the easiest robot to spot.
+    A file download of such a login follows Settings' login pace (BULK), and the
+    pictures somebody is looking at come a browser's way (BROWSE);
   - a site that says stop -- a 429, a bot check, a lock -- is paused as a whole
     (pause(): every host of the company, all cards, the gallery, the checks),
     for as long as it asks or for hours, and the pause outlives a restart;
@@ -54,8 +56,8 @@ RETRIES = 4
 
 _local = threading.local()
 _lock = threading.Lock()
-_hosts = {}                 # (host, carries a login, small pictures) -> its limiter's state
-_limits = {"per_host": 32, "pace": 0.1}
+_hosts = {}                 # (host, carries a login, small pictures, a token only, a picture somebody looks at) -> its limiter's state
+_limits = {"per_host": 32, "pace": 0.1, "login_pace": "normal"}
 CAP = 300                   # the longest Retry-After waited out; a longer one pauses the site
 
 # Sites stricter than Settings: (requests at once, seconds apart). With
@@ -99,6 +101,15 @@ FRIENDLY_AFTER = 12
 FRIENDLY_REST = 24 * 3600
 FORUM_READ_EVERY = (40, 80)
 FORUM_READ_BREAK = (6, 20)
+# A file download that carries a cookie login (Settings > Sites & network, `login_pace`): (seconds between two files, a reading break after this many
+# files or None, of this many seconds). 'careful' is the lane above as it always was (the quiet forum's included); 'normal' takes a file about every
+# 1.3 s and rests a little now and then, 'fast' one every 0.65 s without a break. Listings, pages and everything else a login asks keep the lane
+# above: those requests are what an account is flagged for, a file is a file. A site that said a word lately (_calm) is read carefully whatever is chosen.
+BULK = {"careful": (LOGIN_PACE, READ_EVERY, READ_BREAK), "normal": (1.0, (40, 80), (6, 20)), "fast": (0.5, None, None)}
+# The pictures of a gallery from a site that wants the login (a forum's attachments, Fanbox, Fantia) are fetched the way a browser fetches a page of
+# them -- a few at once, a fraction of a second apart, no reading break: somebody is looking at them, and at LOGIN_PACE a page of sixty took minutes.
+# Still the login's own lane (never the preview lane), counted in the day's budget, and stopped by a pause like every other request.
+BROWSE = (3, 0.3)
 # Requests a day carrying a login, per site -- real HTTP requests, counted one by one (X, Fanbox and Fantia: what gallery-dl asked,
 # read from its log, _gdl.items(site=); until v0.42 they counted the files of a page, ~10 times what the site was asked, and the
 # 1500 of X were spent by "All artists" long before X had seen that many requests). None of the sites publishes a number for
@@ -244,9 +255,8 @@ def _friendly(url):
 
 
 def _unfriendly(url):
-    """A forum said a word (a refusal, a pause, a bot check): back to the careful lane, and no fast one for FRIENDLY_REST."""
-    if not _forum(url):
-        return
+    """A site said a word (a refusal, a pause, a bot check): back to the careful lane, and no fast one for FRIENDLY_REST -- a forum's
+    quiet lane, and every site's login pace for files (_calm)."""
     site = site_of(url)
     with _lock:
         _clean.pop(site, None)
@@ -254,6 +264,23 @@ def _unfriendly(url):
         _stored("unfriendly")[site] = time.time() + FRIENDLY_REST
         _store("unfriendly")
     _flush()
+
+
+def _calm(url):
+    """True when the site has said nothing against Sourcerer for FRIENDLY_REST. Called under _lock."""
+    return _stored("unfriendly").get(site_of(url), 0) <= time.time()
+
+
+def _rhythm(url, bulk):
+    """(seconds between two requests, reading break after this many requests or None, of this many seconds) for a request that carries a cookie
+    login. A forum that stayed quiet is read at FORUM_PACE (_friendly); a file download follows Settings' login pace (BULK) -- faster than that
+    only while the site has said nothing (_calm), and never slower than the careful lane gives. Called under _lock."""
+    pace, every, rest = (FORUM_PACE, FORUM_READ_EVERY, FORUM_READ_BREAK) if site_of(url) in _fast else (LOGIN_PACE, READ_EVERY, READ_BREAK)
+    if bulk and _calm(url):
+        wanted = BULK.get(_limits["login_pace"]) or BULK["normal"]
+        if wanted[0] < pace:
+            pace, every, rest = wanted
+    return pace, every, rest
 
 
 def paused(url):
@@ -539,12 +566,21 @@ _EXT = {"image/jpeg": ".jpg", "image/png": ".png", "image/gif": ".gif",
         "audio/mpeg": ".mp3", "audio/ogg": ".ogg", "audio/mp4": ".m4a"}
 
 
-def configure(per_host=None, pace_ms=None):
+def configure(per_host=None, pace_ms=None, login_pace=None):
     with _lock:
         if per_host:
             _limits["per_host"] = max(1, int(per_host))
         if pace_ms is not None:
             _limits["pace"] = max(0, int(pace_ms)) / 1000.0
+        if login_pace in BULK:
+            _limits["login_pace"] = login_pace
+
+
+def apply_settings():
+    """What Settings say about speed, taken from the database: at the start, when they are saved and when a sync begins."""
+    from . import db
+    configure(per_host=db.setting_int("per_host", 1, 32), pace_ms=db.setting_int("pace_ms", 0, 5000),
+              login_pace=db.get_setting("login_pace"))
 
 
 def _tls13():
@@ -658,13 +694,15 @@ class _Polite:
     one at a time and LOGIN_PACE apart for requests carrying a login, timed
     from the end of the last one, with a reading break now and then."""
 
-    def __init__(self, url, login=False, first=False, preview=False):
+    def __init__(self, url, login=False, first=False, preview=False, browse=False, bulk=False):
         # first: somebody is waiting for this one -- a gallery's large view, or a download they
         # asked for (interactive()). It goes ahead of what can wait and takes no reading break.
+        # browse: a picture somebody is looking at, from a site that wants the login (BROWSE); bulk: a file download of one (BULK).
         self.token = login == "token"
         self.url, self.login = url, login is True
         self.first = first or bool(getattr(_local, "interactive", 0))
         self.preview = preview and not login
+        self.browse, self.bulk = browse and self.login, bulk and self.login
         self.host = urllib.parse.urlparse(url).hostname or ""
 
     def __enter__(self):
@@ -672,16 +710,19 @@ class _Polite:
         own = _own(self.host)
         with _lock:
             limit, pace = min(_limits["per_host"], own[0]), max(_limits["pace"], own[1])
-            fast = self.login and site_of(self.url) in _fast          # (a forum that has been quiet: _friendly)
-            if self.login:                       # Settings can make this gentler, never faster
-                limit, pace = 1, max(pace, FORUM_PACE if fast else LOGIN_PACE)
+            every, rest = None, None
+            if self.browse:                      # a browser's way (BROWSE); the host's own limits still hold
+                limit, pace = min(BROWSE[0], limit), max(BROWSE[1], pace)
+            elif self.login:                     # Settings can make this gentler, never faster
+                base, every, rest = _rhythm(self.url, self.bulk)
+                limit, pace = 1, max(pace, base)
                 if self.first:                   # somebody waits: the gap of a person browsing, not of a scan
                     pace = max(_limits["pace"], min(own[1], 1.0), INTERACTIVE_PACE)
             elif self.token:
                 limit, pace = 1, max(pace, TOKEN_PACE if not self.first else 0.3)
             elif self.preview:
                 limit, pace = PREVIEW
-            lane = (self.host, self.login, self.preview, self.token)
+            lane = (self.host, self.login, self.preview, self.token, self.browse)
             entry = _hosts.get(lane)
             if entry is None or entry["limit"] != limit:
                 entry = _hosts[lane] = {
@@ -704,12 +745,11 @@ class _Polite:
             with _lock:
                 # One at a time: the gap runs from the end of the last request,
                 # so a slow answer does not eat it.
-                at = (entry["end"] if self.login else entry["start"]) + pace * random.uniform(*JITTER)
+                at = (entry["end"] if self.login and not self.browse else entry["start"]) + pace * random.uniform(*JITTER)
                 reading_break = 0.0                  # (not "pause": that is the module's function to rest a site)
-                if self.login:
+                if every:                            # (a login's request; none on 'fast', and none for a picture somebody looks at)
                     entry["count"] += 1
                     if entry["count"] >= entry["break"] and not self.first:
-                        every, rest = (FORUM_READ_EVERY, FORUM_READ_BREAK) if fast else (READ_EVERY, READ_BREAK)
                         entry["count"], entry["break"] = 0, random.randint(*every)
                         reading_break = random.uniform(*rest)
                 now = time.monotonic()
@@ -1034,7 +1074,7 @@ def download(url, folder, mime_hint="", progress=None, headers=None):
     part = folder / (".%s.part" % os.urandom(6).hex())
     digest = hashlib.sha256()
     # The whole transfer counts against the site's limit, not just its start.
-    with _Polite(url, _carries_login(url, headers)):
+    with _Polite(url, _carries_login(url, headers), bulk=True):
         return _stream(url, part, digest, mime_hint, progress, headers)
 
 
@@ -1074,7 +1114,7 @@ def fetch_picture(url, headers=None, limit=40 << 20, first=False):
     """A picture or video for the gallery, as (content type, bytes): asked for
     once, no retries -- a preview is not worth asking a site twice -- and only
     a picture or a video is accepted."""
-    with _Polite(url, _carries_login(url, headers), first, preview=not first):
+    with _Polite(url, _carries_login(url, headers), first, preview=not first, browse=not first):
         resp = _get(url, stream=True, headers=headers, tries=1, pooled=True)
         try:
             ctype = (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
