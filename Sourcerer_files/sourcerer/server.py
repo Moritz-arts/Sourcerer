@@ -445,7 +445,7 @@ def state():
     have = {a["key"].split(":", 1)[0] for a in rows if a["logged_in"] and _shown(a["key"])}
     on = {s.LABEL: s.KIND in have for s in sources.SITES}
     return jsonify(version=config.VERSION, library=sync.library(), sep=os.sep,
-                   sites=[s.LABEL for s in sources.SITES], settings=db.settings(), speeds=net.PROFILES,
+                   sites=[s.LABEL for s in sources.SITES], settings=db.settings(), speed=net.speed_state(),
                    fields=[{"label": label, "example": example, "logged_in": on.get(label, False)}
                            for label, example in sources.FIELDS],
                    logins=accounts.problems(rows), pauses=net.pauses(),
@@ -1289,7 +1289,7 @@ def open_url():
 @app.get("/api/settings")
 def get_settings():
     return jsonify(settings=db.settings(), library=sync.library(),
-                   default_library=str(config.DEFAULT_LIBRARY), speeds=net.PROFILES)    # (the page says what each level does from these numbers)
+                   default_library=str(config.DEFAULT_LIBRARY), speed=net.speed_state())    # (the page says what each level does from these numbers)
 
 
 @app.put("/api/settings")
@@ -1320,12 +1320,39 @@ def save_settings():
     for key, value in clean.items():
         if key in ("auto_sync", "auto_hours") and db.get_setting(key) != value:
             db.set_setting("next_auto", "")        # drawn from the old interval: draw anew when due
+        if key == "speed":                         # a level takes the sliders back to it; the daily limits stay
+            keep = {k: v for k, v in net.tuning().items() if k.startswith("limit_")}
+            db.set_setting("speed_tune", json.dumps(net.clean_tune(keep, value)))
         db.set_setting(key, value)
     if clean.get("import_follows") == "1":
         # Switched on just now: every list is read, not held back by the time of an earlier look.
         follows.look_async(follows.keys() if follows_was != "1" else None)
     net.apply_settings()
     return get_settings()
+
+
+@app.put("/api/speed")
+def save_speed():
+    """The sliders of Settings > Speed & safety. {"tune": {knob: number, ...}} moves some (null takes one back to its level), {"reset": "sliders" | "limits"}
+    takes all of the one kind back. What is sent is checked and clamped (net.clean_tune); the answer is the new state, the same the page gets with /api/state."""
+    body = request.get_json(force=True) or {}
+    level, mine = net._limits["speed"], net.tuning()
+    tune = body.get("tune")
+    if tune is not None and not isinstance(tune, dict):
+        return jsonify(error="tune must be an object."), 400
+    for key, value in (tune or {}).items():
+        if key not in net._BY_KEY:
+            return jsonify(error="Unknown slider: %s." % key), 400
+        if value is None:
+            mine.pop(key, None)
+        else:
+            mine[key] = value
+    if body.get("reset") in ("sliders", "limits"):
+        limits = body["reset"] == "limits"
+        mine = {k: v for k, v in mine.items() if k.startswith("limit_") != limits}
+    db.set_setting("speed_tune", json.dumps(net.clean_tune(mine, level)))
+    net.apply_settings()
+    return jsonify(speed=net.speed_state(), settings=db.settings())
 
 
 @app.post("/api/pick-folder")

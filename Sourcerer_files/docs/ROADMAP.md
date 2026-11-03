@@ -72,7 +72,7 @@ without changing its state; Linux names the system library that is missing; a mi
 
 **Speed and safety** — snapshots, one cached listing per artist, a pooled picture session, indexes on the file table; request counting per site,
 look gaps for sources read lately, rate-limit windows respected, three artists on different sites at once; **one speed choice** (Careful / Normal / Fast) rules
-downloads, pauses, the gap between artists and the pace of a login's files, and the pictures you look at load like in a browser.
+downloads, pauses, the gap between artists and the pace of a login's files, and the pictures you look at load like in a browser. **Sliders** under the levels for every value behind them and for each site's daily limit, with a notice that they run at your own risk.
 
 **Downloads and updates** — Sourcerer-Windows.exe and portable zip, .dmg for both Mac types, AppImage and tar.gz, built and started by CI before they are attached;
 in-app update for the Python version and the installed Windows copy; *Actions › Publish* merges and releases.

@@ -334,7 +334,7 @@ function load() {
   return api("GET", "/api/state").then(function (d) {
     S.artists = d.artists; S.apart = apartSet(d.apart); S.sync = d.sync; S.library = d.library; S.window = d.window;
     S.frame = d.frame; applyFrame();
-    S.sep = d.sep; S.sites = d.sites; S.fields = d.fields; S.settings = d.settings; S.speeds = d.speeds || {}; S.logins = d.logins || []; S.pauses = d.pauses || [];
+    S.sep = d.sep; S.sites = d.sites; S.fields = d.fields; S.settings = d.settings; S.speed = d.speed || {}; S.logins = d.logins || []; S.pauses = d.pauses || [];
     $("version").textContent = "v" + d.version;
     $("btn-quit").classList.toggle("hidden", S.window);
     applySettings();
@@ -2323,17 +2323,70 @@ function showPane(name) {
   if (name === "about" || name === "updates") loadInfo();
 }
 
-// What a level of Settings > Speed & safety does, in words, from the numbers the server runs by (net.PROFILES): one row of the table.
+// What Settings > Speed & safety do, in words, from the numbers the server runs by (net.speed_state's row): the page holds no number of its own.
 function speedSays(p) {
-  if (!p) return [];
-  var s = function (a) { return a[0] + "-" + a[1] + " s"; }, n = function (x) { return String(Math.round(x * 100) / 100); };
+  if (!p || !p.gap) return [];
+  var s = function (a) { return n(a[0]) + "-" + n(a[1]) + " s"; }, n = function (x) { return String(Math.round(x * 100) / 100); };
   return [
     "Downloads: up to " + p.parallel + " files at once, " + p.per_host + " per site" + (p.pause ? ", at least " + n(p.pause) + " s between two requests to one site." : "."),
-    "Sites with your login (pixiv, X, Patreon, Fanbox, Fantia, forums): " + s(p.gap) + " between two artists, a file about every " + n(p.files * 1.3) + " s" +
-      (p.every ? ", a rest of " + s(p.rest) + " every " + p.every[0] + "-" + p.every[1] + " files." : ", no rest."),
+    "Sites with your login (pixiv, X, Patreon, Fanbox, Fantia, forums): a page or list every " + n(p.pace) + "-" + n(p.pace * 1.6) + " s, " + s(p.gap) + " between two artists, a file about every " +
+      n(p.files * 1.3) + " s" + (p.every ? ", a rest of " + s(p.rest) + " every " + p.every[0] + "-" + p.every[1] + " files." : ", no rest."),
     "Browse: a page of such a site every " + n(p.look) + "-" + n(p.look * 1.6) + " s; pictures " + p.preview[0] + " at a time" +
       (p.preview[1] ? ", " + n(p.preview[1]) + " s apart" : ", all at once, like a browser") + "."
   ];
+}
+
+// One slider per value (what each is, its range and where it turns risky come from net.KNOBS). Risk: 0 no riskier than Normal, 1 riskier, 2 riskier than any level offers.
+function knobRisk(k, v) {
+  if (!v && k.zero != null) return k.zero;
+  if (k.risk === "high") return v <= k.safe ? 0 : v > k.danger ? 2 : 1;
+  return v >= k.safe ? 0 : v < k.danger ? 2 : 1;
+}
+function knobText(k, v) {
+  if (!v && k.key === "every") return "no breaks";
+  if (!v && k.key === "rest") return "none";
+  return String(Math.round(v * 100) / 100) + (k.unit ? " " + k.unit : "");
+}
+function knobHint(k) {
+  var L = S.speed.levels, cap = function (w) { return w.charAt(0).toUpperCase() + w.slice(1); };
+  var where = k.group === "limits" ? "Default " + knobText(k, k.default) : ["careful", "normal", "fast"].map(function (lv) { return cap(lv) + " " + knobText(k, L[lv][k.key]); }).join(" · ");
+  return where + (k.hint ? " — " + k.hint : "");
+}
+function paintTune() {
+  var sp = S.speed, host = $("tune");
+  if (!sp.knobs) { host.innerHTML = ""; host.dataset.built = ""; return; }
+  if (host.dataset.built !== "1") {
+    host.innerHTML = '<p class="hint warn">The sliders below are yours: faster or more than Normal is at your own risk.</p>' + sp.groups.map(function (g) {
+      return "<h4>" + esc(g.title) + (g.key === "limits" ? '<button type="button" class="linkish hidden" id="limits-reset">Reset limits</button>' : "") + '</h4><p class="ghint">' + esc(g.hint) + "</p>" +
+        sp.knobs.filter(function (k) { return k.group === g.key; }).map(function (k) {
+          return '<div class="knob" data-knob="' + k.key + '"><label for="knob-' + k.key + '">' + esc(k.label) + '</label><span class="val"></span>' +
+            '<input type="range" id="knob-' + k.key + '" min="' + k.low + '" max="' + k.high + '" step="' + k.step + '" value="' + sp.values[k.key] + '">' +
+            '<span class="khint">' + esc(knobHint(k)) + "</span></div>";
+        }).join("");
+    }).join("");
+    host.dataset.built = "1";
+  }
+  var worst = 0, own = sp.levels[sp.level];
+  sp.knobs.forEach(function (k) {
+    var row = host.querySelector('[data-knob="' + k.key + '"]'), v = sp.values[k.key], input = row.querySelector("input");
+    var r = k.key === "rest" && !sp.values.every ? 0 : knobRisk(k, v);
+    worst = Math.max(worst, r);
+    if (+input.value !== v) input.value = v;
+    row.querySelector(".val").textContent = knobText(k, v);
+    row.className = "knob r" + r + (Math.abs(v - own[k.key]) > 1e-9 && k.group !== "limits" ? " moved" : "") + (v !== k.default && k.group === "limits" ? " moved" : "");
+  });
+  var pill = $("risk-pill");
+  pill.className = "risk-pill r" + worst;
+  pill.textContent = ["Risk: low", "Risk: raised", "Risk: high"][worst];
+  $("limits-reset").classList.toggle("hidden", !sp.limits_changed);
+}
+
+function fillSpeed() {
+  var sp = S.speed;
+  $("speed-says").innerHTML = speedSays(sp.row).map(function (line) { return "<li>" + esc(line) + "</li>"; }).join("");
+  $("speed-custom").classList.toggle("hidden", !sp.tuned);
+  $("speed-base").textContent = $("speed-base2").textContent = sp.level ? sp.level.charAt(0).toUpperCase() + sp.level.slice(1) : "";
+  paintTune();
 }
 
 function fillSettings() {
@@ -2346,8 +2399,8 @@ function fillSettings() {
   $("set-tilelogo").checked = st.tile_logo !== "0";
   $("set-auto").checked = st.auto_sync === "1";
   $("set-hours").value = st.auto_hours; $("set-hours").disabled = st.auto_sync !== "1";
-  $("speed-says").innerHTML = speedSays(S.speeds[st.speed]).map(function (line) { return "<li>" + esc(line) + "</li>"; }).join("");
-  $$("[data-set]").forEach(function (b) { b.classList.toggle("selected", st[b.dataset.set] === b.dataset.value); });
+  fillSpeed();
+  $$("[data-set]").forEach(function (b) { b.classList.toggle("selected", st[b.dataset.set] === b.dataset.value && !(b.dataset.set === "speed" && S.speed.tuned)); });
   $("filename-example").textContent = "For example: " + (st.filenames === "dated" ? "2025-03-14_" : "") +
     "a6f1c09b2e7d4f31.png" + " — the name the file has on the site, wherever it has one.";
 }
@@ -2361,7 +2414,7 @@ function openSettings(pane) {
 
 function saveSetting(change) {
   return api("PUT", "/api/settings", change).then(function (d) {
-    S.settings = d.settings; S.library = d.library;
+    S.settings = d.settings; S.library = d.library; S.speed = d.speed || S.speed;
     applySettings(); fillSettings(); renderActivity();
     toast("Saved");
   }).catch(function (e) { fail(e); fillSettings(); });
@@ -2377,6 +2430,27 @@ $$("[data-set]").forEach(function (b) {
     });
   });
 });
+// The sliders: moving one shows its value and the risk at once; letting go saves it (the server checks it and says what it made of it).
+function saveTune(change) {
+  return api("PUT", "/api/speed", change).then(function (d) {
+    S.speed = d.speed; S.settings = d.settings; fillSettings(); toast("Saved");
+  }).catch(function (e) {
+    fail(e);
+    api("GET", "/api/settings").then(function (d) { S.speed = d.speed; S.settings = d.settings; fillSettings(); });
+  });
+}
+$("tune").addEventListener("input", function (e) {
+  var row = e.target.closest("[data-knob]");
+  if (row) { S.speed.values[row.dataset.knob] = +e.target.value; paintTune(); }
+});
+$("tune").addEventListener("change", function (e) {
+  var row = e.target.closest("[data-knob]"), tune = {};
+  if (!row) return;
+  tune[row.dataset.knob] = +e.target.value;
+  saveTune({ tune: tune });
+});
+$("tune").addEventListener("click", function (e) { if (e.target.closest("#limits-reset")) saveTune({ reset: "limits" }); });
+$("speed-reset").addEventListener("click", function () { saveTune({ reset: "sliders" }); });
 $("set-library").addEventListener("change", function () { saveSetting({ library: this.value }).then(load); });
 $("btn-browse").addEventListener("click", function () {
   api("POST", "/api/pick-folder", { start: $("set-library").value }).then(function (d) {
