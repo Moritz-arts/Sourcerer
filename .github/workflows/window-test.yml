@@ -1,5 +1,6 @@
 # Drives Sourcerer's real window on a Windows runner with the real mouse (.github/window_test.py): the bar moves
-# the window, a drag to the screen's edge docks it, a drag out of a docked window gives it its size back.
+# the window, a drag to the screen's edge docks it, a drag out of a docked window gives it its size back. A failing
+# check fails the run (WINDOW_TEST_STRICT), after one more try: a real mouse on a shared runner may stumble once.
 # Windows only, because that is where the page's own bar is the title bar. Twice: from source, and the frozen exe
 # a user runs (it differs in more than one way: pythonnet, the unpacked folder, no console).
 name: Window test (Windows)
@@ -27,7 +28,11 @@ jobs:
       - name: Install the packages Sourcerer needs
         run: python -m pip install -r Sourcerer_files/requirements.txt websocket-client
       - name: Move and dock the window with the mouse
-        run: python .github/window_test.py
+        env:
+          WINDOW_TEST_STRICT: "1"
+        run: |
+          python .github/window_test.py
+          if ($LASTEXITCODE -ne 0) { Write-Host "A real mouse on a shared runner: once more before the run fails."; python .github/window_test.py }
       - name: Keep the logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -50,7 +55,12 @@ jobs:
       - name: Build the exe
         run: python -c "import pathlib, sys; sys.path.insert(0, '.github/exe'); import build; out = pathlib.Path('build-exe').resolve(); out.mkdir(exist_ok=True); print(build.freeze(out, True))"
       - name: Move and dock the window with the mouse
-        run: python .github/window_test.py (Get-ChildItem -Path build-exe -Recurse -Filter Sourcerer.exe | Select-Object -First 1).FullName
+        env:
+          WINDOW_TEST_STRICT: "1"
+        run: |
+          $exe = (Get-ChildItem -Path build-exe -Recurse -Filter Sourcerer.exe | Select-Object -First 1).FullName
+          python .github/window_test.py $exe
+          if ($LASTEXITCODE -ne 0) { Write-Host "A real mouse on a shared runner: once more before the run fails."; python .github/window_test.py $exe }
       - name: Keep the logs
         if: always()
         uses: actions/upload-artifact@v4
