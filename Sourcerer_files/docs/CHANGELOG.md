@@ -3,6 +3,14 @@
 Newest first. Each entry is made from the commit subjects when a version is made, so a subject is one short,
 plain sentence.
 
+## v0.60 — 2026-11-03
+
+- Windows: the window docks and snaps like any other, and its bar also works on the lock screen and under dialogs
+- A second start brings the window forward without un-maximizing it
+- The window check names what is missing -- a Linux library or the WebView2 runtime -- and Qt starts without the GTK probe
+- pywebview 6.1 or newer: its drag regions follow classes the page adds later
+- The window check runs once on a build without Qt
+
 ## v0.59 — 2026-10-27
 
 - XenForo: a forum that leaves the member's name out of its addresses is recognised again, and a wrong login base is repaired
