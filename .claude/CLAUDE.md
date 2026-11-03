@@ -802,6 +802,18 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   batches. The viewer's `info()` gives such a file (told by its key, `xenforo:<host>:a<id>`: `_is_attachment`) only its post's own time -- from the clock when that post was read, else
   one read that teaches the clock (the thread's title, author and counts are not the file's) -- and a media item is never given a guessed time (`_fill_dates` keeps what it reads there as an anchor). A follow list's picture may hang on a class (`avatar-u<id>-s`) instead of a `data-user-id` (`_rows`).
   Written from a handoff of a live test on one real forum and checked here only against a made-up one: markup of another addon version or theme may not match `_tiles`.
+  **The number in a tile's small copy is the DATA's id, not the attachment's** (`data/attachments/<bucket>/<data id>-<md5 of the file>.jpg`; the route
+  `attachments/<id>/` wants the attachment id, and XenForo numbers the two apart -- an upload nobody attached, a file two posts share): on a forum where they differ
+  `attachments/<data id>/` is **another member's file**. That was "the viewer shows the right picture and, once the original has loaded, a completely wrong one"
+  (the user, 2026-11-03; "open original post" was right: it comes from the tile's link), and a sync saved such files under the artist, keyed `xenforo:<host>:a<data id>`
+  -- the keys stay (remote_key is forever), so **files saved before are not repaired and a key already saved is never fetched again**. `xenforo.resolve(media)` is the site hook
+  that fixes the address (asked by `gallery.picture` -- large, mid, and the grid when there is no small copy --, `gallery.download`, `snapshot_picture` and `sync._fetch` for an
+  item whose site has one; `None` for a gallery's files): it reads the page of the file's post (`_attachment_address`: the thread page, every attachment on it remembered by
+  (host, data id); the link around each small copy, and the pictures a post shows inline at full size by the name in `alt`, in the post's own part of the page only) and gives
+  that address. With none it tries the data id **only against the md5 in the small copy's name** (`_md5_check`: a file of another hash is never shown, never kept in the
+  gallery's cache -- checked before `_once` stores it --, never left as a part file; a refusal and a page that said nothing are remembered for `RETRY_AFTER`, so a viewer opened
+  again fetches neither the page nor the wrong original again) and otherwise raises: the viewer keeps the small copy and a sync fails the file. Checked by `.github/checks.py`
+  against a made-up forum whose numbers differ; **not seen on a real forum** (the data-id naming is from XenForo's source, not from the user's forum).
   A thread's attachments still go through gallery-dl.
 - **A Misskey looks like a Mastodon in the address** (`https://misskey.io/@user`) **and answers nothing a
   Mastodon client asks** (404 on `/api/v1/...`): Baraag's follow list names such accounts, and they were

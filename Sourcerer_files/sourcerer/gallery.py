@@ -717,6 +717,13 @@ def _once(gallery_id, key, make):
     return data
 
 
+def _file_of(site, m, address):
+    """(address, check) of an item's file itself: what its site works out and checks (a forum's attachment: sources.xenforo.resolve), else
+    the address the listing gave."""
+    special = site.resolve(m) if hasattr(site, "resolve") else None
+    return special or (address, None)
+
+
 def picture(gallery_id, number, size):
     """(content type, bytes) of an item's grid picture, its screen-sized "mid" or its large view, fetched
     with the headers its site wants and kept in memory only. Kept by address, not by size: a site whose
@@ -739,6 +746,12 @@ def picture(gallery_id, number, size):
     url = (m.thumb if thumb else "") or m.large or m.thumb or m.url
     if _gif(m) and m.url:
         url = m.url                                  # the GIF itself, for the grid and the viewer alike
+    # A file whose address the listing only guessed (a forum's attachment: its small copy names the DATA, not the attachment) is asked of the
+    # site -- the page of its post -- before it is fetched, and a guess that stays is checked against the file's hash: it raises when neither
+    # can be done, so the viewer keeps the grid's picture instead of showing another member's file.
+    check = None
+    if not (thumb and m.thumb) and not _gif(m):
+        url, check = _file_of(s.site, m, url)
 
     def get(address):
         # No retries for an answer (a refusal, a pause), but a dropped connection or a timeout is
@@ -749,17 +762,22 @@ def picture(gallery_id, number, size):
             time.sleep(0.8)
             return net.fetch_picture(address, headers=m.preview_headers or None, first=size == "large")
 
-    def fetch(address):
-        return _once(gallery_id, (gallery_id, number, address, ""), lambda: get(address))
+    def fetch(address, check=None):
+        def make():
+            data = get(address)
+            if check:
+                check(data[1])                       # before it is kept: a wrong file must not sit in the cache for a download to find
+            return data
+        return _once(gallery_id, (gallery_id, number, address, ""), make)
 
     try:
-        data = fetch(url)
+        data = fetch(url, check)
     except Exception:
         # A grid picture that is not there (a rendition the site does not make): the viewer's one will do.
-        fallback = m.large or m.url
+        fallback, fallback_check = _file_of(s.site, m, m.large or m.url) if thumb and m.thumb else ("", None)
         if not thumb or not m.thumb or not fallback or fallback == url:
             raise
-        data = fetch(fallback)
+        data = fetch(fallback, fallback_check)
     if thumb and not m.thumb and data[0].startswith("image/") and not _gif(m):
         # A forum gives no small picture: one is made here, in memory, from the original the viewer will want too.
         return _once(gallery_id, (gallery_id, number, url, "small"),
@@ -776,8 +794,13 @@ def download(gallery_id, number):
            "file": "", "size": 0}
     with db.connect() as con:
         src = con.execute("SELECT * FROM sources WHERE id = ?", (s.row["id"],)).fetchone()
+    try:
+        with net.interactive():                          # (somebody waits for the page that names a forum's attachment)
+            where = _file_of(s.site, m, m.large)[0]      # (the address its post's page gave)
+    except Exception:
+        where = m.large
     with _lock:
-        seen = _cache.get((gallery_id, number, m.large, ""))
+        seen = _cache.get((gallery_id, number, where, ""))
     if seen and m.large and m.large == m.url and m.filename and not m.fetch:
         m = _from_memory(m, *seen)             # the large view already fetched the original: no second request
     # Somebody is waiting for this one: ahead of what waits in the site's lane, no reading break.
@@ -901,12 +924,18 @@ def snapshot_picture(source_id, key):
         m = next((x for x in snap.items if x.remote_key == key), None) if snap else None
         if m is None:
             raise KeyError(key)
-        url = m.thumb or m.large or m.url
+        url, check = m.thumb or m.large or m.url, None
+        if not m.thumb:
+            with db.connect() as con:
+                row = con.execute("SELECT url FROM sources WHERE id = ?", (source_id,)).fetchone()
+            url, check = _file_of(sources.site_for(row["url"]) if row else None, m, url)
         try:
             ctype, data = net.fetch_picture(url, headers=m.preview_headers or None)
         except (requests.ConnectionError, requests.Timeout):
             time.sleep(0.8)
             ctype, data = net.fetch_picture(url, headers=m.preview_headers or None)
+        if check:
+            check(data)
         if ctype.startswith("image/") and (not m.thumb or _gif(m)):
             ctype, data = "image/jpeg", imaging.preview(io.BytesIO(data), 480)      # (an original, or a GIF: a small still)
         elif not ctype.startswith("image/"):

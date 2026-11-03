@@ -17,12 +17,14 @@ login window is one: its cookies -- Cloudflare's pass among them -- and its
 User-Agent go along with every request to the forum (accounts.py).
 """
 import datetime
+import hashlib
 import html
 import json
 import logging
 import random
 import re
 import threading
+import time
 import urllib.parse
 
 import requests
@@ -366,8 +368,6 @@ _dated = {}
 MAX_DATED = 20000
 
 
-def _post(f):
-    return f["url"].rsplit("/full", 1)[0] + "/" if "/full" in f["url"] else f["url"]
 def _tile_thumb(base, f):
     """A media gallery tile's small picture as an address -- the forum's own or a public host's (_thumb) -- or "" : the grid then makes its own from
     the original, which is the file itself and a thousand times the bytes. It must be the picture's own (XenForo names it `<media id>-<hash>`):
@@ -378,6 +378,8 @@ def _tile_thumb(base, f):
     return _thumb(base, small)
 
 
+def _post(f):
+    return f["url"].rsplit("/full", 1)[0] + "/" if "/full" in f["url"] else f["url"]
 
 
 def _epoch(text):
@@ -536,11 +538,21 @@ def _when(text):
 # Content-Disposition: the tile's alt text, the uploader's file name, names it. The tile shows no time; its post does. Attributes are
 # read one by one (a theme puts `class` first, or `alt` before `src`); the post and the file are addressed by their ids, and only the
 # small copy is taken from the page (_thumb): nothing a page says sends Sourcerer anywhere.
+# **The number in the small copy's name is the DATA's id, not the attachment's** (data/attachments/<bucket>/<data id>-<md5 of the file>.jpg; the
+# route wants the attachment id): XenForo numbers the two apart -- an upload nobody attached, a file two posts share -- so
+# `/attachments/<data id>/` is, on a forum where they differ, another member's file. That was the viewer's "right picture, then a completely wrong
+# one" and what a sync saved under the artist. resolve() asks the post's page which attachment is which; the data id stays the last resort
+# and then the file must hash to the md5 in the small copy's name.
 _TILE = re.compile(r'<a\b([^>]*)>\s*<img\b([^>]*)>', re.I)
 _POST_ID = re.compile(r"\bposts/(\d+)")
 _TILE_POST = re.compile(r'href="[^"]*?' + _POST_ID.pattern + r'/?"', re.I)
 _TILE_FILE = re.compile(r'src="([^"]*?/attachments/\d+/(\d+)-[^"]+)"', re.I)
 _TILE_ALT = re.compile(r'alt="([^"]*)"', re.I)
+_THUMB_MD5 = re.compile(r"/attachments/\d+/\d+-([0-9a-f]{32})\.", re.I)      # the file's md5, in its small copy's name
+# An attachment's own address -- `attachments/<slug>.<id>/`, `attachments/<id>/`, behind `index.php?` too -- and not a small copy's
+# (`data/attachments/<bucket>/<data id>-<md5>.jpg`, whose next part is not the end of the address).
+_ROUTE = re.compile(r"attachments/(?:[^/?#]*\.)?(\d+)/?(?:$|[?#])")
+_ANCHOR = re.compile(r'id="post-(\d+)"')
 _POST_TIME = re.compile(r'id="post-(\d+)"|datetime="([^"]+)"', re.I)
 _EXT = re.compile(r"\.(?=[a-z0-9]*[a-z])[a-z0-9]{2,5}$", re.I)       # "a.jpg", not "v2.5": the uploader's name, or a title with a dot
 _VIDEO = (".mp4", ".webm", ".m4v", ".mov")                          # the browser gives no content type
@@ -570,7 +582,7 @@ def _is_attachment(media):
 
 
 def _tiles(text):
-    """[(post id, small copy, attachment id, the uploader's file name)] of a browser page."""
+    """[(post id, small copy, data id, the uploader's file name)] of a browser page (the number in the small copy's name: see above)."""
     out = []
     for link, img in _TILE.findall(text):
         post, file = _TILE_POST.search(link), _TILE_FILE.search(img)
@@ -598,6 +610,101 @@ def _name(alt, att_id):
     the name's stem and the content type says the extension; with no name at all the id does."""
     ext = _EXT.search(alt)
     return ((alt[:ext.start()] if ext else alt) or att_id), (alt if ext else "")
+
+
+def _post_attachments(text, page, post_id):
+    """({data id: address}, {file name: [addresses]}) of what a post's page says about its attachments: the link of each -- around its small
+    copy, which names the data -- and, for the pictures a post shows inline at full size (the attachment's own address in `src`, the file's name
+    in `alt`), the name; those are looked for in the post's own part of the page only, where a name may be any thread's "image.jpg".
+    Only addresses on the page's own host: nothing a page says sends Sourcerer, and the forum's login, anywhere else (a link to this machine's network)."""
+    by_data, by_name = {}, {}
+    forum = urllib.parse.urlsplit(page).hostname
+
+    def own(href):
+        url = urllib.parse.urljoin(page, html.unescape(href))
+        return url if urllib.parse.urlsplit(url).scheme in ("http", "https") and urllib.parse.urlsplit(url).hostname == forum else ""
+    for link, img in _TILE.findall(text):
+        href, small = re.search(r'href="([^"]*)"', link, re.I), _TILE_FILE.search(img)
+        if href and small and _ROUTE.search(html.unescape(href.group(1))) and own(href.group(1)):
+            by_data[small.group(2)] = own(href.group(1))
+    anchors = [(m.start(), m.group(1)) for m in _ANCHOR.finditer(text)]
+    start = next((at for at, pid in anchors if pid == post_id), None)
+    if start is not None:
+        end = next((at for at, pid in anchors if at > start and pid != post_id), len(text))
+        for tag in re.findall(r"<img\b([^>]*)>", text[start:end], re.I):
+            src, alt = re.search(r'src="([^"]*)"', tag, re.I), _TILE_ALT.search(tag)
+            if src and alt and "/data/attachments/" not in src.group(1) and _ROUTE.search(html.unescape(src.group(1))) and own(src.group(1)):
+                by_name.setdefault(html.unescape(alt.group(1)).strip(), set()).add(own(src.group(1)))
+    return by_data, by_name
+
+
+_attachments, _att_lock = {}, threading.Lock()       # (host, data id) -> the address its post's page gave the attachment
+_unsettled = {}                                      # (host, data id) -> when the page of its post did not say, or its data id was another file: not asked again soon
+MAX_ATTACHMENTS = 20000
+RETRY_AFTER = 300                                    # seconds: a viewer that is opened again must not fetch a page, or a wrong original, every time
+
+
+def _attachment_address(root, data_id, alt, post_url):
+    """The address of the attachment whose data has this id, from the page of its post ("" when the page does not say). One request per page
+    of a thread: every attachment on it is remembered, so the files of a thread's other posts cost nothing."""
+    host = _host(root)
+    with _att_lock:
+        if (host, data_id) in _attachments:
+            return _attachments[(host, data_id)]
+        if _unsettled.get((host, data_id), 0) > time.time():
+            return ""
+    text, page = _get(post_url)
+    by_data, by_name = _post_attachments(text, page, _POST_ID.search(post_url).group(1))
+    del text
+    named = by_name.get(alt) or ()
+    found = by_data.get(data_id) or (next(iter(named)) if len(named) == 1 else "")
+    with _att_lock:
+        if len(_attachments) > MAX_ATTACHMENTS:
+            _attachments.clear()
+        _attachments.update({(host, data): url for data, url in by_data.items()})
+        if found:
+            _attachments[(host, data_id)] = found
+        else:
+            _unsettled[(host, data_id)] = time.time() + RETRY_AFTER
+    return found
+
+
+def _md5_check(expect, key):
+    """A check that a file -- bytes, or a path -- is the one whose small copy's name carried this md5. A file that is not is remembered (`key`):
+    its data id is another attachment's here, and it is not fetched again for a while."""
+    def check(data):
+        digest = hashlib.md5()
+        if isinstance(data, (bytes, bytearray)):
+            digest.update(data)
+        else:
+            with open(data, "rb") as f:
+                for chunk in iter(lambda: f.read(1 << 20), b""):
+                    digest.update(chunk)
+        if digest.hexdigest() != expect:
+            with _att_lock:
+                _unsettled[key + ("wrong",)] = time.time() + RETRY_AFTER
+            raise RuntimeError("the forum sent another file than the one its list shows (an attachment's number cannot be read off its small copy)")
+    return check
+
+
+def resolve(media):
+    """What fetching a file of this forum needs, or None when the address it was listed with is the file's (a gallery's `/full`):
+    (address, check). An attachment browser's file is addressed by the number in its small copy's name, which is the data's id and may
+    be another attachment's -- the page of its post says which one it is (no check: the page is the forum's word). Where it does not, the
+    data id is tried as the attachment id and the file must hash to the md5 in the small copy's name (`check`); with neither it raises,
+    so that a picture the forum cannot be asked for is shown as its small copy and a sync fails it, and no other member's file is shown or saved."""
+    if not _is_attachment(media):
+        return None
+    root, data_id = media.url.rsplit("attachments/", 1)[0], media.remote_key.rpartition(":a")[2]
+    url = _attachment_address(root, data_id, media.filename or media.name, media.post_url)
+    if url:
+        return url, None
+    key = (_host(root), data_id)
+    expect = _THUMB_MD5.search(media.thumb or "")
+    if expect and _unsettled.get(key + ("wrong",), 0) <= time.time():
+        return media.url, _md5_check(expect.group(1).lower(), key)
+    raise RuntimeError("the forum's page of the post does not say which attachment this file is" if not expect else
+                       "the forum sent another file than the one its list shows (an attachment's number cannot be read off its small copy)")
 
 
 def _root(base, indexphp):
@@ -647,9 +754,10 @@ def _post_times(post):
 
 def _attachment_media(base, root, host, tile, post):
     from . import Media
-    post_id, thumb, att_id, alt = tile
-    url, (name, filename) = "%sattachments/%s/" % (root, att_id), _name(alt, att_id)
-    return Media(remote_key="xenforo:%s:a%s" % (host, att_id), url=url, large=url, name=name, filename=filename,
+    post_id, thumb, data_id, alt = tile
+    # `url` is what the data id would be as an attachment id: the address resolve() starts from, and a wrong file where the two differ.
+    url, (name, filename) = "%sattachments/%s/" % (root, data_id), _name(alt, data_id)
+    return Media(remote_key="xenforo:%s:a%s" % (host, data_id), url=url, large=url, name=name, filename=filename,
                  post_url=post["url"], posted=_when(post["date"]), thumb=_thumb(base, thumb), video=alt.lower().endswith(_VIDEO),
                  # the forum shows its files to members only: the gallery fetches even the small copies through Sourcerer, with the login
                  preview_headers={})
@@ -738,6 +846,7 @@ def pages(url):
         ordered = len(ids) == len(batch) and all(a > b for a, b in zip(seq, seq[1:]))      # newest first, by id, across the pages too
         last = ids[-1] if ids else last
         _fill_dates(host, batch, ordered)
+        base = _base(url)
         yield [Media(remote_key="xenforo:%s:%s" % (host, f["id"]), url=f["url"],
                      post_url=_post(f), thumb=_tile_thumb(base, f),
                      # the title is the file name's last resort and what a tile says (the forum's own name for the file
