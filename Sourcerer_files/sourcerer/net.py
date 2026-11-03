@@ -20,8 +20,9 @@ page refused):
   - a request that carries a login goes alone, at least LOGIN_PACE apart,
     whatever Settings say, and every gap is drawn at random (JITTER) with a
     longer reading break now and then -- a metronome is the easiest robot to spot.
-    A file download of such a login follows Settings' login pace (BULK), and the
-    pictures somebody is looking at come a browser's way (BROWSE);
+    A file download of such a login and the requests somebody waits for follow the
+    speed Settings chose (PROFILES), and the pictures somebody is looking at come a
+    browser's way: several at once, no pause;
   - a site that says stop -- a 429, a bot check, a lock -- is paused as a whole
     (pause(): every host of the company, all cards, the gallery, the checks),
     for as long as it asks or for hours, and the pause outlives a restart;
@@ -57,7 +58,7 @@ RETRIES = 4
 _local = threading.local()
 _lock = threading.Lock()
 _hosts = {}                 # (host, carries a login, small pictures, a token only, a picture somebody looks at) -> its limiter's state
-_limits = {"per_host": 32, "pace": 0.1, "login_pace": "normal"}
+_limits = {"speed": "normal"}      # the level of PROFILES Settings chose (configure)
 CAP = 300                   # the longest Retry-After waited out; a longer one pauses the site
 
 # Sites stricter than Settings: (requests at once, seconds apart). With
@@ -79,16 +80,8 @@ HOSTS = {"www.pixiv.net": (1, 1.5), "i.pximg.net": (2, 0.4), "www.patreon.com": 
 # actions within a short period"; tools that kept retrying there had accounts restricted.
 STOP_HOSTS = {"www.pixiv.net"}
 
-# The gallery's small pictures, from a host that carries no login: a browser opens six
-# connections to a CDN to show a page of them, so four at a time, 0.08 s apart, is less
-# than that -- and a grid of sixty no longer waits one picture per HOSTS' pace (0.5 s on
-# pixiv's image host: half a minute for a page). Originals and anything with a login keep
-# the lanes above.
-PREVIEW = (4, 0.08)
-
 LOGIN_PACE = 2.0            # seconds at least between two requests carrying a login
 TOKEN_PACE = 1.0            # ... carrying only a token (Mastodon allows 300 requests in 5 minutes): no jitter-long gaps, no breaks
-INTERACTIVE_PACE = 0.5      # ... when somebody waits for the answer (interactive()): a click, not a scan
 JITTER = (1.0, 1.6)         # every gap times this, drawn anew: longer, never shorter
 READ_EVERY = (20, 40)       # a logged-in site gets a break after this many requests ...
 READ_BREAK = (15, 60)       # ... of this many seconds
@@ -101,15 +94,38 @@ FRIENDLY_AFTER = 12
 FRIENDLY_REST = 24 * 3600
 FORUM_READ_EVERY = (40, 80)
 FORUM_READ_BREAK = (6, 20)
-# A file download that carries a cookie login (Settings > Sites & network, `login_pace`): (seconds between two files, a reading break after this many
-# files or None, of this many seconds). 'careful' is the lane above as it always was (the quiet forum's included); 'normal' takes a file about every
-# 1.3 s and rests a little now and then, 'fast' one every 0.65 s without a break. Listings, pages and everything else a login asks keep the lane
-# above: those requests are what an account is flagged for, a file is a file. A site that said a word lately (_calm) is read carefully whatever is chosen.
-BULK = {"careful": (LOGIN_PACE, READ_EVERY, READ_BREAK), "normal": (1.0, (40, 80), (6, 20)), "fast": (0.5, None, None)}
-# The pictures of a gallery from a site that wants the login (a forum's attachments, Fanbox, Fantia) are fetched the way a browser fetches a page of
-# them -- a few at once, a fraction of a second apart, no reading break: somebody is looking at them, and at LOGIN_PACE a page of sixty took minutes.
-# Still the login's own lane (never the preview lane), counted in the day's budget, and stopped by a pause like every other request.
-BROWSE = (3, 0.3)
+# ---- the speed choice -----------------------------------------------------------------------------------------------------------
+# One word in Settings (`speed`) rules how fast Sourcerer talks to the sites and how safe a login stays: each level is a row of this table, and
+# nothing else reads a speed out of Settings (until v0.62 there were five -- parallel downloads, connections per site, the pause between
+# requests, the gap between artists and the pace of files on a login -- and nobody could tell what they added up to).
+#   parallel  files downloaded at once, all sites together
+#   per_host  requests at once to one site (a site's own limit, HOSTS, may be lower)
+#   pause     seconds between two requests to one site (times JITTER)
+#   gap       seconds between two artists on a site where a login can get banned (sync.next_card)
+#   files     seconds between two files of such a site (times JITTER), a rest of `rest` seconds every `every` files (None: no rest)
+#   look      seconds between two requests of such a site while somebody waits for the page (a gallery opened, a click): at most this, at least half
+#   preview   (at once, seconds apart) of the pictures somebody looks at, from a host that carries no login: a browser opens six connections to a CDN to
+#             show a page of them and asks for them all at once, so 'normal' does -- at one picture per HOSTS' pace a page of sixty took half a minute
+#   browse    the same from a site that wants the login (a forum's attachments, Fanbox, Fantia): its own lane, still counted in the day's budget and
+#             stopped by a pause like every other request, and at LOGIN_PACE a page of sixty took minutes
+# Lists, pages and everything else a login asks keep LOGIN_PACE whatever is chosen: those requests are what an account is flagged for, a file or a
+# picture is a file. A site that said a word lately (_calm) is read carefully whatever is chosen. 'normal' is what the settings were until v0.62
+# (the user's own, 2026-10-23) with the pictures as a browser takes them; 'careful' is v0.33's.
+PROFILES = {
+    "careful": {"parallel": 8, "per_host": 4, "pause": 0.25, "gap": (15, 60), "files": 2.0, "every": (20, 40), "rest": (15, 60),
+                "look": 1.0, "preview": (4, 0.08), "browse": (3, 0.3)},
+    "normal": {"parallel": 24, "per_host": 32, "pause": 0.1, "gap": (3, 15), "files": 1.0, "every": (40, 80), "rest": (6, 20),
+               "look": 0.5, "preview": (6, 0.0), "browse": (6, 0.0)},
+    "fast": {"parallel": 48, "per_host": 32, "pause": 0.0, "gap": (1, 6), "files": 0.5, "every": None, "rest": None,
+             "look": 0.25, "preview": (6, 0.0), "browse": (6, 0.0)},
+}
+
+
+def profile():
+    """The level of PROFILES Settings chose."""
+    return PROFILES.get(_limits["speed"]) or PROFILES["normal"]
+
+
 # Requests a day carrying a login, per site -- real HTTP requests, counted one by one (X, Fanbox and Fantia: what gallery-dl asked,
 # read from its log, _gdl.items(site=); until v0.42 they counted the files of a page, ~10 times what the site was asked, and the
 # 1500 of X were spent by "All artists" long before X had seen that many requests). None of the sites publishes a number for
@@ -273,13 +289,13 @@ def _calm(url):
 
 def _rhythm(url, bulk):
     """(seconds between two requests, reading break after this many requests or None, of this many seconds) for a request that carries a cookie
-    login. A forum that stayed quiet is read at FORUM_PACE (_friendly); a file download follows Settings' login pace (BULK) -- faster than that
+    login. A forum that stayed quiet is read at FORUM_PACE (_friendly); a file download follows the speed Settings chose (PROFILES) -- faster than that
     only while the site has said nothing (_calm), and never slower than the careful lane gives. Called under _lock."""
     pace, every, rest = (FORUM_PACE, FORUM_READ_EVERY, FORUM_READ_BREAK) if site_of(url) in _fast else (LOGIN_PACE, READ_EVERY, READ_BREAK)
     if bulk and _calm(url):
-        wanted = BULK.get(_limits["login_pace"]) or BULK["normal"]
-        if wanted[0] < pace:
-            pace, every, rest = wanted
+        wanted = profile()
+        if wanted["files"] < pace:
+            pace, every, rest = wanted["files"], wanted["every"], wanted["rest"]
     return pace, every, rest
 
 
@@ -566,21 +582,16 @@ _EXT = {"image/jpeg": ".jpg", "image/png": ".png", "image/gif": ".gif",
         "audio/mpeg": ".mp3", "audio/ogg": ".ogg", "audio/mp4": ".m4a"}
 
 
-def configure(per_host=None, pace_ms=None, login_pace=None):
+def configure(speed=None):
     with _lock:
-        if per_host:
-            _limits["per_host"] = max(1, int(per_host))
-        if pace_ms is not None:
-            _limits["pace"] = max(0, int(pace_ms)) / 1000.0
-        if login_pace in BULK:
-            _limits["login_pace"] = login_pace
+        if speed in PROFILES:
+            _limits["speed"] = speed
 
 
 def apply_settings():
     """What Settings say about speed, taken from the database: at the start, when they are saved and when a sync begins."""
     from . import db
-    configure(per_host=db.setting_int("per_host", 1, 32), pace_ms=db.setting_int("pace_ms", 0, 5000),
-              login_pace=db.get_setting("login_pace"))
+    configure(speed=db.get_setting("speed"))
 
 
 def _tls13():
@@ -697,7 +708,7 @@ class _Polite:
     def __init__(self, url, login=False, first=False, preview=False, browse=False, bulk=False):
         # first: somebody is waiting for this one -- a gallery's large view, or a download they
         # asked for (interactive()). It goes ahead of what can wait and takes no reading break.
-        # browse: a picture somebody is looking at, from a site that wants the login (BROWSE); bulk: a file download of one (BULK).
+        # browse: a picture somebody is looking at, from a site that wants the login; bulk: a file download of one (both: PROFILES).
         self.token = login == "token"
         self.url, self.login = url, login is True
         self.first = first or bool(getattr(_local, "interactive", 0))
@@ -709,19 +720,20 @@ class _Polite:
         _stopped(self.url)
         own = _own(self.host)
         with _lock:
-            limit, pace = min(_limits["per_host"], own[0]), max(_limits["pace"], own[1])
+            speed = profile()
+            limit, pace = min(speed["per_host"], own[0]), max(speed["pause"], own[1])
             every, rest = None, None
-            if self.browse:                      # a browser's way (BROWSE); the host's own limits still hold
-                limit, pace = min(BROWSE[0], limit), max(BROWSE[1], pace)
+            if self.browse:                      # a browser's way; the host's own limits still hold
+                limit, pace = min(speed["browse"][0], limit), max(speed["browse"][1], pace)
             elif self.login:                     # Settings can make this gentler, never faster
                 base, every, rest = _rhythm(self.url, self.bulk)
                 limit, pace = 1, max(pace, base)
                 if self.first:                   # somebody waits: the gap of a person browsing, not of a scan
-                    pace = max(_limits["pace"], min(own[1], 1.0), INTERACTIVE_PACE)
+                    pace = max(speed["pause"], min(own[1], speed["look"]), speed["look"] / 2)
             elif self.token:
                 limit, pace = 1, max(pace, TOKEN_PACE if not self.first else 0.3)
             elif self.preview:
-                limit, pace = PREVIEW
+                limit, pace = speed["preview"]
             lane = (self.host, self.login, self.preview, self.token, self.browse)
             entry = _hosts.get(lane)
             if entry is None or entry["limit"] != limit:

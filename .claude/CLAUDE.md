@@ -774,7 +774,7 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   still drawn at random, 1.0-1.6 s) -- the careful lane made a list of followed members take twice as long as clicking through it (41.7 s -> 22.1 s for 119 rows).
   **Any word from the forum ends it for 24 h** (setting `unfriendly`, survives a restart): a counted refusal (401, a 403 that is no guess), and every `pause()`
   (a bot check, a 429, a 409, three refusals, the budget); a new login (`lift`) starts the count afresh. Only `xenforo:` logins can earn it -- pixiv, X, Patreon,
-  Fanbox and Fantia keep the careful lane for lists and pages (their *files* follow `login_pace`, below). Gallery-dl's own reads of a forum (`sleep-request`) are not part of it. Measured on one real forum only.
+  Fanbox and Fantia keep the careful lane for lists and pages (their *files* follow the speed chosen, *One speed choice* below). Gallery-dl's own reads of a forum (`sleep-request`) are not part of it. Measured on one real forum only.
 - **A forum without the Media Gallery addon is listed from its attachment browser** (`xenforo._attachment_pages`; its member pages 404, so gallery-dl has
   nothing to list). `pages()` first asks **the forum's front page `index.php?media/`**, once per forum (`_uses_media_gallery`): XenForo answers an unknown route
   with a 404, so a 404 means "no gallery" and anything else -- an answer, a refusal, an error page -- means the gallery route exists and the card goes to gallery-dl as
@@ -1057,11 +1057,13 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   (DNS rebinding): `/api/state` holds every account the user follows. Requests without an Origin
   (launch.py's `/api/focus`) pass.
 - **Be gentle with sites; it is what keeps users unblocked.** Every request
-  goes through `net.py`: an honest User-Agent, at most `per_host` requests per
-  site at once, `pace_ms` between them, Retry-After honoured; `HOSTS` makes a
-  site stricter than Settings, `STOP_HOSTS` stops a source at the first 429
+  goes through `net.py`: an honest User-Agent, at most the speed row's `per_host`
+  requests per site at once and its `pause` between them (*One speed choice*,
+  below), Retry-After honoured; `HOSTS` makes a site stricter than the speed
+  chosen, `STOP_HOSTS` stops a source at the first 429
   instead of retrying (pixiv's terms). Never pretend to be a browser on a
-  public API, never bypass `_Polite`, and give a login site gentler defaults
+  public API (what somebody *looks at* is asked for a browser's way, below), never
+  bypass `_Polite`, and give a login site gentler defaults
   than a public API -- there an account can be locked. The exceptions are
   deliberate: gallery-dl keeps its own browser emulation for X (a logged-in
   web session), and a forum's Cloudflare pass is sent with the login
@@ -1079,12 +1081,8 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   A card's sources on different sites are read side by side (`_sync_artist.look_site`; the ones on one site one after the
   other); a look stops at the first page whose oldest post is in the library (`_glance`: an up-to-date card is one request per
   source -- 2 s for three sources, it was a minute). **Only a cookie login is spaced out between artists**
-  (`accounts.careful`: pixiv, X, Patreon, Fanbox, Fantia, forums; `LOGIN_GAPS`, Settings > Sites & network
-  *Gap between artists on a cookie login*: careful 15-60 s, normal 10-30 s, fast 3-15 s (the user's numbers; default **fast** since v0.49) -- the other speed settings
-  were worked out in v0.33 (8 downloads at once, 4 per site, 0.25 s between requests, times 1.0-1.6) and are **24 downloads, 32 per site, 0.1 s since v0.49:
-  the user's own settings became the base settings** (the screenshots of Settings > Sync / Sites & network / Appearance, 2026-10-23; the Appearance ones --
-  System, Quick, a week, the site mark on -- were the defaults already); `net.HOSTS` keeps the touchy hosts
-  lower; `db.init` dropped what was saved before, once, `speed_defaults_v2`): a token or key (Bluesky, Mastodon, Misskey, boorus) is an API
+  (`accounts.careful`: pixiv, X, Patreon, Fanbox, Fantia, forums; the speed row's `gap`, `sync.next_card()`; `net.HOSTS` keeps the touchy hosts
+  lower): a token or key (Bluesky, Mastodon, Misskey, boorus) is an API
   client with published limits and only gets `net.TOKEN_PACE` between requests, no reading breaks, no gap between cards
   (`net._carries_login` says `True` / `"token"` / `False`; the token lane has its own key in `_hosts`). Galleries use
   the same test.
@@ -1094,20 +1092,27 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   follow at once), every gap times a random `JITTER`, a `READ_BREAK` every
   `READ_EVERY` requests, a daily `BUDGETS` count per site. Regular timing
   is what bot detection looks for -- never make a gap fixed again.
-- **Files and pictures on a login's lane have a pace of their own** (`net.BULK`, `net.BROWSE`; Settings > Sites & network *Files from a site with a cookie
-  login*, `login_pace`: careful / **normal, the default** / fast): a sync's activity bar read "Downloading 123 / 424 ... 15 KB/s" -- one file every 2-3 s and a
-  rest of 15-60 s every 20-40 files on a forum's, Fanbox's or Fantia's lane, and a gallery page of sixty thumbnails the same (a forum has no small pictures: its
-  thumbnails are the attachments). **A file download** (`net.download` -> `_Polite(bulk=True)`) takes `BULK[login_pace]` (`net._rhythm`): normal 1.0 s (times
-  `JITTER`) and a rest of 6-20 s every 40-80 files, fast 0.5 s and none, careful the lane above, the quiet forum's included. **A listing, a page, an API
-  request keep the careful lane whatever is chosen** -- those are what an account is flagged for, a file is a file; `first` / `interactive()` requests keep
-  `INTERACTIVE_PACE`. **A site that said a word is read carefully for `FRIENDLY_REST` whatever is chosen** (`_calm`: a counted refusal, any `pause()` --
-  `_unfriendly` keeps its stamp for every site now; only the quiet *forum* lane of v0.59 stays the forums'). The daily budgets are untouched (`spend()` counts
-  every request). **The pictures somebody looks at** -- the grid, the Artists overview, avatars: `fetch_picture` without `first`; the large view keeps
-  its lane -- **from a site that wants the login go through `_Polite(browse=True)`**: a lane of their own (`_hosts` keys have a fifth element),
-  `BROWSE` = 3 at once and 0.3 s apart (start to start, as the preview lane; not end to start), no reading rest, and the host's own limits still hold
-  (`HOSTS`: Fanbox's file host is two at 0.6 s) -- the way a browser loads a page of them, where sixty attachments took minutes. Timing checked with a test of
-  the lanes (made-up host, shrunk constants), **not measured against a real site**: 'normal' is the pace the quiet forum measured in v0.59; 'fast' and BROWSE are
-  the user's choice, made from the screenshot.
+- **One speed choice, not five** (`net.PROFILES`, `net.profile()`; Settings > **Speed & safety**: Careful / **Normal, the default** / Fast; the setting `speed`):
+  Settings had parallel downloads, connections per site, the pause between requests, the gap between artists on a cookie login and (v0.61) the pace of its
+  files -- five rows in two panes, and nobody could say what they added up to (the user, 2026-11-03: make them "more uniform and easier to understand").
+  Each level is one row of the table -- `parallel`, `per_host`, `pause`, `gap` (`sync.next_card`), `files` / `every` / `rest`, `look`, `preview`, `browse` --
+  and **nothing else reads a speed out of Settings**; the page says what the chosen level does in words from the numbers the server runs by (`/api/state`'s
+  `speeds`, `speedSays`), so the text cannot drift from the table. **'normal' is what the settings were** (the user's own, 2026-10-23: 24 at once, 32 per site, 0.1 s,
+  a gap of 3-15 s; files 1.0-1.6 s) **plus the pictures as a browser takes them**; 'careful' is v0.33's (8, 4, 0.25 s, 15-60 s, a file every 2-3 s with a rest);
+  'fast' goes further (48, no pause, 1-6 s, 0.5-0.8 s with no rest). `db.init` maps what was chosen on purpose (`speed_v1`: the gap's word, else the files' word, else
+  numbers as low as 'careful') and drops the five keys. **What no level changes**: lists, pages and API requests of a login keep `LOGIN_PACE` and the reading rests
+  -- those are what an account is flagged for, a file is a file --, the daily `BUDGETS`, the pauses, and `net.HOSTS` (a touchy host keeps its own lower limit).
+  **A site that said a word** (a counted refusal, any `pause()`: `_unfriendly` keeps its stamp for every site) **is read carefully for `FRIENDLY_REST` whatever is
+  chosen** (`_calm`); the quiet *forum* lane of v0.59 (`_fast`) stays the forums' and 'careful' keeps what it earned. **A file download** (`net.download` ->
+  `_Polite(bulk=True)`) goes at the row's `files` (`net._rhythm`); **a request somebody waits for** (`first`, `net.interactive()`: a gallery opened, a click) on a
+  login lane goes `look` seconds apart at most and half of it at least (v0.61: 1.0 s on pixiv whatever was chosen: 'normal' halves it). **The pictures somebody
+  looks at** -- the grid, the Artists overview, avatars: `fetch_picture` without `first`; the large view keeps its lane -- use the row's `preview` from a host that
+  carries no login (the preview lane) and `browse` from a site that wants the login (`_Polite(browse=True)`: a lane of its own, a fifth element of the `_hosts` key,
+  counted in the day's budget and stopped by a pause like any request): 'normal' and 'fast' take **six at once and no pause, the way a browser asks for a page of them**
+  (it opens six connections to a site and asks for everything at once; at 4 at once and 0.08 s apart -- v0.60 -- a page of sixty took 7 s, from a login at 3 and 0.3 s
+  24 s, and on the careful lane one picture per 2-3 s, minutes); the host's own limits still hold (`HOSTS`: Fanbox's file host is two at 0.6 s). The user's report that
+  started it: a sync's bar read "Downloading 123 / 424 ... 15 KB/s" -- a file every 2-3 s and a rest of 15-60 s every 20-40 files on a forum's, Fanbox's or Fantia's lane.
+  Checked by `.github/checks.py` against made-up hosts with the seconds shrunk, **not measured against a real site**; what 'fast' risks is an account, not a page.
 - **A site that objects rests, all of it** (`net.pause`, saved in the
   setting `paused`): a 429 on a login, a bot check, three refused logins,
   X's ratelimit or lock (gallery-dl `ratelimit: abort`, `_run`). A site is
@@ -1175,11 +1180,11 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   and no further, only while the gallery is open. A download asked for in the
   gallery runs inside `net.interactive()`: ahead of what waits in the site's
   lane and without the login lane's reading break (the gaps between requests
-  stay). Small pictures from a host with no login use `net.PREVIEW`'s own lane
-  (4 at once, 0.08 s apart); originals and anything with a login keep
-  `HOSTS` and the login lane. A login lane's first request of such a download or
-  page keeps at least `net.INTERACTIVE_PACE` (0.5 s) instead of the 2-3 s of a
-  sync; an artist's gallery (not "All artists") runs its listings in
+  stay). Small pictures from a host with no login use the speed row's `preview`
+  lane and those from a site that wants the login its `browse` lane (*One speed
+  choice*); originals and anything else with a login keep `HOSTS` and the login lane.
+  A login lane's first request of such a download or page goes at the row's `look`
+  pace instead of the 2-3 s of a sync; an artist's gallery (not "All artists") runs its listings in
   `net.interactive()` too -- somebody is waiting for them.
 - **Browse opens from snapshots and checks the site meanwhile**
   (`gallery._Source.seed`, `_Gallery.start_checks`). A source with a snapshot
@@ -1283,7 +1288,9 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
 - **The browser opens six connections to Sourcerer, no more.** Proxied
   pictures wait in a site's polite lane; fifty asked for at once held back
   the large view, the next page and the state poll for a minute. `app.js`
-  loads them four at a time (`GAL_AT_ONCE`), near the screen only; the large
+  loads them four at a time (`GAL_AT_ONCE`), near the screen only -- the viewer's
+  request and the state poll are the other two of the browser's six; the lanes take six
+  at once under 'normal', so it is the page that sets the pace -- the large
   view shows the grid's picture until its own arrives.
 - **Pikura is GPL-3.0.** Its gallery was studied for ideas (pixiv's small
   previews with a Referer); none of its code may be copied here.

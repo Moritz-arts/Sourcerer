@@ -334,7 +334,7 @@ function load() {
   return api("GET", "/api/state").then(function (d) {
     S.artists = d.artists; S.apart = apartSet(d.apart); S.sync = d.sync; S.library = d.library; S.window = d.window;
     S.frame = d.frame; applyFrame();
-    S.sep = d.sep; S.sites = d.sites; S.fields = d.fields; S.settings = d.settings; S.logins = d.logins || []; S.pauses = d.pauses || [];
+    S.sep = d.sep; S.sites = d.sites; S.fields = d.fields; S.settings = d.settings; S.speeds = d.speeds || {}; S.logins = d.logins || []; S.pauses = d.pauses || [];
     $("version").textContent = "v" + d.version;
     $("btn-quit").classList.toggle("hidden", S.window);
     applySettings();
@@ -2319,6 +2319,19 @@ function showPane(name) {
   if (name === "about" || name === "updates") loadInfo();
 }
 
+// What a level of Settings > Speed & safety does, in words, from the numbers the server runs by (net.PROFILES): one row of the table.
+function speedSays(p) {
+  if (!p) return [];
+  var s = function (a) { return a[0] + "-" + a[1] + " s"; }, n = function (x) { return String(Math.round(x * 100) / 100); };
+  return [
+    "Downloads: up to " + p.parallel + " files at once, " + p.per_host + " per site" + (p.pause ? ", at least " + n(p.pause) + " s between two requests to one site." : "."),
+    "Sites with your login (pixiv, X, Patreon, Fanbox, Fantia, forums): " + s(p.gap) + " between two artists, a file about every " + n(p.files * 1.3) + " s" +
+      (p.every ? ", a rest of " + s(p.rest) + " every " + p.every[0] + "-" + p.every[1] + " files." : ", no rest."),
+    "Browse: a page of such a site every " + n(p.look) + "-" + n(p.look * 1.6) + " s; pictures " + p.preview[0] + " at a time" +
+      (p.preview[1] ? ", " + n(p.preview[1]) + " s apart" : ", all at once, like a browser") + "."
+  ];
+}
+
 function fillSettings() {
   var st = S.settings;
   $("set-library").value = S.library;
@@ -2329,11 +2342,7 @@ function fillSettings() {
   $("set-tilelogo").checked = st.tile_logo !== "0";
   $("set-auto").checked = st.auto_sync === "1";
   $("set-hours").value = st.auto_hours; $("set-hours").disabled = st.auto_sync !== "1";
-  $("set-parallel").value = st.parallel;
-  $("set-perhost").value = st.per_host;
-  $("set-pace").value = st.pace_ms;
-  $("set-logingap").value = st.login_gap;
-  $("set-loginpace").value = st.login_pace;
+  $("speed-says").innerHTML = speedSays(S.speeds[st.speed]).map(function (line) { return "<li>" + esc(line) + "</li>"; }).join("");
   $$("[data-set]").forEach(function (b) { b.classList.toggle("selected", st[b.dataset.set] === b.dataset.value); });
   $("filename-example").textContent = "For example: " + (st.filenames === "dated" ? "2025-03-14_" : "") +
     "a6f1c09b2e7d4f31.png" + " — the name the file has on the site, wherever it has one.";
@@ -2375,11 +2384,6 @@ $("set-scanstart").addEventListener("change", function () { saveSetting({ scan_o
 $("set-follows").addEventListener("change", function () { saveSetting({ import_follows: this.checked ? "1" : "0" }); });
 $("set-auto").addEventListener("change", function () { saveSetting({ auto_sync: this.checked ? "1" : "0" }); });
 $("set-hours").addEventListener("change", function () { saveSetting({ auto_hours: this.value }); });
-$("set-parallel").addEventListener("change", function () { saveSetting({ parallel: this.value }); });
-$("set-perhost").addEventListener("change", function () { saveSetting({ per_host: this.value }); });
-$("set-pace").addEventListener("change", function () { saveSetting({ pace_ms: this.value }); });
-$("set-logingap").addEventListener("change", function () { saveSetting({ login_gap: this.value }); });
-$("set-loginpace").addEventListener("change", function () { saveSetting({ login_pace: this.value }); });
 $("btn-settings").addEventListener("click", function () { openSettings(S.update && S.update.available ? "updates" : null); });
 // ---- log files ----------------------------------------------------------------
 var LG = { files: [], name: "", problems: false, timer: 0 };

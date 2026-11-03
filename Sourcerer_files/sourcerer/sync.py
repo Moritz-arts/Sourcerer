@@ -62,8 +62,7 @@ MIN_HOURS = {"x": 12, "pixiv": 6, "patreon": 6, "xenforo": 12, "fanbox": 6, "fan
 COOL_DAYS = (7, 60)
 COOL_OPEN = (1, 6, 24)
 # Seconds before the next card asks a site where a cookie login can get banned (pixiv, X, Patreon, a forum) the last one
-# used -- Settings > Sync decides how careful. Token logins (Mastodon, Bluesky) are not spaced: the lane paces them.
-LOGIN_GAPS = {"careful": (15, 60), "normal": (10, 30), "fast": (3, 15)}
+# used -- Settings > Speed & safety decides how careful (net.PROFILES). Token logins (Mastodon, Bluesky) are not spaced: the lane paces them.
 FOCUS_GAP = (4, 10)          # ... for the card somebody has opened in Browse: they are waiting
 PICK_FROM = 40               # the next card is the first of this many waiting ones whose sites are not cooling down
 GIVE_UP = 3                  # syncs a file may fail before its source completes without it
@@ -178,7 +177,8 @@ def _final_path(folder, media, ext, server_name, posted):
 # ---- queue ------------------------------------------------------------------
 
 def next_card():
-    return LOGIN_GAPS.get(db.get_setting("login_gap"), LOGIN_GAPS["normal"])
+    """Seconds between two artists on a site where a login can get banned: the speed Settings chose (net.PROFILES)."""
+    return net.profile()["gap"]
 
 
 def enqueue(artist_ids=None, auto=False, only=None, mode=None, everyone=False, order=None):
@@ -1014,7 +1014,7 @@ def _sync_artist(artist_id, auto=False, only=None, mode=None):
                 remaining[src["id"]] -= 1
                 unsettled[src["id"]].discard(media.remote_key)
 
-    with ThreadPoolExecutor(max_workers=db.setting_int("parallel", 1, 64)) as pool:
+    with ThreadPoolExecutor(max_workers=net.profile()["parallel"]) as pool:
         list(pool.map(one, todo))
     left = [m.remote_key for _src, site, m in todo if getattr(site, "SKIPS_KNOWN", False)]
     if left:
