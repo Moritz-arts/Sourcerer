@@ -125,7 +125,7 @@ Traps:
   `app.py`) and falls back to the browser when it dies. **A minimal system lacks more than `libxcb-cursor0`** (checked on Ubuntu 24.04 with PyQt6
   6.12: `libEGL.so.1` fails the import of any Qt module; the xcb plugin wants `libxkbcommon-x11`, `libxcb-cursor`, `-icccm`, `-image`, `-keysyms`,
   `-render-util`, `-xkb` and `-util`): README lists the Debian/Ubuntu packages, and `QT_DEBUG_PLUGINS=1` in the child makes Qt name the library
-  it stopped at, which the activity log then says (`_QT_LIBS` maps the known ones to their package) -- a browser tab that opens without a word looks
+  it stopped at, which the activity log then says (`_QT_LIBS` maps the known ones to their package; the debug noise is why a failure that is not a Python error is asked once more without it -- the tar.gz has no Qt and one run says so) -- a browser tab that opens without a word looks
   like a program that has no window. `webview.start(gui="qt")` where `gi` is absent: without it pywebview tries GTK first and logs
   "GTK cannot be loaded" with a traceback at every start. Root needs `--no-sandbox` for QtWebEngine (set there).
   **On Windows pywebview does not fail without the WebView2 runtime** -- it opens the page in MSHTML (Internet Explorer's engine), which cannot run

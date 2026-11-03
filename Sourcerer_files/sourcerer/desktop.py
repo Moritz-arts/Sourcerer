@@ -262,7 +262,9 @@ def _window_problem():
                 package = _QT_LIBS.get(lib.group(1))
                 return "Qt needs %s%s -- README lists everything the Linux window needs" % (
                     lib.group(1), " (Debian/Ubuntu: %s)" % package if package else ""), True
-            done = probe(False)                                 # something else: its own words, without the debug noise
+            lines = [line for line in (done.stderr or "").strip().splitlines() if line.strip()]
+            if not (lines and re.match(r"\w*(Error|Exception)\b", lines[-1])):
+                done = probe(False)             # Qt's own words, without the debug noise (a Python error, like no Qt in this build, needs no second run)
     except (OSError, subprocess.SubprocessError) as e:
         return "the window check did not run: %s" % e, False
     if done.returncode:
