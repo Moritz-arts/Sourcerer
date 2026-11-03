@@ -3,6 +3,15 @@
 Newest first. Each entry is made from the commit subjects when a version is made, so a subject is one short,
 plain sentence.
 
+## v0.61 — 2026-11-03
+
+- A Windows test moves and docks the real window with the mouse
+- The bar moves the window with pywebview again, and docking is done at the let-go
+- The window test reads the page through a debugging port of Sourcerer's own and pulls out of a dock by the brand mark
+- The window test presses where a dialog leaves the bar free, and the notes describe the docking that works
+- Gallery pictures from login sites load like in a browser, and downloads from them follow a new login pace setting
+- The window test fails the run when a check fails, after one more try
+
 ## v0.60 — 2026-11-03
 
 - Windows: the window docks and snaps like any other, and its bar also works on the lock screen and under dialogs
