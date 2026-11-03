@@ -1,6 +1,7 @@
 # Drives Sourcerer's real window on a Windows runner with the real mouse (.github/window_test.py): the bar moves
 # the window, a drag to the screen's edge docks it, a drag out of a docked window gives it its size back.
-# Windows only, because that is where the page's own bar is the title bar.
+# Windows only, because that is where the page's own bar is the title bar. Twice: from source, and the frozen exe
+# a user runs (it differs in more than one way: pythonnet, the unpacked folder, no console).
 name: Window test (Windows)
 
 on:
@@ -14,7 +15,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  window:
+  source:
+    name: From source
     runs-on: windows-latest
     timeout-minutes: 15
     steps:
@@ -23,13 +25,36 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install the packages Sourcerer needs
-        run: python -m pip install -r Sourcerer_files/requirements.txt
+        run: python -m pip install -r Sourcerer_files/requirements.txt websocket-client
       - name: Move and dock the window with the mouse
         run: python .github/window_test.py
       - name: Keep the logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: window-test
+          name: window-test-source
+          path: window-test/
+          if-no-files-found: ignore
+
+  exe:
+    name: The exe
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the packages Sourcerer needs, and PyInstaller
+        run: python -m pip install -r Sourcerer_files/requirements.txt pyinstaller websocket-client
+      - name: Build the exe
+        run: python -c "import pathlib, sys; sys.path.insert(0, '.github/exe'); import build; out = pathlib.Path('build-exe').resolve(); out.mkdir(exist_ok=True); print(build.freeze(out, True))"
+      - name: Move and dock the window with the mouse
+        run: python .github/window_test.py (Get-ChildItem -Path build-exe -Recurse -Filter Sourcerer.exe | Select-Object -First 1).FullName
+      - name: Keep the logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: window-test-exe
           path: window-test/
           if-no-files-found: ignore
