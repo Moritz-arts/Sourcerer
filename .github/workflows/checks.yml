@@ -1,0 +1,32 @@
+# The program's own checks (.github/checks.py) and the static ones, on every pull request that touches the program: a viewer that shows another
+# member's file, a speed choice that reads a wrong number, a settings table that migrates wrongly. Against made-up sites, on a copy of the program.
+name: Checks
+
+on:
+  pull_request:
+    paths:
+      - "Sourcerer_files/**"
+      - ".github/checks.py"
+      - ".github/redefined.py"
+      - ".github/workflows/checks.yml"
+  workflow_dispatch:
+
+jobs:
+  checks:
+    name: Checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install what the checks import
+        run: python -m pip install flask requests pillow gallery-dl
+      - name: Compile, names defined twice, the page's script
+        run: |
+          python -m py_compile .github/*.py .github/exe/*.py Sourcerer_files/*.py Sourcerer_files/sourcerer/*.py Sourcerer_files/sourcerer/sources/*.py
+          python .github/redefined.py
+          node --check Sourcerer_files/static/app.js
+      - name: The program's checks
+        run: python .github/checks.py

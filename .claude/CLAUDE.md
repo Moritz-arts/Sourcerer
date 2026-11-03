@@ -1445,6 +1445,7 @@ python3 .github/redefined.py   # a name defined twice at the top of a module: th
 node --check Sourcerer_files/static/app.js
 python3 -c "import yaml; [yaml.safe_load(open(f)) for f in ('.github/workflows/version-bump.yml', '.github/workflows/release-zip.yml', '.github/workflows/build-exe.yml')]"
 sh -n start-linux.sh && sh -n start-macos.command
+python3 .github/checks.py      # the program's own checks against made-up sites (pip install flask requests pillow gallery-dl); CI runs it too (checks.yml)
 sh ./start-linux.sh --no-open --port 8765   # the whole start; then use the page
 ```
 
