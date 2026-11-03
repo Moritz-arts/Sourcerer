@@ -109,6 +109,9 @@ Only in the repository, never in the ZIP (`export-ignore` in `.gitattributes`):
 │   ├─ workflows/build-exe.yml    builds the standalone downloads on a Windows, a Linux and
 │   │                               two macOS runners, tests them, attaches them to a release;
 │   │                               also on pull requests
+│   ├─ workflows/window-test.yml  on pull requests: window_test.py on a Windows runner, from source
+│   │                               and as the frozen exe
+│   ├─ window_test.py             moves, docks and pulls out the real window with the real mouse
 │   ├─ exe/build.py               the PyInstaller build and packaging; exe/smoke.py starts each
 │   │                               result like a user; exe/Sourcerer.iss is the Windows installer;
 │   │                               exe/Sourcerer.ico / .icns / .png are the logo as icons

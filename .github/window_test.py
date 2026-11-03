@@ -322,17 +322,24 @@ def tests(port, hwnd, page, wa):
         time.sleep(1.0)
         check(zoomed(hwnd) == expected, "a double-click on the bar %s the window" % ("maximizes" if expected else "restores"))
 
-    # 7. a dialog open: the bar still moves the window
-    normal(hwnd)
+    # 7. a dialog open: the bar still moves the window, by what the dialog leaves of it. In a small window the dialog's box covers the brand
+    # mark (the press lands on the dialog's header and is the dialog's own); the strip above the box is the dialog's backdrop, and a press
+    # there goes to the bar. A larger window leaves the brand mark free.
     if page:
+        normal(hwnd)
         page.run("document.getElementById('btn-settings').click(); 1")
         time.sleep(1.5)
-        before = rect_of(hwnd)
-        start = bar_point(hwnd)
-        drag(start, (start[0] + 120, start[1] + 50))
-        after = rect_of(hwnd)
-        say("drag under a dialog: moved by (%d, %d) %s" % (after[0] - before[0], after[1] - before[1], events(page)))
-        check(abs(after[0] - before[0] - 120) <= 14 and abs(after[1] - before[1] - 50) <= 14, "the bar moves the window under a modal dialog")
+        for label, rect, dy in (("small window, the strip above the dialog", BASE, 5), ("larger window, the brand mark", (10, 10, 1010, 710), 26)):
+            user32.SetWindowPos(hwnd, None, rect[0], rect[1], rect[2] - rect[0], rect[3] - rect[1], 0x0004 | 0x0010)
+            time.sleep(0.8)
+            events(page)
+            before = rect_of(hwnd)
+            start = bar_point(hwnd, dy=dy)
+            drag(start, (start[0] + 120, start[1] + 50))
+            after = rect_of(hwnd)
+            say("drag under a dialog (%s): moved by (%d, %d) %s" % (label, after[0] - before[0], after[1] - before[1], events(page)))
+            check(abs(after[0] - before[0] - 120) <= 14 and abs(after[1] - before[1] - 50) <= 14,
+                  "the bar moves the window under a modal dialog (%s)" % label)
         page.run("document.getElementById('dlg-settings').close(); 1")
 
 
