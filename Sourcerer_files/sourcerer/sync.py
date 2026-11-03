@@ -1234,8 +1234,16 @@ def _fetch(artist, src, site, media, cur):
         if media.fetch:
             part, sha, ext, server_name = media.fetch(folder, _count_bytes)
         else:
-            part, sha, ext, server_name = net.download(media.url, folder, media.mime, _count_bytes,
-                                                       headers=media.headers)
+            # A file whose address the listing only guessed (a forum's attachment) is asked of the site first, and one that stays a guess is checked
+            # against the file's hash: nothing else may be saved under the artist (sources.xenforo.resolve).
+            url, check = (site.resolve(media) if hasattr(site, "resolve") else None) or (media.url, None)
+            part, sha, ext, server_name = net.download(url, folder, media.mime, _count_bytes, headers=media.headers)
+            if check:
+                try:
+                    check(part)
+                except Exception:
+                    part.unlink(missing_ok=True)
+                    raise
     except net.SlowDown:                           # the site rests: said once, when it began
         with _lock:
             cur["failed"] += 1
