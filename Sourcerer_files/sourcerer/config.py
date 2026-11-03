@@ -87,6 +87,7 @@ DEFAULTS = {
     "parallel": "24",           # downloads at once, all sites together
     "per_host": "32",           # downloads at once from one site
     "pace_ms": "100",           # pause between two requests to one site (times 1.0-1.6: a random gap, never a regular one)
+    "login_pace": "normal",     # the pace of a file download on a site where a cookie login can get banned: 'careful', 'normal', 'fast' (net.BULK)
     "channel": "stable",        # updates: 'stable' (the latest release) or 'beta' (the main branch)
     "gdl_updated": "",          # when gallery-dl was last brought up to date (weekly)
     "update_seen": "",          # the update helper's last run that was already reported

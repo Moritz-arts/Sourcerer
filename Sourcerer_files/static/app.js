@@ -2333,6 +2333,7 @@ function fillSettings() {
   $("set-perhost").value = st.per_host;
   $("set-pace").value = st.pace_ms;
   $("set-logingap").value = st.login_gap;
+  $("set-loginpace").value = st.login_pace;
   $$("[data-set]").forEach(function (b) { b.classList.toggle("selected", st[b.dataset.set] === b.dataset.value); });
   $("filename-example").textContent = "For example: " + (st.filenames === "dated" ? "2025-03-14_" : "") +
     "a6f1c09b2e7d4f31.png" + " — the name the file has on the site, wherever it has one.";
@@ -2378,6 +2379,7 @@ $("set-parallel").addEventListener("change", function () { saveSetting({ paralle
 $("set-perhost").addEventListener("change", function () { saveSetting({ per_host: this.value }); });
 $("set-pace").addEventListener("change", function () { saveSetting({ pace_ms: this.value }); });
 $("set-logingap").addEventListener("change", function () { saveSetting({ login_gap: this.value }); });
+$("set-loginpace").addEventListener("change", function () { saveSetting({ login_pace: this.value }); });
 $("btn-settings").addEventListener("click", function () { openSettings(S.update && S.update.available ? "updates" : null); });
 // ---- log files ----------------------------------------------------------------
 var LG = { files: [], name: "", problems: false, timer: 0 };
