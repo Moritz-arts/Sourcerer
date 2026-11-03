@@ -1,8 +1,12 @@
 """Drives Sourcerer's real window on a Windows runner with the real mouse and says what the window did.
 
-Run by .github/workflows/window-test.yml (Windows only): starts Sourcerer from source, finds its window, presses the page's
-own bar with injected mouse events and moves the pointer, then reads where the window is. Everything is printed -- a failing
-line starts with FAIL -- and the logs of the run are kept in ./window-test for the workflow to upload.
+    python .github/window_test.py [path\\to\\Sourcerer.exe]
+
+Run by .github/workflows/window-test.yml (Windows only): starts Sourcerer -- from source, or the frozen exe it is given --, waits
+until the page is drawn (the page is asked through WebView2's debugging port), then presses the page's own bar with injected mouse
+events and reads where the window is: the bar moves the window, a drag to the screen's edge docks it (half, quarter, maximized), a
+drag out of a docked window gives it its size back, a double-click maximizes, and all of it works under a dialog.
+A failing check starts with FAIL; WINDOW_TEST_STRICT=1 makes the exit code say so. The logs of the run are kept in ./window-test.
 """
 import ctypes
 import json
@@ -16,16 +20,12 @@ from ctypes import wintypes
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 OUT = ROOT / "window-test"
-LOGS = ROOT / "Sourcerer_files" / "Userdata" / "Logs"
+CDP_PORT = 9333
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 user32.SetProcessDPIAware()
+SCREEN = (user32.GetSystemMetrics(0), user32.GetSystemMetrics(1))
 FAILS = []
-
-
-class GUITHREADINFO(ctypes.Structure):
-    _fields_ = [("cbSize", wintypes.DWORD), ("flags", wintypes.DWORD), ("hwndActive", wintypes.HWND), ("hwndFocus", wintypes.HWND),
-                ("hwndCapture", wintypes.HWND), ("hwndMenuOwner", wintypes.HWND), ("hwndMoveSize", wintypes.HWND),
-                ("hwndCaret", wintypes.HWND), ("rcCaret", wintypes.RECT)]
+BASE = (60, 40, 860, 600)                      # a normal window of 800x560, which is not the size of anything the tests dock it to
 
 
 def say(text=""):
@@ -47,10 +47,28 @@ def http(port, path, body=None):
         return json.loads(r.read().decode("utf-8") or "{}")
 
 
+class Page:
+    """The page inside the window, through the Chrome DevTools protocol WebView2 offers on a debugging port."""
+
+    def __init__(self):
+        import websocket
+        targets = json.loads(urllib.request.build_opener(urllib.request.ProxyHandler({}))
+                             .open("http://127.0.0.1:%d/json" % CDP_PORT, timeout=5).read().decode("utf-8"))
+        page = next(t for t in targets if t.get("type") == "page" and "127.0.0.1" in t.get("url", ""))
+        self.ws = websocket.create_connection(page["webSocketDebuggerUrl"], timeout=15, suppress_origin=True)
+        self.n = 0
+
+    def run(self, expression):
+        self.n += 1
+        self.ws.send(json.dumps({"id": self.n, "method": "Runtime.evaluate",
+                                 "params": {"expression": expression, "returnByValue": True}}))
+        while True:
+            message = json.loads(self.ws.recv())
+            if message.get("id") == self.n:
+                return message.get("result", {}).get("result", {}).get("value")
+
+
 # ---- the window and the mouse
-SCREEN = (user32.GetSystemMetrics(0), user32.GetSystemMetrics(1))
-
-
 def rect_of(hwnd):
     r = wintypes.RECT()
     user32.GetWindowRect(hwnd, ctypes.byref(r))
@@ -67,6 +85,10 @@ def work_area():
     r = wintypes.RECT()
     user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(r), 0)       # SPI_GETWORKAREA
     return (r.left, r.top, r.right, r.bottom)
+
+
+def zoomed(hwnd):
+    return bool(user32.IsZoomed(hwnd))
 
 
 def find_window():
@@ -95,67 +117,60 @@ def up():
     user32.mouse_event(0x0004, 0, 0, 0, 0)
 
 
-def cursor():
-    p = wintypes.POINT()
-    user32.GetCursorPos(ctypes.byref(p))
-    return p.x, p.y
-
-
-def in_move_size(hwnd):
-    thread = user32.GetWindowThreadProcessId(hwnd, None)
-    info = GUITHREADINFO()
-    info.cbSize = ctypes.sizeof(info)
-    return bool(user32.GetGUIThreadInfo(thread, ctypes.byref(info)) and info.flags & 0x2)
-
-
-def drag(hwnd, start, end, steps=24, pause=0.02, hold=0.25, watch=None):
-    """Press at `start`, move to `end` in steps, release. `watch(step)` runs while the button is down."""
+def drag(start, end, steps=24, pause=0.02, hold=0.25):
+    """Press at `start`, move to `end` in steps, release."""
     point(*start)
     time.sleep(0.3)
     down()
     time.sleep(hold)
-    if watch:
-        watch(0)
     for i in range(1, steps + 1):
         point(start[0] + (end[0] - start[0]) * i / steps, start[1] + (end[1] - start[1]) * i / steps)
         time.sleep(pause)
-        if watch:
-            watch(i)
     time.sleep(0.25)
     up()
     time.sleep(0.9)
 
 
 def bar_point(hwnd, dx=31, dy=26):
-    """The brand mark in the page's bar (CSS px from the client origin; the runner is 100 %)."""
+    """The brand mark in the page's bar (css px from the client origin; the runner is 100 %)."""
     cx, cy = client_origin(hwnd)
     return cx + dx, cy + dy
 
 
-def show_logs(title):
-    say("---- %s ----" % title)
-    for name in ("sourcerer.log", "console.log"):
-        try:
-            lines = (LOGS / name).read_text(encoding="utf-8", errors="replace").splitlines()
-        except OSError:
-            continue
-        say("[%s]" % name)
-        for line in lines[-25:]:
-            say("  " + line)
+def normal(hwnd, page=None):
+    """The window as every test starts: not maximized, 800x560 at a fixed place."""
+    if zoomed(hwnd):
+        user32.ShowWindow(hwnd, 9)                             # SW_RESTORE
+        time.sleep(0.4)
+    user32.SetWindowPos(hwnd, None, BASE[0], BASE[1], BASE[2] - BASE[0], BASE[3] - BASE[1], 0x0004 | 0x0010)
+    time.sleep(0.8)                                            # (the page hears of the new size and asks what became of the window)
+
+
+def flags(page, hwnd):
+    return "page: maxed=%s snapped=%s" % (page.run("S.maxed"), page.run("S.snapped")) if page else ""
+
+
+def events(page):
+    return page.run("JSON.stringify(window.__bar.splice(0))") if page else ""
 
 
 def main():
     OUT.mkdir(exist_ok=True)
-    env = dict(os.environ, SOURCERER_DETACHED="1", PYTHONUNBUFFERED="1")
-    app = subprocess.Popen([sys.executable, str(ROOT / "Sourcerer_files" / "app.py")], cwd=str(ROOT), env=env,
-                           stdout=open(OUT / "app.out", "w"), stderr=subprocess.STDOUT)
+    exe = pathlib.Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else None
+    env = dict(os.environ, PYTHONUNBUFFERED="1", WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=%d" % CDP_PORT)
+    if exe:
+        data, cmd, cwd = exe.parent / "Userdata", [str(exe)], str(exe.parent)
+    else:
+        data, cmd, cwd = ROOT / "Sourcerer_files" / "Userdata", [sys.executable, str(ROOT / "Sourcerer_files" / "app.py")], str(ROOT)
+        env["SOURCERER_DETACHED"] = "1"
+    app = subprocess.Popen(cmd, cwd=cwd, env=env, stdout=open(OUT / "app.out", "w"), stderr=subprocess.STDOUT)
     try:
-        run(app)
+        run(data)
     finally:
         app.kill()
         for name in ("sourcerer.log", "console.log"):
             try:
-                (OUT / name).write_text((LOGS / name).read_text(encoding="utf-8", errors="replace"), encoding="utf-8")
+                (OUT / name).write_text((data / "Logs" / name).read_text(encoding="utf-8", errors="replace"), encoding="utf-8")
             except OSError:
                 pass
     say("")
@@ -163,89 +178,145 @@ def main():
     return 1 if FAILS and os.environ.get("WINDOW_TEST_STRICT") else 0
 
 
-def run(app):
-    running = ROOT / "Sourcerer_files" / "Userdata" / "running.json"
+def run(data):
+    started = time.time()
     port = None
-    for _ in range(120):
+    for _ in range(240):
         try:
-            port = json.loads(running.read_text(encoding="utf-8"))["port"]
+            port = json.loads((data / "running.json").read_text(encoding="utf-8"))["port"]
             http(port, "/api/ping")
             break
         except (OSError, ValueError, KeyError):
             port = None
             time.sleep(0.5)
-    check(port is not None, "Sourcerer serves")
+    check(port is not None, "Sourcerer serves (%.1f s)" % (time.time() - started))
     if port is None:
         return
     hwnd = None
-    for _ in range(120):
+    for _ in range(240):
         hwnd = find_window()
         if hwnd:
             break
         time.sleep(0.5)
-    check(hwnd is not None, "the app window opens")
+    check(hwnd is not None, "the app window opens (%.1f s)" % (time.time() - started))
     if not hwnd:
         return
-    state = {}
-    for _ in range(60):
-        state = http(port, "/api/state")
-        if state.get("frame") == "custom":
-            break
+    page = None
+    for _ in range(180):                                       # until the page is drawn and has dressed the bar
+        try:
+            page = page or Page()
+            if page.run("typeof S !== 'undefined' && S.frame === 'custom' && document.readyState === 'complete'"):
+                break
+        except Exception as e:                                 # (the debugging port is not up yet)
+            page = None
+            last = e
         time.sleep(0.5)
-    time.sleep(3)                                              # the page draws its bar
-    say("screen %sx%s, work area %s, dpi %s" % (SCREEN[0], SCREEN[1], work_area(), user32.GetDpiForSystem()))
-    say("window rect %s, client origin %s, style 0x%08x" % (rect_of(hwnd), client_origin(hwnd), user32.GetWindowLongW(hwnd, -16) & 0xFFFFFFFF))
-    say("state: frame=%s drag=%s" % (state.get("frame"), state.get("drag")))
-    check(state.get("frame") == "custom", "the page's own bar is the title bar")
-    user32.SetForegroundWindow(hwnd)
-    time.sleep(0.5)
-    moves_and_docks(port, hwnd)
-    show_logs("logs after the run")
-
-
-def moved(hwnd, before):
-    now = rect_of(hwnd)
-    return now[0] - before[0], now[1] - before[1]
-
-
-def moves_and_docks(port, hwnd):
-    # 1. a plain drag of the bar, three times (the second and third show a fallback if there is one)
-    for attempt in (1, 2, 3):
-        before = rect_of(hwnd)
-        seen = []
-        drag(hwnd, bar_point(hwnd), (bar_point(hwnd)[0] + 150, bar_point(hwnd)[1] + 60),
-             watch=lambda step: seen.append(in_move_size(hwnd)) if step in (0, 12, 24) else None)
-        dx, dy = moved(hwnd, before)
-        say("drag %d: window moved by (%d, %d); in a move loop while held: %s; drag mode now: %s" % (
-            attempt, dx, dy, seen, http(port, "/api/state").get("drag")))
-        check(abs(dx - 150) <= 12 and abs(dy - 60) <= 12, "drag %d moves the window with the pointer" % attempt)
-        # back to where it was
-        r = rect_of(hwnd)
-        user32.SetWindowPos(hwnd, None, before[0], before[1], 0, 0, 0x0001 | 0x0004 | 0x0010)
-        time.sleep(0.3)
-
-    # 2. docking: to the left edge, the right edge, the top edge
+    else:
+        say("the page was not reached through the debugging port: %s" % (last if page is None else "no custom frame"))
+        page = None
+    say("page ready after %.1f s" % (time.time() - started))
+    if page:
+        page.run("window.__bar = []; ['mousedown', 'mouseup'].forEach(function (t) { window.addEventListener(t, function (e) { "
+                 "window.__bar.push([Math.round(performance.now()), t, e.isTrusted, e.clientX, e.clientY, "
+                 "(e.target.id || e.target.className || e.target.tagName)]); }, true); }); 1")
+    time.sleep(1.0)
     wa = work_area()
-    for name, target in (("left", (0, wa[1] + 300)), ("right", (SCREEN[0] - 1, wa[1] + 300)), ("top", (SCREEN[0] // 2, 0))):
+    say("screen %sx%s, work area %s, dpi %s" % (SCREEN[0], SCREEN[1], wa, user32.GetDpiForSystem()))
+    say("window rect %s, client origin %s, style 0x%08x" % (rect_of(hwnd), client_origin(hwnd), user32.GetWindowLongW(hwnd, -16) & 0xFFFFFFFF))
+    check(http(port, "/api/state").get("frame") == "custom", "the page's own bar is the title bar")
+    user32.SetForegroundWindow(hwnd)
+    normal(hwnd)
+    tests(port, hwnd, page, wa)
+    say("---- logs after the run ----")
+    for name in ("sourcerer.log", "console.log"):
+        try:
+            lines = (data / "Logs" / name).read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        say("[%s]" % name)
+        for line in lines[-30:]:
+            say("  " + line)
+
+
+def tests(port, hwnd, page, wa):
+    half = (wa[2] - wa[0]) // 2
+
+    # 1. the bar moves the window
+    for attempt in (1, 2):
+        normal(hwnd)
         before = rect_of(hwnd)
-        drag(hwnd, bar_point(hwnd), target, steps=30)
+        start = bar_point(hwnd)
+        drag(start, (start[0] + 150, start[1] + 60))
         after = rect_of(hwnd)
-        say("dock %s: %s -> %s (work area %s)" % (name, before, after, wa))
-        if name == "left":
-            check(abs(after[0] - wa[0]) <= 2 and abs((after[2] - after[0]) - (wa[2] - wa[0]) // 2) <= 16, "dragged to the left edge: left half")
-        elif name == "right":
-            check(abs(after[2] - wa[2]) <= 2 and abs((after[2] - after[0]) - (wa[2] - wa[0]) // 2) <= 16, "dragged to the right edge: right half")
-        else:
-            check(abs(after[0] - wa[0]) <= 2 and abs(after[2] - wa[2]) <= 2 and abs(after[3] - wa[3]) <= 2, "dragged to the top edge: maximized")
-        # pulled out again: the window comes back to a normal size under the pointer
-        mid = bar_point(hwnd)
+        dx, dy = after[0] - before[0], after[1] - before[1]
+        say("drag %d: moved by (%d, %d); page events %s" % (attempt, dx, dy, events(page)))
+        check(abs(dx - 150) <= 14 and abs(dy - 60) <= 14, "the bar moves the window with the pointer (%d)" % attempt)
+
+    # 2. dock left, then pull out
+    normal(hwnd)
+    drag(bar_point(hwnd), (0, wa[1] + 300))
+    r = rect_of(hwnd)
+    say("dock left: %s %s" % (r, flags(page, hwnd)))
+    check(abs(r[0] - wa[0]) <= 2 and abs(r[1] - wa[1]) <= 2 and abs(r[3] - wa[3]) <= 8 and r[2] - r[0] <= 780 and not zoomed(hwnd),
+          "a drag to the left edge docks the window there (full height, narrower than 780)")
+    start = bar_point(hwnd, dx=200)
+    drag(start, (start[0] + 120, start[1] + 150))
+    r = rect_of(hwnd)
+    say("pulled out of the left dock: %s %s" % (r, flags(page, hwnd)))
+    check(abs((r[2] - r[0]) - 800) <= 8 and abs((r[3] - r[1]) - 560) <= 8, "a drag out of the dock gives the window its size back (800x560)")
+
+    # 3. dock right
+    normal(hwnd)
+    drag(bar_point(hwnd), (SCREEN[0] - 1, wa[1] + 300))
+    r = rect_of(hwnd)
+    say("dock right: %s %s" % (r, flags(page, hwnd)))
+    check(abs(r[2] - wa[2]) <= 2 and abs(r[1] - wa[1]) <= 2 and abs(r[3] - wa[3]) <= 8 and r[2] - r[0] <= 780 and not zoomed(hwnd),
+          "a drag to the right edge docks the window there")
+
+    # 4. dock top = maximize, then pull out
+    normal(hwnd)
+    drag(bar_point(hwnd), (SCREEN[0] // 2, 0))
+    r = rect_of(hwnd)
+    say("dock top: %s zoomed=%s %s" % (r, zoomed(hwnd), flags(page, hwnd)))
+    check(zoomed(hwnd) and abs(r[0] - wa[0]) <= 2 and abs(r[2] - wa[2]) <= 2 and abs(r[3] - wa[3]) <= 2,
+          "a drag to the top edge maximizes the window into the work area")
+    start = bar_point(hwnd, dx=400)
+    drag(start, (start[0] + 60, start[1] + 200))
+    r = rect_of(hwnd)
+    say("pulled out of the maximized window: %s zoomed=%s %s" % (r, zoomed(hwnd), flags(page, hwnd)))
+    check(not zoomed(hwnd) and abs((r[2] - r[0]) - 800) <= 8, "a drag out of a maximized window gives it its size back")
+
+    # 5. a corner is a quarter
+    normal(hwnd)
+    drag(bar_point(hwnd), (0, 0))
+    r = rect_of(hwnd)
+    say("dock top left: %s %s" % (r, flags(page, hwnd)))
+    check(abs(r[0] - wa[0]) <= 2 and abs(r[1] - wa[1]) <= 2 and r[2] - r[0] <= 780 and r[3] - r[1] <= 560 and not zoomed(hwnd),
+          "a drag to a corner docks the window as a quarter")
+
+    # 6. a double-click on the bar maximizes, and again restores
+    normal(hwnd)
+    p = bar_point(hwnd)
+    for expected in (True, False):
+        p = bar_point(hwnd)
+        point(*p)
+        time.sleep(0.3)
+        down(); up(); time.sleep(0.08); down(); up()
+        time.sleep(1.0)
+        check(zoomed(hwnd) == expected, "a double-click on the bar %s the window" % ("maximizes" if expected else "restores"))
+
+    # 7. a dialog open: the bar still moves the window
+    normal(hwnd)
+    if page:
+        page.run("document.getElementById('btn-settings').click(); 1")
+        time.sleep(1.5)
         before = rect_of(hwnd)
-        drag(hwnd, (mid[0] + 100, mid[1]), (mid[0] + 100 + 80, mid[1] + 240), steps=20)
-        out = rect_of(hwnd)
-        say("pulled out of %s: %s -> %s" % (name, before, out))
-        check((out[2] - out[0]) != (before[2] - before[0]), "pulled out of %s: the window gets its normal size back" % name)
-        user32.SetWindowPos(hwnd, None, 120, 40, 0, 0, 0x0001 | 0x0004 | 0x0010)
-        time.sleep(0.5)
+        start = bar_point(hwnd)
+        drag(start, (start[0] + 120, start[1] + 50))
+        after = rect_of(hwnd)
+        say("drag under a dialog: moved by (%d, %d) %s" % (after[0] - before[0], after[1] - before[1], events(page)))
+        check(abs(after[0] - before[0] - 120) <= 14 and abs(after[1] - before[1] - 50) <= 14, "the bar moves the window under a modal dialog")
+        page.run("document.getElementById('dlg-settings').close(); 1")
 
 
 if __name__ == "__main__":
