@@ -9,6 +9,8 @@ Run by .github/workflows/checks.yml on every pull request, and by hand before pu
 * a media gallery's tiles: the small picture of each, not an avatar, not another picture's (gdl_run.py: tile_thumb);
 * the speed choice: the table, the pace of a login's files and pages, the lanes' concurrency, what an old settings table becomes, the settings API (net.py,
   db.py, server.py);
+* what a refused file does to a site (net.py: _refusal): one file is one refusal and it takes eight different ones in a row, a refused page or list still
+  takes three;
 * gallery.picture for a site with no resolver (the booru-like case the forum fix must not change).
 
 A failing check starts with FAIL and makes the exit code 1.
@@ -354,6 +356,82 @@ def speed_checks():
     net.configure(speed="normal")
 
 
+# ---- a refused file is about that file, a refused page about the login ------------------------------------------------------------------------
+
+def refusal_checks():
+    """2026-11-03: three attachments of one post, behind a permission, answered 403 in a row and "it refused the login three times in a row"
+    rested a forum for hours while the login worked."""
+    class Refusing(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            number = self.path.rstrip("/").rpartition("/")[2]
+            if self.path.startswith("/attachments/") and number.isdigit() and int(number) >= 100:
+                body, code, kind = jpeg((10, 120, 10), (32, 24)), 200, "image/jpeg"
+            else:                                                  # the forum's own error page, as a member without the permission sees it
+                body, code, kind = b"<html><head><title>Oops! We ran into some problems. | Forum</title></head><body>No permission</body></html>", 403, "text/html"
+            self.send_response(code)
+            self.send_header("Content-Type", kind)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    base = serve(Refusing)
+    site, folder = net.site_of(base), pathlib.Path(tempfile.mkdtemp(dir=WORK))
+    saved = (copy.deepcopy(net.PROFILES), net.JITTER, net.LOGIN_PACE, net.accounts.headers_for)
+    net.accounts.headers_for = lambda url, *args, **kwargs: {"Cookie": "session=made-up"}          # the made-up forum is a login's site
+    net.JITTER, net.LOGIN_PACE = (1.0, 1.0), 0.0
+    for p in net.PROFILES.values():
+        p["files"], p["look"], p["pause"] = 0.0, 0.0, 0.0
+
+    def fresh():
+        net._refused.clear()
+        net._hosts.clear()
+        net._state["paused"], net._state["unfriendly"] = {}, {}
+
+    def asked(path, page=False):
+        try:
+            net.get_json(base + path) if page else net.download(base + path, folder)
+        except Exception:
+            return "refused"
+        return "served"
+
+    try:
+        fresh()
+        for _ in range(5):
+            asked("/attachments/7/")
+        check(net.paused(base) is None, "one refused file, asked again and again, is one refusal", net.paused(base))
+        for n in range(1, 8):
+            asked("/attachments/%d/" % n)
+        check(net.paused(base) is None, "seven different refused files do not rest the site", net.paused(base))
+        check(not net._stored("unfriendly").get(site), "a refused file is no word about how Sourcerer behaves", net._stored("unfriendly"))
+        asked("/attachments/8/")
+        got = net.paused(base)
+        check(got is not None and "8 files in a row" in got[1], "the eighth different one does, and says what it was", got)
+        net.lift(base)
+        check(net.paused(base) is None, "a login saved anew ends it")
+
+        fresh()
+        for n in range(1, 4):
+            asked("/attachments/%d/" % n)
+        check(asked("/attachments/200/") == "served", "a file that comes through is served as before")
+        for n in range(4, 11):
+            asked("/attachments/%d/" % n)
+        check(net.paused(base) is None, "a file that came through starts the count afresh", net.paused(base))
+
+        fresh()
+        for n in range(3):
+            asked("/list/%d" % n, page=True)
+        got = net.paused(base)
+        check(got is not None and "the login three times" in got[1], "three refused pages still rest the site: that is the login's verdict", got)
+    finally:
+        net.PROFILES.clear()
+        net.PROFILES.update(saved[0])
+        net.JITTER, net.LOGIN_PACE, net.accounts.headers_for = saved[1], saved[2], saved[3]
+        fresh()
+
+
 def settings_checks():
     def scenario(old):
         with db.connect() as con:
@@ -421,7 +499,7 @@ def gallery_checks():
 
 
 def main():
-    for group in (forum_checks, tile_checks, speed_checks, settings_checks, gallery_checks):
+    for group in (forum_checks, tile_checks, speed_checks, refusal_checks, settings_checks, gallery_checks):
         print("--", group.__name__, flush=True)
         try:
             group()

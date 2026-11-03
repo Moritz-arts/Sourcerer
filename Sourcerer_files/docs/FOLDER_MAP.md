@@ -114,7 +114,7 @@ Only in the repository, never in the ZIP (`export-ignore` in `.gitattributes`):
 │   ├─ window_test.py             moves, docks and pulls out the real window with the real mouse
 │   ├─ workflows/checks.yml       on pull requests: the static checks and checks.py on Linux
 │   ├─ checks.py                  the program's own checks against made-up sites (a forum whose attachment numbers differ,
-│   │                               media tiles, the speed choice and its migration, gallery.picture)
+│   │                               media tiles, the speed choice and its migration, what a refused file does to a site, gallery.picture)
 │   ├─ exe/build.py               the PyInstaller build and packaging; exe/smoke.py starts each
 │   │                               result like a user; exe/Sourcerer.iss is the Windows installer;
 │   │                               exe/Sourcerer.ico / .icns / .png are the logo as icons

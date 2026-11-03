@@ -623,7 +623,13 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   still a bot check, but only by its own words -- inside it the Server header alone no longer makes one); a 401 still counts. The read's own
   note says what it could not read. `net.guess()` works through a thread-local flag, not an argument (the reads go through helpers that know
   nothing of it): **keep it around the one call**, as `patreon.following` and Fanbox's `plan.listSupporting` do, never around a block that
-  calls a helper which makes other requests.
+  calls a helper which makes other requests. **A 403 on a *file* is about that file, not the login** (`_get(file=True)` from `download`,
+  `fetch_picture`, `fetch_bytes`; `net._refusal`): a forum numbers its attachments one after the other, so three attachments of one post behind a
+  permission came in a row and "it refused the login three times in a row" rested a forum for 3-4 hours while its login worked (the user's log, 2026-11-03,
+  twice -- the first time through the wrong-attachment bug, whose guesses hit strangers' files in sections the account may not see). A file now
+  counts once however often it is asked for, `FILE_REFUSALS` (8) different ones in a row rest the site ("it refused 8 files in a row"; a new login
+  lifts it like the others, `LOGIN_PAUSES`), a refused file is no `_unfriendly` word, and a page, a list or an API call still takes three.
+  A success resets both counts. A Cloudflare challenge on a file is still a bot check.
 - **The activity bar writes what changes at every poll in place** (`data-dyn` text, bar width, speed, file) and rebuilds only when its structure
   changes: comparing the whole markup still rebuilt it at every poll of a running download and swallowed the click on Cancel.
 - **An empty X list may be the right answer for the wrong account** (v0.40's trace: `Following` = ClearCache + cursors and no user anywhere, `HomeLatestTimeline`

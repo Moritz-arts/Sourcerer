@@ -135,6 +135,7 @@ def profile():
 BUDGETS = {"pixiv": 1500, "patreon": 1500, "x": 600, "fanbox": 300, "fantia": 300}
 BUDGET = 3000
 BOT_REST = (12, 24)         # hours a site rests after it answered with a block page (not a challenge that passes)
+FILE_REFUSALS = 8           # different files in a row a site may refuse before it rests (a page, a list or an API call: three)
 
 # A site is every host one company runs: a stop from pixiv's API stops its image host too (pause()). The day's budget counts only
 # the requests that carry the login -- the API hosts: the cookie domains (accounts.SITES) leave out the image hosts.
@@ -225,7 +226,7 @@ def pause(url, seconds, why):
 
 
 # What a pause says when a login began it: a new login ends it (lift).
-LOGIN_PAUSES = ("refused the login", "bot check", "took Sourcerer for a bot", "let only a browser through")
+LOGIN_PAUSES = ("refused the login", "files in a row", "bot check", "took Sourcerer for a bot", "let only a browser through")
 
 
 def lift(url):
@@ -547,23 +548,35 @@ def _say_refusal(url, resp):
     log.warning("%s answered %d on %s: %s", urllib.parse.urlparse(url).hostname, resp.status_code, key[1], _describe(resp))
 
 
-_refused = {}               # site -> [refusals in a row, since]
+_refused = {}               # site -> [pages, lists and API calls refused in a row, since, the files refused in a row]
 
 
-def _refusal(url, ok):
-    """A login refused again and again (401/403) is not asked further for a while."""
+def _refusal(url, ok, file=False):
+    """A login refused again and again (401/403) is not asked further for a while.
+
+    A refused *file* is about that file -- a post in a section the account may not see, another member's attachment -- not about the
+    login, which a page or a list judges. A forum's attachments are numbered one after the other, so three attachments of one post
+    behind a permission came in a row, and "it refused the login three times in a row" rested the forum for hours while the login
+    worked (2026-11-03). A file counts once however often it is asked for, and it takes FILE_REFUSALS different ones in a row; a
+    page, a list or an API call still takes three."""
     site = site_of(url)
     with _lock:
         if ok:
             _refused.pop(site, None)
             return
-        count, since = _refused.get(site, [0, time.time()])
-        if time.time() - since > 900:
-            count, since = 0, time.time()
-        _refused[site] = [count + 1, since]
-        tripped = count + 1 >= 3
-    if tripped:
-        pause(url, _hours(2, 4), "it refused the login three times in a row")
+        now = time.time()
+        pages, since, files = _refused.get(site, [0, now, set()])
+        if now - since > 900:
+            pages, since, files = 0, now, set()
+        if file:
+            files.add(url)
+        else:
+            pages += 1
+        _refused[site] = [pages, since, files]
+        why = ("it refused the login three times in a row" if pages >= 3 else
+               "it refused %d files in a row" % len(files) if len(files) >= FILE_REFUSALS else "")
+    if why:
+        pause(url, _hours(2, 4), why)
 
 
 def _carries_login(url, headers=None, params=None):
@@ -854,8 +867,9 @@ def _retry_after(resp):
 
 
 def _get(url, params=None, stream=False, headers=None, method="GET", data=None, json=None, tries=None,
-         pooled=False):
-    """A response, retrying what passes with time. The caller holds _Polite(url).
+         pooled=False, file=False):
+    """A response, retrying what passes with time. The caller holds _Polite(url). `file`: a picture or a download -- a 403 on it is
+    about that file, not about the login (_refusal).
 
     A site the user logged in to gets what proves the login (accounts.py) --
     per request, never in the shared session, so it reaches no other host.
@@ -929,8 +943,9 @@ def _get(url, params=None, stream=False, headers=None, method="GET", data=None, 
                 continue
             if login and code in (401, 403):
                 if not (code == 403 and getattr(_local, "guess", False)):
-                    _refusal(url, False)
-                    _unfriendly(url)
+                    _refusal(url, False, file and code == 403)
+                    if not (file and code == 403):       # (a permission on one file is no word about how Sourcerer behaves)
+                        _unfriendly(url)
             elif login and code < 400:
                 _refusal(url, True)
                 _friendly(url)
@@ -1091,7 +1106,7 @@ def download(url, folder, mime_hint="", progress=None, headers=None):
 
 
 def _stream(url, part, digest, mime_hint, progress, headers):
-    resp = _get(url, stream=True, headers=headers)
+    resp = _get(url, stream=True, headers=headers, file=True)
     try:
         # A web page where a file should be: a hotlink guard or a login wall,
         # never something to keep under a picture's name.
@@ -1127,7 +1142,7 @@ def fetch_picture(url, headers=None, limit=40 << 20, first=False):
     once, no retries -- a preview is not worth asking a site twice -- and only
     a picture or a video is accepted."""
     with _Polite(url, _carries_login(url, headers), first, preview=not first, browse=not first):
-        resp = _get(url, stream=True, headers=headers, tries=1, pooled=True)
+        resp = _get(url, stream=True, headers=headers, tries=1, pooled=True, file=True)
         try:
             ctype = (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
             if not ctype.startswith(("image/", "video/")):
@@ -1143,7 +1158,7 @@ def fetch_picture(url, headers=None, limit=40 << 20, first=False):
 def fetch_bytes(url, limit=10 << 20, headers=None):
     """A small file (a profile picture) as bytes."""
     with _Polite(url, _carries_login(url, headers)):
-        resp = _get(url, stream=True, headers=headers)
+        resp = _get(url, stream=True, headers=headers, file=True)
         try:
             data = resp.raw.read(limit + 1, decode_content=True)
         finally:
