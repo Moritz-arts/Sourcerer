@@ -373,16 +373,63 @@ def focus():
     """A second start of Sourcerer asks this one to come forward instead."""
     if WINDOW is not None:
         try:
-            WINDOW.restore()
-            WINDOW.show()
-            WINDOW.on_top = True          # the only way past Windows' focus-stealing guard
-            WINDOW.on_top = False
+            _forward(WINDOW)
         except Exception as e:
             log.info("could not bring the window forward: %s", e)
     else:
         import webbrowser
         webbrowser.open(URL)
     return jsonify(ok=True)
+
+
+def _forward(window):
+    """Bring the window to the front and leave its state alone. pywebview's restore() sets the state to Normal on Windows and on
+    Qt -- a maximized window shrank at every second start -- and Qt's on_top flip re-creates the native window (a new window id;
+    the window manager may place it anew). Only a minimized window is restored, and to what it was."""
+    native = window.native
+    if sys.platform == "win32":
+        if int(native.WindowState) == 1 and HWND[0]:                     # FormWindowState.Minimized
+            _win32()["user32"].ShowWindow(HWND[0], 9)                    # SW_RESTORE: maximized again if it was
+        elif int(native.WindowState) == 1:
+            window.restore()
+        window.show()
+        window.on_top = True          # the only way past Windows' focus-stealing guard
+        window.on_top = False
+    elif hasattr(native, "windowState"):                                 # Qt
+        _qt_forwarder(native).forward()
+    else:                             # GTK, Cocoa: restore() brings a minimized window back and does nothing else
+        window.restore()
+        window.show()
+
+
+_QT = []
+
+
+def _qt_forwarder(native):
+    """Qt's widgets belong to the GUI thread and this is a server thread; only slots can be invoked from outside, and QWidget's
+    activateWindow() is none. So a small QObject with a slot of its own lives in the GUI thread and does the bringing forward there."""
+    if not _QT:
+        from qtpy import QtCore
+
+        class Forwarder(QtCore.QObject):
+            def __init__(self, window):
+                super().__init__()
+                self.window = window
+                self.moveToThread(window.thread())
+
+            @QtCore.Slot()
+            def _forward(self):
+                window, flag = self.window, QtCore.Qt.WindowState
+                state = window.windowState()
+                if state & flag.WindowMinimized:                         # back to maximized if it was, not to normal
+                    window.setWindowState((state & ~flag.WindowMinimized) | flag.WindowActive)
+                window.raise_()
+                window.activateWindow()
+
+            def forward(self):
+                QtCore.QMetaObject.invokeMethod(self, "_forward", QtCore.Qt.ConnectionType.QueuedConnection)
+        _QT.append(Forwarder(native))
+    return _QT[0]
 
 
 @app.post("/api/quit")

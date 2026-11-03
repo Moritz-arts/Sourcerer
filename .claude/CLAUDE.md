@@ -1008,6 +1008,12 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   above the screen, out of reach; it is pulled back into the work area of its monitor. Every Win32 prototype lives in `server._win32()` (one
   function with two argtypes keeps whoever set it last). The page keeps the maximize icon right by asking `/api/window {action: "state"}` after a
   `resize`. A viewer (`#gal-view`) is inside the gallery area, below the bar: it never covers it.
+- **Bringing the window forward must not touch its state** (`server._forward`, `/api/focus`, a second start): pywebview's `restore()` sets
+  the state to Normal on Windows (WinForms) and Qt -- a maximized window shrank at every second start -- and Qt's `on_top` flip
+  (`setWindowFlags` + `show`) re-creates the native window (a new X11 window id, the manager may place it anew; reproduced under openbox).
+  Windows restores only a minimized window (`ShowWindow(SW_RESTORE)`: maximized again if it was) and keeps the `on_top` flip, the only way past
+  its focus-stealing guard; Qt does it through a `QObject` with a slot that lives in the GUI thread (`_qt_forwarder`: only slots can be invoked from
+  a server thread, and `activateWindow` is none), GTK and Cocoa through `restore()` + `show()`.
 - **Keys act on the open artist** (`S.brArtist`, `artistAct`): there is no card selection any
   more -- the cards' keys once did nothing in Browse, which was the "shortcuts don't work".
   Up/Down/Home/End pick the previous or next artist (the gallery opens 250 ms after the last key),
