@@ -215,6 +215,7 @@ def run(data):
         say("the page was not reached through the debugging port: %s" % (last if page is None else "no custom frame"))
         page = None
     say("page ready after %.1f s" % (time.time() - started))
+    check(page is not None, "the page is read through the debugging port (the empty-spot and dialog checks need it)")
     if page:
         page.run("window.__bar = []; ['mousedown', 'mouseup'].forEach(function (t) { window.addEventListener(t, function (e) { "
                  "window.__bar.push([Math.round(performance.now()), t, e.isTrusted, e.clientX, e.clientY, "
