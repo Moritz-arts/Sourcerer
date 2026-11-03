@@ -333,7 +333,7 @@ function load() {
   lastLoad = Date.now();
   return api("GET", "/api/state").then(function (d) {
     S.artists = d.artists; S.apart = apartSet(d.apart); S.sync = d.sync; S.library = d.library; S.window = d.window;
-    S.frame = d.frame; applyFrame();
+    S.frame = d.frame; S.drag = d.drag; applyFrame();
     S.sep = d.sep; S.sites = d.sites; S.fields = d.fields; S.settings = d.settings; S.logins = d.logins || []; S.pauses = d.pauses || [];
     $("version").textContent = "v" + d.version;
     $("btn-quit").classList.toggle("hidden", S.window);
@@ -376,6 +376,7 @@ function poll() {
     S.sync = s;
     if (syncEnded) galSavedRefresh();
     if (s.pauses) S.pauses = s.pauses;
+    if (s.frame && (s.frame !== S.frame || s.drag !== S.drag)) { S.frame = s.frame; S.drag = s.drag; applyFrame(); }     // (desktop._custom_frame may finish after the first load)
     if (key !== lastKey) { lastKey = key; return loadSoon(); }
     renderBrowseList(); renderBrowseHead(); renderActivity();
   }).catch(function () {}).then(function () {
@@ -2918,28 +2919,78 @@ $("btn-quit").addEventListener("click", function () {
 $("btn-sync-all").addEventListener("click", function () { sync(null); });
 
 // ---- the window's own title bar (Windows) ------------------------------------------------
-// desktop.py takes the native title bar off and says so (frame: "custom"): the page's bar is then the top of the
-// window -- it drags it (pywebview's drag region, on the bar itself, not on its buttons), a double-click maximizes
-// -- and draws minimize, maximize and close at the right edge. Anything else keeps its native bar.
+// desktop.py takes the native title bar off and says so (frame: "custom"): the page's bar is then the top of the window and
+// draws minimize, maximize and close at its right edge. A press on the bar hands the pointer to the system's own move loop
+// (POST /api/window "drag", `drag: "native"`), so the window docks at the screen's edges, comes back from maximized when it is
+// pulled down and snaps like any other window. Where that cannot start, the server says `drag: "script"` and pywebview's own
+// script drag takes over (the pywebview-drag-region class): it moves the window but never docks it. Anything else keeps its
+// native bar and none of this runs.
+function barHeight() { document.documentElement.style.setProperty("--bar-h", $("toolbar").offsetHeight + "px"); }
+if (window.ResizeObserver) new ResizeObserver(barHeight).observe($("toolbar"));
 function applyFrame() {
-  var custom = S.frame === "custom";
+  var custom = S.frame === "custom", script = custom && S.drag !== "native";
   document.documentElement.classList.toggle("frameless", custom);
   $("winctl").classList.toggle("hidden", !custom);
   $$("#toolbar, #toolbar .logo, #toolbar .brand, #toolbar #version, #toolbar .grow").forEach(function (el) {
-    el.classList.toggle("pywebview-drag-region", custom);
+    el.classList.toggle("pywebview-drag-region", script);
   });
+  barHeight();
 }
-function windowAct(action) {
-  api("POST", "/api/window", { action: action }).then(function (d) {
+function windowAct(action, quiet) {
+  return api("POST", "/api/window", { action: action }).then(function (d) {
     $("win-max").querySelector("use").setAttribute("href", d.maximized ? "#i-copy" : "#i-square");
     $("win-max").title = $("win-max").ariaLabel = d.maximized ? "Restore" : "Maximize";
-  }).catch(fail);
+    if (d.frame && (d.frame !== S.frame || d.drag !== S.drag)) { S.frame = d.frame; S.drag = d.drag; applyFrame(); }
+    return d;
+  }).catch(function (e) { if (!quiet) fail(e); });
 }
 $("win-min").addEventListener("click", function () { windowAct("minimize"); });
 $("win-max").addEventListener("click", function () { windowAct("maximize"); });
 $("win-close").addEventListener("click", function () { windowAct("close"); });
+
+// What a point of the bar is, by its geometry: a window button, "drag" (the bar's own empty parts, the logo, the name) or nothing
+// (one of the page's buttons). Geometry, because a modal dialog makes the whole page inert: a press on the bar then reaches
+// the dialog's backdrop and not the bar, which left the window unmovable and its buttons dead while Settings was open.
+function barHit(x, y) {
+  var bar = $("toolbar").getBoundingClientRect();
+  if (x < bar.left || x >= bar.right || y < bar.top || y >= bar.bottom) return null;
+  function over(el) { var r = el.getBoundingClientRect(); return x >= r.left && x < r.right && y >= r.top && y < r.bottom; }
+  var button = $$("#toolbar .wc").filter(over)[0];
+  if (button) return button;
+  return $$("#toolbar button, #toolbar .seg").some(over) ? null : "drag";
+}
+var BAR_PRESS = null;
+document.addEventListener("mousedown", function (e) {
+  if (S.frame !== "custom" || e.button !== 0) return;
+  var hit = barHit(e.clientX, e.clientY), bar = $("toolbar"), t = e.target;
+  if (!hit) return;
+  if (!bar.contains(t)) {            // something covers the bar: only a modal dialog's backdrop (its box is the dialog's own) passes it on
+    var box = t.tagName === "DIALOG" && t.open && t.getBoundingClientRect();
+    if (!box || (e.clientX >= box.left && e.clientX < box.right && e.clientY >= box.top && e.clientY < box.bottom)) return;
+    e.preventDefault();
+    if (hit !== "drag") { hit.click(); return; }
+  } else if (hit !== "drag" || !t.matches("#toolbar, #toolbar .logo, #toolbar .brand, #toolbar #version, #toolbar .grow")) return;
+  if (S.drag !== "native") return;   // pywebview's script drag, on the bar itself; a double-click is the handler below
+  e.preventDefault();
+  // The system's loop swallows the button's release, so the page never sees a double-click: two presses close together are one.
+  var now = Date.now(), prev = BAR_PRESS;
+  BAR_PRESS = { t: now, x: e.clientX, y: e.clientY };
+  if (e.detail >= 2 || (prev && now - prev.t < 500 && Math.abs(prev.x - e.clientX) < 5 && Math.abs(prev.y - e.clientY) < 5)) {
+    BAR_PRESS = null;
+    windowAct("maximize");
+    return;
+  }
+  windowAct("drag", true);
+}, true);
 $("toolbar").addEventListener("dblclick", function (e) {
-  if (S.frame === "custom" && e.target.classList.contains("pywebview-drag-region")) windowAct("maximize");
+  if (S.frame === "custom" && S.drag !== "native" && e.target.classList.contains("pywebview-drag-region")) windowAct("maximize");
+});
+// Win+Up, a snap, the taskbar's menu: the window changes state without the page, which asks when its size changed.
+var stateTimer = 0;
+window.addEventListener("resize", function () {
+  if (S.frame !== "custom") return;
+  clearTimeout(stateTimer);
+  stateTimer = setTimeout(function () { windowAct("state", true); }, 150);
 });
 
 // ---- the master password, and the reset ------------------------------------------------
@@ -2948,6 +2999,7 @@ $("toolbar").addEventListener("dblclick", function (e) {
 
 function showLock(then) {
   S.afterUnlock = then || null;
+  document.documentElement.classList.add("locked");
   $$("dialog[open]").forEach(function (d) { d.close(); });
   $("lock-msg").textContent = ""; $("lock-pass").value = "";
   $("lock").classList.remove("hidden");
@@ -2962,6 +3014,7 @@ $("lock-form").addEventListener("submit", function (e) {
   e.preventDefault();
   api("POST", "/api/unlock", { password: $("lock-pass").value }).then(function () {
     $("lock").classList.add("hidden"); $("lock-pass").value = "";
+    document.documentElement.classList.remove("locked");
     var then = S.afterUnlock;
     S.afterUnlock = null;
     if (then) then(); else location.reload();                     // locked while it ran: what it shows is stale
@@ -3208,5 +3261,6 @@ function start() {
 }
 api("GET", "/api/lock").then(function (d) {
   S.lock = d;
+  S.frame = d.frame; S.drag = d.drag; applyFrame();          // the bar works on the lock screen too
   if (d.locked) showLock(start); else start();
 }).catch(function () { start(); });

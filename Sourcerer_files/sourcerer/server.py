@@ -283,8 +283,9 @@ def _same_origin():
 
 
 # What answers while the master password has not been given: the page itself, the launcher's ping and
-# focus, the lock's own calls, and the reset (the way out of a forgotten password).
-_OPEN = ("/", "/favicon.ico", "/api/ui.js", "/api/ping", "/api/focus", "/api/lock", "/api/unlock", "/api/reset")
+# focus, the lock's own calls, the reset (the way out of a forgotten password) and the window's bar.
+_OPEN = ("/", "/favicon.ico", "/api/ui.js", "/api/ping", "/api/focus", "/api/lock", "/api/unlock", "/api/reset",
+         "/api/window")          # the window's own bar: a locked window must still move, minimize and close
 
 
 @app.before_request
@@ -308,7 +309,7 @@ def _unlocked_answer(token, **fields):
 @app.get("/api/lock")
 def lock_state():
     on = security.enabled()
-    return jsonify(enabled=on, locked=on and not security.valid(request.cookies.get(security.COOKIE)))
+    return jsonify(enabled=on, locked=on and not security.valid(request.cookies.get(security.COOKIE)), **window_state())
 
 
 @app.post("/api/unlock")
@@ -402,8 +403,7 @@ def state():
                    fields=[{"label": label, "example": example, "logged_in": on.get(label, False)}
                            for label, example in sources.FIELDS],
                    logins=accounts.problems(rows), pauses=net.pauses(),
-                   artists=_artists(), apart=_apart(), sync=sync.status(), window=WINDOW is not None,
-                   frame="custom" if CUSTOM_FRAME and WINDOW is not None else "native")
+                   artists=_artists(), apart=_apart(), sync=sync.status(), window=WINDOW is not None, **window_state())
 
 
 # ---- artist cards --------------------------------------------------------------
@@ -748,7 +748,8 @@ def cancel_sync():
 
 @app.get("/api/sync")
 def sync_status():
-    return jsonify(dict(sync.status(), pauses=net.pauses(), follows=follows.version))
+    # (`frame` / `drag` ride along: the bar can become the title bar after the page loaded -- see desktop._custom_frame)
+    return jsonify(dict(sync.status(), pauses=net.pauses(), follows=follows.version, **window_state()))
 
 
 @app.get("/api/thumb/<int:file_id>")
@@ -938,7 +939,11 @@ def gallery_close():
 
 
 HWND = [None]            # the window's handle, read on the window's own thread (desktop._custom_frame)
+NATIVE_DRAG = [True]     # the system's own move loop moves the window when the bar is pressed (cleared when it was refused)
+_DRAG = {"busy": False, "refused": 0}
+_MONITOR = [None]        # the monitor MaximizedBounds was last worked out for
 _USER32 = []
+_WIN = {}
 
 
 def own_user32():
@@ -952,44 +957,200 @@ def own_user32():
     return _USER32[0]
 
 
-def keep_taskbar(window):
-    """A window without its title bar maximizes over the whole monitor, taskbar included. WinForms lets the form say
-    where it goes when maximized (MaximizedBounds): the work area of the monitor it is on, as a position relative
-    to that monitor (what WM_GETMINMAXINFO wants). Set again before every maximize -- the window may have moved to
-    another monitor -- and once when the bar is taken off. The monitor is asked through user32 with the handle kept
-    from the window's own thread: reading `native.Handle` here, on a server thread, may be refused."""
-    try:
+def _win32():
+    """own_user32() with the prototypes and structures Sourcerer's Windows calls need, set up once. They all live here: one
+    function given two argtypes by two callers keeps whichever came last."""
+    if not _WIN:
         import ctypes
         from ctypes import wintypes
-        from System.Drawing import Rectangle
 
         class MONITORINFO(ctypes.Structure):
             _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT), ("rcWork", wintypes.RECT),
                         ("dwFlags", wintypes.DWORD)]
-        user32 = own_user32()
-        user32.MonitorFromWindow.argtypes = [wintypes.HWND, wintypes.DWORD]
-        user32.MonitorFromWindow.restype = wintypes.HANDLE
-        user32.GetMonitorInfoW.argtypes = [wintypes.HANDLE, ctypes.POINTER(MONITORINFO)]
-        info = MONITORINFO(ctypes.sizeof(MONITORINFO))
-        if not HWND[0] or not user32.GetMonitorInfoW(user32.MonitorFromWindow(HWND[0], 2), ctypes.byref(info)):   # 2: the nearest monitor
+
+        class GUITHREADINFO(ctypes.Structure):
+            _fields_ = [("cbSize", wintypes.DWORD), ("flags", wintypes.DWORD), ("hwndActive", wintypes.HWND),
+                        ("hwndFocus", wintypes.HWND), ("hwndCapture", wintypes.HWND), ("hwndMenuOwner", wintypes.HWND),
+                        ("hwndMoveSize", wintypes.HWND), ("hwndCaret", wintypes.HWND), ("rcCaret", wintypes.RECT)]
+        user32, win, number, flag = own_user32(), wintypes.HWND, ctypes.c_int, wintypes.BOOL
+        for name, args, result in (
+                ("GetWindowLongW", [win, number], ctypes.c_long), ("SetWindowLongW", [win, number, ctypes.c_long], ctypes.c_long),
+                ("SetWindowPos", [win, win, number, number, number, number, wintypes.UINT], flag),
+                ("GetWindowRect", [win, ctypes.POINTER(wintypes.RECT)], flag),
+                ("IsIconic", [win], flag), ("IsZoomed", [win], flag), ("ShowWindow", [win, number], flag),
+                ("MonitorFromWindow", [win, wintypes.DWORD], wintypes.HANDLE),
+                ("GetMonitorInfoW", [wintypes.HANDLE, ctypes.POINTER(MONITORINFO)], flag),
+                ("ReleaseCapture", [], flag),
+                ("PostMessageW", [win, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM], flag),
+                ("GetAsyncKeyState", [number], ctypes.c_short), ("GetSystemMetrics", [number], number),
+                ("GetCursorPos", [ctypes.POINTER(wintypes.POINT)], flag),
+                ("GetWindowThreadProcessId", [win, ctypes.POINTER(wintypes.DWORD)], wintypes.DWORD),
+                ("GetGUIThreadInfo", [wintypes.DWORD, ctypes.POINTER(GUITHREADINFO)], flag)):
+            function = getattr(user32, name)
+            function.argtypes, function.restype = args, result
+        _WIN.update(user32=user32, MONITORINFO=MONITORINFO, GUITHREADINFO=GUITHREADINFO)
+    return _WIN
+
+
+def window_state():
+    """What the page needs to dress the window: whether its bar is the window's title bar (`frame`), and who moves the window when
+    the bar is pressed (`drag`: the system's own move loop, or pywebview's script -- which moves it but never docks it)."""
+    custom = CUSTOM_FRAME and WINDOW is not None
+    return {"frame": "custom" if custom else "native", "drag": "native" if custom and NATIVE_DRAG[0] else "script"}
+
+
+def _maximized():
+    try:
+        return int(WINDOW.native.WindowState) == 2          # WinForms' FormWindowState.Maximized
+    except Exception:
+        return False
+
+
+def _on_ui_thread(window, call):
+    """Run `call` on the window's own thread, as pywebview does for maximize."""
+    from System import Func, Type
+    window.native.Invoke(Func[Type](call))
+
+
+def keep_taskbar(window):
+    """A window without its title bar maximizes over the whole monitor, taskbar included. WinForms lets the form say
+    where it goes when maximized (MaximizedBounds): the work area of the monitor it is on, as a position relative
+    to that monitor (what WM_GETMINMAXINFO wants). Set again before every maximize -- the window may have moved to
+    another monitor -- and once when the bar is taken off; `follow_monitor` does it for the maximizes the page does not
+    make (Win+Up, a drag to the top edge). The monitor is asked through user32 with the handle kept from the window's
+    own thread: reading `native.Handle` here, on a server thread, may be refused."""
+    try:
+        import ctypes
+        from System.Drawing import Rectangle
+        win = _win32()
+        user32, info = win["user32"], win["MONITORINFO"]()
+        info.cbSize = ctypes.sizeof(info)
+        monitor = user32.MonitorFromWindow(HWND[0], 2) if HWND[0] else None          # 2: the nearest monitor
+        if not monitor or not user32.GetMonitorInfoW(monitor, ctypes.byref(info)):
             return
+        _MONITOR[0] = monitor
         w, m = info.rcWork, info.rcMonitor
         window.native.MaximizedBounds = Rectangle(w.left - m.left, w.top - m.top, w.right - w.left, w.bottom - w.top)
     except Exception as e:
         log.info("maximized bounds not set (the taskbar may be covered): %s", e)
 
 
+def follow_monitor(window):
+    """MaximizedBounds belongs to one monitor. It is worked out again when the window arrives on another one and when a move or
+    resize begins (the taskbar may have grown or hidden): a maximize by Win+Up, by a drag to the top edge or from the system menu
+    does not pass through the page's button, which was the only place that refreshed it."""
+    def moved(sender, args):
+        try:
+            if HWND[0] and _win32()["user32"].MonitorFromWindow(HWND[0], 2) != _MONITOR[0]:
+                keep_taskbar(window)
+        except Exception:
+            pass
+    window.native.LocationChanged += moved
+    window.native.ResizeBegin += lambda sender, args: keep_taskbar(window)
+
+
+def fit_to_screen():
+    """The window is made 1280x860 and centred; on a smaller work area (1366x768, 1080p at 150 %) its top -- the page's own bar --
+    starts above the screen, out of reach. Pulled back inside the work area of the monitor it opened on."""
+    import ctypes
+    from ctypes import wintypes
+    win = _win32()
+    user32, info, rect, hwnd = win["user32"], win["MONITORINFO"](), wintypes.RECT(), HWND[0]
+    info.cbSize = ctypes.sizeof(info)
+    if not hwnd or user32.IsZoomed(hwnd) or user32.IsIconic(hwnd) or not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+        return
+    monitor = user32.MonitorFromWindow(hwnd, 2)
+    if not monitor or not user32.GetMonitorInfoW(monitor, ctypes.byref(info)):
+        return
+    work = info.rcWork
+    w, h = min(rect.right - rect.left, work.right - work.left), min(rect.bottom - rect.top, work.bottom - work.top)
+    x, y = max(work.left, min(rect.left, work.right - w)), max(work.top, min(rect.top, work.bottom - h))
+    if (x, y, w, h) != (rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top):
+        user32.SetWindowPos(hwnd, None, x, y, w, h, 0x0004 | 0x0010)             # SWP_NOZORDER | SWP_NOACTIVATE
+
+
+def begin_drag(window):
+    """The bar was pressed: start the system's own move loop, as if the title bar had been. It is the loop that docks a window at
+    the screen's edges, restores it when it is pulled down from maximized and snaps it -- pywebview's script drag (a SetWindowPos
+    per mouse move) never enters it. The same message Qt, Tauri and every borderless WinForms window send. Returns "started";
+    "released" (the button was up before it could begin -- a loop started then sticks the window to the pointer until the next
+    click, so it is not started); or "refused" (the button is held and no loop began)."""
+    import ctypes
+    from ctypes import wintypes
+    win = _win32()
+    user32, hwnd = win["user32"], HWND[0]
+    if not hwnd:
+        return "refused"
+    key = 0x02 if user32.GetSystemMetrics(23) else 0x01       # SM_SWAPBUTTON: GetAsyncKeyState reads the physical buttons; the primary one may be the right
+    def held():
+        return bool(user32.GetAsyncKeyState(key) & 0x8000)
+    posted = []
+
+    def post():                                               # on the window's own thread
+        if not held():
+            return
+        point = wintypes.POINT()
+        user32.GetCursorPos(ctypes.byref(point))
+        user32.ReleaseCapture()                               # the web view holds the pointer; the loop takes it over
+        user32.PostMessageW(hwnd, 0x00A1, 2, ((point.y & 0xFFFF) << 16) | (point.x & 0xFFFF))     # WM_NCLBUTTONDOWN, HTCAPTION
+        posted.append(True)
+    _on_ui_thread(window, post)
+    if not posted:
+        return "released"
+    thread, info = user32.GetWindowThreadProcessId(hwnd, None), win["GUITHREADINFO"]()
+    info.cbSize = ctypes.sizeof(info)
+
+    def looping():                                            # GUI_INMOVESIZE: that thread is in a move or size loop; None: cannot be told
+        return bool(info.flags & 0x2) if user32.GetGUIThreadInfo(thread, ctypes.byref(info)) else None
+    for _ in range(25):                                       # the loop begins when that thread picks the message up
+        if looping() is not False:                            # (a loop that cannot be looked at is not blamed)
+            return "started"
+        if not held():
+            time.sleep(0.03)                                  # let go before it began: if it starts now nothing ends it
+            if looping():
+                user32.PostMessageW(hwnd, 0x001F, 0, 0)       # WM_CANCELMODE
+            return "released"
+        time.sleep(0.01)
+    return "refused"
+
+
+def _drag():
+    """What the page's press on the bar comes to: the system's loop moves the window; if it was refused twice with the button held
+    the bar goes back to pywebview's script drag for good (`drag: "script"` -- the page re-dresses itself)."""
+    if not CUSTOM_FRAME or not NATIVE_DRAG[0]:
+        return "script"
+    if _DRAG["busy"]:
+        return "busy"
+    _DRAG["busy"] = True
+    try:
+        result = begin_drag(WINDOW)
+    except Exception as e:
+        NATIVE_DRAG[0] = False
+        log.warning("window: the system's move loop cannot be started (%s); the bar drags by script, which cannot dock", e)
+        return "script"
+    finally:
+        _DRAG["busy"] = False
+    if result == "refused":
+        _DRAG["refused"] += 1
+        if _DRAG["refused"] >= 2:
+            NATIVE_DRAG[0] = False
+            log.warning("window: the system's move loop did not start twice; the bar drags by script, which cannot dock")
+    elif result == "started":
+        if not _DRAG.get("told"):
+            _DRAG["told"] = True
+            log.info("window: the bar starts the system's move loop (the window docks at the screen's edges)")
+        _DRAG["refused"] = 0
+    return result
+
+
 @app.post("/api/window")
 def window_action():
-    """The buttons of the page's own title bar (CUSTOM_FRAME): minimize, maximize and back, close."""
+    """The page's own title bar (CUSTOM_FRAME): minimize, maximize and back, close -- and the press on the bar itself ("drag"),
+    which hands the pointer to the system's move loop; "state" only reads."""
     action = (request.get_json(silent=True) or {}).get("action")
-    if WINDOW is None or action not in ("minimize", "maximize", "close"):
+    if WINDOW is None or action not in ("minimize", "maximize", "close", "drag", "state"):
         abort(400)
-    maximized = False
-    try:
-        maximized = int(WINDOW.native.WindowState) == 2          # WinForms' FormWindowState.Maximized
-    except Exception:
-        pass
+    maximized, result = _maximized(), None
     if action == "minimize":
         WINDOW.minimize()
     elif action == "maximize":
@@ -997,9 +1158,11 @@ def window_action():
             keep_taskbar(WINDOW)
         (WINDOW.restore if maximized else WINDOW.maximize)()
         maximized = not maximized
-    else:
+    elif action == "drag":
+        result = _drag()
+    elif action == "close":
         _background(WINDOW.destroy)            # as the window's own close: the program ends with it
-    return jsonify(ok=True, maximized=maximized)
+    return jsonify(ok=True, maximized=maximized, result=result, **window_state())
 
 
 @app.post("/api/open-url")

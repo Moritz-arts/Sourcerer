@@ -168,19 +168,14 @@ def _custom_frame(window):
     """Windows: take the title bar off, so the page's own bar is the top of the window and draws the
     buttons (minimize, maximize, close). The resize border stays: only WS_CAPTION goes, and the style is
     read back -- the page draws its buttons only when the bar really is gone (server.CUSTOM_FRAME), so
-    anything that goes wrong leaves the native bar and nothing is doubled."""
+    anything that goes wrong leaves the native bar and nothing is doubled. What is done after that (a
+    window that fits the screen, the maximized bounds) can fail on its own: the bar is gone by then."""
     if server.CUSTOM_FRAME:
         return
     try:
         import ctypes
         from ctypes import wintypes
-        user32 = server.own_user32()          # not ctypes.windll.user32: its argtypes would break pywebview's own SetWindowPos (a window move)
-        user32.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
-        user32.GetWindowLongW.restype = ctypes.c_long
-        user32.SetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_long]
-        user32.SetWindowLongW.restype = ctypes.c_long
-        user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int,
-                                        ctypes.c_int, wintypes.UINT]
+        user32 = server._win32()["user32"]    # not ctypes.windll.user32: its argtypes would break pywebview's own SetWindowPos (a window move)
         hwnd = wintypes.HWND(int(window.native.Handle.ToInt64()))
         server.HWND[0] = hwnd
         _window_icon(hwnd)
@@ -190,11 +185,16 @@ def _custom_frame(window):
         # SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED
         user32.SetWindowPos(hwnd, None, 0, 0, 0, 0, 0x0002 | 0x0001 | 0x0004 | 0x0010 | 0x0020)
         server.CUSTOM_FRAME = not (user32.GetWindowLongW(hwnd, GWL_STYLE) & WS_CAPTION)
-        server.keep_taskbar(window)               # (Win+Up maximizes too, without the page)
         log.info("window frame: %s", "the page's own bar" if server.CUSTOM_FRAME else "native (could not be removed)")
     except Exception as e:
         server.CUSTOM_FRAME = False
         log.info("window frame stays native: %s", e)
+        return
+    for step in (server.fit_to_screen, lambda: server.keep_taskbar(window), lambda: server.follow_monitor(window)):
+        try:
+            step()
+        except Exception as e:
+            log.info("window set-up step failed: %s", e)
 
 
 def window_check():
