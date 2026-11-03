@@ -3,6 +3,14 @@
 Newest first. Each entry is made from the commit subjects when a version is made, so a subject is one short,
 plain sentence.
 
+## v0.62 — 2026-11-03
+
+- One speed choice in Settings (Careful, Normal, Fast) replaces five settings, and the pictures you look at load like in a browser
+- A forum's media gallery shows each tile's own small picture instead of downloading every original
+- XenForo: an attachment browser's file is fetched by the attachment its post's page names, so the viewer and a sync no longer get another member's file
+- Checks: the forum's attachments, the media tiles, the speed choice and the gallery are checked against made-up sites on every pull request
+- A forum that refuses a file no longer rests for hours: a file counts once and it takes eight different ones in a row, a refused page still takes three
+
 ## v0.61 — 2026-11-03
 
 - A Windows test moves and docks the real window with the mouse
