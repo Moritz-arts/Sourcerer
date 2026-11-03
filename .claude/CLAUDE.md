@@ -1241,7 +1241,11 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   re-lays out after 60 ms. Leaving Full clears the inline sizes. A shape is never written
   back as a default (it would stop the `load` handler learning the real one), and
   `.gal-body` always shows its scrollbar (`overflow-y: scroll`): one that comes and goes
-  changes the width the rows are laid out for, and the layout flickered for ever.
+  changes the width the rows are laid out for, and the layout flickered for ever. **Only a tile's own picture tells its shape**
+  (`img.parentNode === tile` in the grid's `load` listener): the tile of a Mastodon, Misskey, forum or booru item holds the site's icon too
+  (`siteLogo`, a 64 px square `<img>`), and it loads long before a proxied thumbnail -- it was heard first, `data-ar` became 1 for every tile and
+  **Full looked exactly like Squares** on those sites (the user, 2026-11-03: "I change the view and nothing happens"). A test of the layout needs
+  thumbnails that arrive later than the icon (proxied: `/api/gallery/<g>/<n>/thumb`, delayed) -- with data URLs the thumbnail wins the race and the bug hides.
 - **Sourcerer keeps no pictures of its own** (the user's rule, v0.33): no thumbnails, no previews, no profile pictures on
   disk. v0.32 and older kept `Userdata/Avatars/<artist>.jpg` and `Userdata/Previews/<artist>/*.jpg` (the cards' small
   copies of the newest posts, which nothing showed any more, made by a background look at *every* card -- `previews.py`, now

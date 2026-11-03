@@ -1562,7 +1562,9 @@ $("gal-grid").addEventListener("click", function (e) {
 $("gal-grid").addEventListener("error", function (e) {
   if (e.target.tagName !== "IMG") return;
   if (e.target.classList.contains("sharp")) { e.target.remove(); return; }       // the small picture stays
-  var tile = e.target.closest(".gal-tile"), it = G && G.items[+tile.dataset.i];
+  var tile = e.target.closest(".gal-tile");
+  if (!tile) return;                                    // a site icon that failed: siteLogo's own listener has replaced it already
+  var it = G && G.items[+tile.dataset.i];
   var via = it && proxyOf(it, "thumb");
   if (via && !e.target.dataset.lazy) {
     e.target.removeAttribute("src"); e.target.dataset.lazy = via;
@@ -1962,7 +1964,9 @@ new ResizeObserver(function () { if (S.brFit === "full") galLayoutSoon(60); }).o
 $("gal-grid").addEventListener("load", function (e) {
   var img = e.target, tile = img.tagName === "IMG" && img.closest(".gal-tile");
   if (tile && !img.classList.contains("sharp")) galSharpenSoon();
-  if (!tile || tile.dataset.ar || !img.naturalWidth) return;
+  // Only the tile's own picture tells its shape. A Mastodon server's, a forum's or a booru's icon (64 px, square) sits in the tile too and
+  // loads long before a proxied thumbnail: it was heard first, every tile of such a site stayed square and Full looked like Squares.
+  if (!tile || img.parentNode !== tile || img.classList.contains("sharp") || tile.dataset.ar || !img.naturalWidth) return;
   tile.dataset.ar = galRatio(img.naturalWidth, img.naturalHeight);
   if (S.brFit === "full") galLayoutSoon(150);
   else galSharpenSoon();
