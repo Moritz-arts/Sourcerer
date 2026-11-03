@@ -9,6 +9,7 @@ Run by .github/workflows/checks.yml on every pull request, and by hand before pu
 * a media gallery's tiles: the small picture of each, not an avatar, not another picture's (gdl_run.py: tile_thumb);
 * the speed choice: the table, the pace of a login's files and pages, the lanes' concurrency, what an old settings table becomes, the settings API (net.py,
   db.py, server.py);
+* the sliders under the levels and the daily limits (net.py: clean_tune, _row, day_limit, server.py: /api/speed);
 * what a refused file does to a site (net.py: _refusal): one file is one refusal and it takes eight different ones in a row, a refused page or list still
   takes three;
 * gallery.picture for a site with no resolver (the booru-like case the forum fix must not change).
@@ -265,7 +266,7 @@ def tile_checks():
 # ---- the speed choice -------------------------------------------------------------------------------------------------------------------------
 
 def speed_checks():
-    need = {"parallel", "per_host", "pause", "gap", "files", "every", "rest", "look", "preview", "browse"}
+    need = {"parallel", "per_host", "pause", "gap", "pace", "files", "every", "rest", "look", "preview", "browse"}
     check(set(net.PROFILES) == {"careful", "normal", "fast"} and all(set(p) == need for p in net.PROFILES.values()), "three levels, each says everything")
     n = net.PROFILES["normal"]
     check((n["parallel"], n["per_host"], n["pause"], n["gap"]) == (24, 32, 0.1, (3, 15)), "normal is what the settings were (24 at once, 32 per site, 0.1 s, a gap of 3-15 s)")
@@ -295,7 +296,7 @@ def speed_checks():
 
     saved, jitter, pace = copy.deepcopy(net.PROFILES), net.JITTER, net.LOGIN_PACE           # the lanes in time: seconds shrunk tenfold, the ratios are the point
     for p in net.PROFILES.values():
-        for k in ("pause", "files", "look"):
+        for k in ("pause", "pace", "files", "look"):
             p[k] /= 10
         p["preview"], p["browse"] = (p["preview"][0], p["preview"][1] / 10), (p["browse"][0], p["browse"][1] / 10)
     net.JITTER, net.LOGIN_PACE = (1.0, 1.0), 0.2
@@ -383,7 +384,7 @@ def refusal_checks():
     net.accounts.headers_for = lambda url, *args, **kwargs: {"Cookie": "session=made-up"}          # the made-up forum is a login's site
     net.JITTER, net.LOGIN_PACE = (1.0, 1.0), 0.0
     for p in net.PROFILES.values():
-        p["files"], p["look"], p["pause"] = 0.0, 0.0, 0.0
+        p["files"], p["look"], p["pause"], p["pace"] = 0.0, 0.0, 0.0, 0.0
 
     def fresh():
         net._refused.clear()
@@ -432,6 +433,75 @@ def refusal_checks():
         fresh()
 
 
+# ---- the sliders under the levels, and the daily limits ----------------------------------------------------------------------------------------
+
+def tune_checks():
+    client = server.app.test_client()
+    client.put("/api/speed", json={"reset": "limits"})
+    client.put("/api/settings", json={"speed": "normal"})
+    net._state["unfriendly"], net._state["paused"], net._state["spent"] = {}, {}, {}
+    state = client.get("/api/state").get_json()["speed"]
+    names = {k["key"] for k in state["knobs"]}
+    want = {"parallel", "per_host", "pause", "pace", "files", "every", "rest", "gap_min", "gap_max", "look", "preview_n", "browse_n",
+            "limit_pixiv", "limit_patreon", "limit_x", "limit_fanbox", "limit_fantia", "limit_other"}
+    check(names == want, "every important value has a slider, and every daily limit", sorted(names ^ want))
+    check(state["level"] == "normal" and not state["tuned"] and state["values"]["parallel"] == 24 and state["values"]["limit_x"] == 600,
+          "the sliders start at the level's own values and the default limits", state["values"])
+    check(all(k["low"] <= state["levels"][lv][k["key"]] <= k["high"] for lv in state["levels"] for k in state["knobs"]), "every level lies inside every slider's range")
+    check(all(abs(k["step"] * round(state["levels"][lv][k["key"]] / k["step"]) - state["levels"][lv][k["key"]]) < 1e-9 for lv in state["levels"] for k in state["knobs"]),
+          "... and on its step, so a level's value shows exactly")
+
+    got = client.put("/api/speed", json={"tune": {"parallel": 10, "files": 3, "every": 0, "gap_min": 5, "gap_max": 9, "preview_n": 3, "limit_x": 100}}).get_json()["speed"]
+    row = net.profile()
+    check(got["tuned"] and got["limits_changed"] and got["level"] == "normal" and row["parallel"] == 10 and row["files"] == 3.0 and row["every"] is None
+          and tuple(row["gap"]) == (5.0, 9.0) and tuple(row["preview"]) == (3, 0.0), "moved sliders are laid over the level's row", row)
+    check(row["per_host"] == 32 and row["look"] == 0.5 and row["pace"] == 2.0 and tuple(row["browse"]) == (6, 0.0), "and everything else stays the level's")
+    check(net.day_limit("x") == 100 and net.day_limit("pixiv") == 1500 and net.day_limit("forum.example") == 3000, "a daily limit is the user's, the others stay the defaults")
+    url = "https://forum.example/attachments/1/"
+    check(net._rhythm(url, True)[0] == 3.0 and net._rhythm(url, True)[1] is None, "the files slider paces the files, and no breaks", net._rhythm(url, True))
+    check(net._rhythm(url, False)[0] == 2.0, "pages keep their own pace")
+
+    client.put("/api/speed", json={"tune": {"pace": 0.5, "files": 0.1}})
+    check(net._rhythm(url, False)[0] == 0.5 and net._rhythm(url, True)[0] == 0.1, "fast sliders are honoured while the site says nothing")
+    net._state["unfriendly"][net.site_of(url)] = time.time() + 3600
+    got = (net._rhythm(url, False), net._rhythm(url, True))
+    check(all(g[0] == net.LOGIN_PACE and g[1] == net.READ_EVERY for g in got), "a site that said a word is read carefully whatever the sliders say", got)
+    net._state["unfriendly"].clear()
+    client.put("/api/speed", json={"tune": {"every": 30}})
+    got = net._rhythm(url, True)
+    check(got[1] == (30, 60) and got[2], "breaks asked for on a level that had none last what the usual ones do", got)
+
+    client.put("/api/speed", json={"reset": "sliders"})
+    check(set(net.tuning()) == {"limit_x"} and net.profile() is net.PROFILES["normal"], "reset takes the sliders back to the level and keeps the limits", net.tuning())
+    got = client.put("/api/speed", json={"tune": {"parallel": 999, "pace": 0.01, "per_host": 24, "pause": 0.1, "files": "soon"}}).get_json()["speed"]["values"]
+    check(got["parallel"] == 64 and got["pace"] == 0.5 and got["per_host"] == 24 and "pause" not in net.tuning() and "files" not in net.tuning(),
+          "a value is clamped into its range; one that equals the level's, or is no number, is no change", (got, net.tuning()))
+    check(client.put("/api/speed", json={"tune": {"nonsense": 1}}).status_code == 400 and client.put("/api/speed", json={"tune": [1]}).status_code == 400,
+          "an unknown slider and a wrong shape are refused")
+    client.put("/api/speed", json={"tune": {"parallel": None}})
+    check("parallel" not in net.tuning(), "null takes one slider back")
+
+    client.put("/api/speed", json={"tune": {"parallel": 12}})
+    client.put("/api/settings", json={"speed": "fast"})
+    check(net.profile() is net.PROFILES["fast"] and net.tuning() == {"limit_x": 100}, "choosing a level takes the sliders back and keeps the limits", net.tuning())
+    net._limits["tune"], net._limits["row"] = {}, None
+    net.apply_settings()
+    check(net.tuning() == {"limit_x": 100} and net.profile() is net.PROFILES["fast"], "what was moved is read back from the database at the next start", net.tuning())
+    client.put("/api/settings", json={"speed": "normal"})
+
+    net._state["spent"], net._state["paused"] = {}, {}
+    for _ in range(99):
+        net.spend("https://x.com/home")
+    check(net.paused("https://x.com/") is None, "99 requests of a limit of 100 rest nothing")
+    net.spend("https://x.com/home")
+    got = net.paused("https://x.com/")
+    check(got is not None and "today's 100 requests" in got[1], "the 100th ends the day, with the user's figure", got)
+    check(not net.scan_room("https://x.com/home"), "and a sweep leaves the site alone from half of it on")
+    client.put("/api/speed", json={"reset": "limits"})
+    check(net.day_limit("x") == 600 and not net.tuning(), "the limits can be reset too")
+    net._state["spent"], net._state["paused"] = {}, {}
+
+
 def settings_checks():
     def scenario(old):
         with db.connect() as con:
@@ -452,13 +522,13 @@ def settings_checks():
     check(db.get_setting("speed") == "fast", "a second start keeps the choice")
     client = server.app.test_client()
     got = client.get("/api/settings").get_json()
-    check(got["settings"]["speed"] == "fast" and set(got["speeds"]) == {"careful", "normal", "fast"} and "parallel" not in got["settings"],
+    check(got["settings"]["speed"] == "fast" and set(got["speed"]["levels"]) == {"careful", "normal", "fast"} and "parallel" not in got["settings"],
           "the settings API says the one choice and the table", sorted(got["settings"]))
     check(client.put("/api/settings", json={"speed": "careful"}).status_code == 200 and net.profile() is net.PROFILES["careful"], "choosing careful reaches net at once")
     check(client.put("/api/settings", json={"speed": "warp"}).status_code == 400, "an unknown level is refused")
     check(client.put("/api/settings", json={"parallel": "8"}).status_code == 400, "the old keys are gone")
     state = client.get("/api/state").get_json()
-    check(bool(state.get("speeds")) and state["settings"]["speed"] == "careful", "/api/state carries them for the page")
+    check(bool(state.get("speed", {}).get("knobs")) and state["settings"]["speed"] == "careful", "/api/state carries them for the page")
     client.put("/api/settings", json={"speed": "normal"})
 
 
@@ -499,7 +569,7 @@ def gallery_checks():
 
 
 def main():
-    for group in (forum_checks, tile_checks, speed_checks, refusal_checks, settings_checks, gallery_checks):
+    for group in (forum_checks, tile_checks, speed_checks, refusal_checks, tune_checks, settings_checks, gallery_checks):
         print("--", group.__name__, flush=True)
         try:
             group()

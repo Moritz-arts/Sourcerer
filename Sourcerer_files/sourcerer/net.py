@@ -58,7 +58,7 @@ RETRIES = 4
 _local = threading.local()
 _lock = threading.Lock()
 _hosts = {}                 # (host, carries a login, small pictures, a token only, a picture somebody looks at) -> its limiter's state
-_limits = {"speed": "normal"}      # the level of PROFILES Settings chose (configure)
+_limits = {"speed": "normal", "tune": {}, "row": None}      # the level of PROFILES Settings chose, what was moved on top of it, the row that makes (configure)
 CAP = 300                   # the longest Retry-After waited out; a longer one pauses the site
 
 # Sites stricter than Settings: (requests at once, seconds apart). With
@@ -102,28 +102,147 @@ FORUM_READ_BREAK = (6, 20)
 #   per_host  requests at once to one site (a site's own limit, HOSTS, may be lower)
 #   pause     seconds between two requests to one site (times JITTER)
 #   gap       seconds between two artists on a site where a login can get banned (sync.next_card)
+#   pace      seconds between two pages, lists or API calls of such a site (times JITTER; a site that said a word: never less than LOGIN_PACE)
 #   files     seconds between two files of such a site (times JITTER), a rest of `rest` seconds every `every` files (None: no rest)
 #   look      seconds between two requests of such a site while somebody waits for the page (a gallery opened, a click): at most this, at least half
 #   preview   (at once, seconds apart) of the pictures somebody looks at, from a host that carries no login: a browser opens six connections to a CDN to
 #             show a page of them and asks for them all at once, so 'normal' does -- at one picture per HOSTS' pace a page of sixty took half a minute
 #   browse    the same from a site that wants the login (a forum's attachments, Fanbox, Fantia): its own lane, still counted in the day's budget and
 #             stopped by a pause like every other request, and at LOGIN_PACE a page of sixty took minutes
-# Lists, pages and everything else a login asks keep LOGIN_PACE whatever is chosen: those requests are what an account is flagged for, a file or a
+# Lists, pages and everything else a login asks keep `pace` (LOGIN_PACE in every level): those requests are what an account is flagged for, a file or a
 # picture is a file. A site that said a word lately (_calm) is read carefully whatever is chosen. 'normal' is what the settings were until v0.62
 # (the user's own, 2026-10-23) with the pictures as a browser takes them; 'careful' is v0.33's.
 PROFILES = {
-    "careful": {"parallel": 8, "per_host": 4, "pause": 0.25, "gap": (15, 60), "files": 2.0, "every": (20, 40), "rest": (15, 60),
+    "careful": {"parallel": 8, "per_host": 4, "pause": 0.25, "gap": (15, 60), "pace": LOGIN_PACE, "files": 2.0, "every": (20, 40), "rest": (15, 60),
                 "look": 1.0, "preview": (4, 0.08), "browse": (3, 0.3)},
-    "normal": {"parallel": 24, "per_host": 32, "pause": 0.1, "gap": (3, 15), "files": 1.0, "every": (40, 80), "rest": (6, 20),
+    "normal": {"parallel": 24, "per_host": 32, "pause": 0.1, "gap": (3, 15), "pace": LOGIN_PACE, "files": 1.0, "every": (40, 80), "rest": (6, 20),
                "look": 0.5, "preview": (6, 0.0), "browse": (6, 0.0)},
-    "fast": {"parallel": 48, "per_host": 32, "pause": 0.0, "gap": (1, 6), "files": 0.5, "every": None, "rest": None,
+    "fast": {"parallel": 48, "per_host": 32, "pause": 0.0, "gap": (1, 6), "pace": LOGIN_PACE, "files": 0.5, "every": None, "rest": None,
              "look": 0.25, "preview": (6, 0.0), "browse": (6, 0.0)},
 }
 
 
 def profile():
-    """The level of PROFILES Settings chose."""
-    return PROFILES.get(_limits["speed"]) or PROFILES["normal"]
+    """The row Settings > Speed & safety make: the level chosen, with what was moved on top of it (_row)."""
+    return _limits["row"] or PROFILES.get(_limits["speed"]) or PROFILES["normal"]
+
+
+# ---- the fine-tuning: sliders under the three levels (Settings > Speed & safety) ------------------------------------------------------------------
+# A level is a row of PROFILES. What the user moves is kept apart (the setting `speed_tune`, knob -> number) and laid over the row, so "Normal, but 10 files
+# at once" is Normal in everything else, and choosing a level takes the sliders back to it. The daily limits are not part of a level: they stay. All of it
+# runs at the user's own risk, and the page says so. risk: which way is riskier ('high': a bigger value, 'low': a smaller one); safe: the value that is no
+# riskier than 'normal'; danger: beyond it a value is riskier than anything a level offers; zero: how risky 0 is (None: as the direction says); account: a
+# value that can cost an account, not only a site's patience.
+
+def _knob(key, group, label, unit, low, high, step, risk, safe, danger, account, hint="", zero=None, default=None):
+    return {"key": key, "group": group, "label": label, "unit": unit, "low": low, "high": high, "step": step, "risk": risk, "safe": safe,
+            "danger": danger, "account": account, "hint": hint, "zero": zero, "default": default}
+
+
+GROUPS = [
+    {"key": "downloads", "title": "Downloads", "hint": "Sites without a login, and how much comes down at once."},
+    {"key": "login", "title": "Sites with your login", "hint": "pixiv, X, Patreon, Fanbox, Fantia and forums: what an account is flagged for."},
+    {"key": "browse", "title": "Browse", "hint": "The pictures you look at."},
+    {"key": "limits", "title": "Daily limits", "hint": "Requests made with your login, per site and day. A site that reaches its limit rests until tomorrow."},
+]
+KNOBS = [
+    _knob("parallel", "downloads", "Downloads at once", "", 1, 64, 1, "high", 24, 48, False, "All sites added up."),
+    _knob("per_host", "downloads", "Connections per site", "", 1, 32, 1, "high", 32, 32, False, "A touchy site keeps its own lower limit."),
+    _knob("pause", "downloads", "Pause between two requests to a site", "s", 0, 2, 0.05, "low", 0.1, -1, False, "Sites without a login."),
+    _knob("pace", "login", "Between two pages or lists", "s", 0.5, 10, 0.1, "low", LOGIN_PACE, 1.0, True, "Pages, lists and API calls with your login."),
+    _knob("files", "login", "Between two files", "s", 0, 5, 0.05, "low", 1.0, 0.5, True, "Files with your login."),
+    _knob("every", "login", "Reading break after", "files", 0, 120, 5, "high", 40, 1000, True, "0: no breaks.", zero=1),
+    _knob("rest", "login", "A reading break lasts", "s", 0, 120, 1, "low", 6, 1, True, "", zero=1),
+    _knob("gap_min", "login", "Between two artists, at least", "s", 0, 120, 1, "low", 3, 1, True, "Sourcerer draws a gap between the two."),
+    _knob("gap_max", "login", "Between two artists, at most", "s", 0, 180, 1, "low", 15, 6, True),
+    _knob("look", "login", "While you wait for a page", "s", 0.1, 3, 0.05, "low", 0.5, 0.25, True, "A gallery you open, a click."),
+    _knob("preview_n", "browse", "Pictures at once, sites without a login", "", 1, 12, 1, "high", 6, 10, False, "A browser opens six."),
+    _knob("browse_n", "browse", "Pictures at once, sites with your login", "", 1, 12, 1, "high", 6, 10, True),
+] + [_knob("limit_" + key, "limits", label, "requests", low, high, 50, "high", default, default * 2, True, default=default)
+     for key, label, default, low, high in (("pixiv", "pixiv", 1500, 200, 6000), ("patreon", "Patreon", 1500, 200, 6000), ("x", "X", 600, 100, 3000),
+                                            ("fanbox", "Fanbox", 300, 50, 1500), ("fantia", "Fantia", 300, 50, 1500),
+                                            ("other", "Forums and other sites with a login", 3000, 200, 10000))]
+_BY_KEY = {k["key"]: k for k in KNOBS}
+_SPEED_KEYS = {k["key"] for k in KNOBS if k["group"] != "limits"}
+
+
+def _base_value(level, key):
+    """What a knob is at a level of PROFILES (a daily limit: its default)."""
+    row = PROFILES.get(level) or PROFILES["normal"]
+    if key in ("parallel", "per_host", "pause", "pace", "files", "look"):
+        return row[key]
+    return {"every": row["every"][0] if row["every"] else 0, "rest": row["rest"][0] if row["rest"] else 0, "gap_min": row["gap"][0],
+            "gap_max": row["gap"][1], "preview_n": row["preview"][0], "browse_n": row["browse"][0]}.get(key, (_BY_KEY.get(key) or {}).get("default"))
+
+
+def clean_tune(raw, level):
+    """What the user moved, checked: a known knob, a finite number inside its range and on its step; one that equals the level's own value is no change."""
+    out = {}
+    for key, value in (raw or {}).items():
+        knob = _BY_KEY.get(key)
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            continue
+        if not knob or number != number or number in (float("inf"), float("-inf")):
+            continue
+        number = max(knob["low"], min(knob["high"], number))
+        number = round(round(number / knob["step"]) * knob["step"], 4)
+        number = int(number) if knob["step"] >= 1 else number
+        if abs(number - _base_value(level, key)) > 1e-9:
+            out[key] = number
+    return out
+
+
+def _row(level, tune):
+    """The row of PROFILES a level makes with what was moved laid over it (the level's own dict when nothing was)."""
+    base = PROFILES.get(level) or PROFILES["normal"]
+    mine = {k: v for k, v in (tune or {}).items() if k in _SPEED_KEYS}
+    if not mine:
+        return base
+    row = dict(base)
+    for key in ("parallel", "per_host"):
+        if key in mine:
+            row[key] = int(mine[key])
+    for key in ("pause", "pace", "files", "look"):
+        if key in mine:
+            row[key] = float(mine[key])
+    if "every" in mine:
+        row["every"] = (int(mine["every"]), 2 * int(mine["every"])) if mine["every"] else None
+    if "rest" in mine:
+        row["rest"] = (float(mine["rest"]), round(4 * float(mine["rest"]), 1)) if mine["rest"] else None
+    if row["every"] and not row["rest"] and "rest" not in mine:
+        row["rest"] = PROFILES["normal"]["rest"]               # breaks asked for on a level that had none: they last what 'normal's do
+    if "gap_min" in mine or "gap_max" in mine:
+        low, high = float(mine.get("gap_min", base["gap"][0])), float(mine.get("gap_max", base["gap"][1]))
+        row["gap"] = (low, max(low, high))
+    if "preview_n" in mine:
+        row["preview"] = (int(mine["preview_n"]), base["preview"][1])
+    if "browse_n" in mine:
+        row["browse"] = (int(mine["browse_n"]), base["browse"][1])
+    return row
+
+
+def tuning():
+    """What the user moved: {knob: value}."""
+    return dict(_limits["tune"])
+
+
+def speed_state():
+    """Everything the page needs for Settings > Speed & safety: the level, the sliders (what each is, its range, where it turns risky), the values of every
+    level and the values now, and the row the program runs by (the page says in words what the level does from it, so the text cannot drift)."""
+    level, tune = _limits["speed"], tuning()
+    names = [k["key"] for k in KNOBS]
+    return {"level": level, "tuned": any(k in _SPEED_KEYS for k in tune), "limits_changed": any(k not in _SPEED_KEYS for k in tune),
+            "groups": GROUPS, "knobs": KNOBS, "levels": {n: {k: _base_value(n, k) for k in names} for n in PROFILES},
+            "values": {k: tune.get(k, _base_value(level, k)) for k in names}, "row": profile()}
+
+
+def day_limit(site):
+    """The day's budget of requests made with a login on this site: what the user set (Settings > Speed & safety) or the default; BUDGET for a site that has
+    no figure of its own (a forum)."""
+    mine = _limits["tune"]
+    return int(mine.get("limit_" + site, BUDGETS[site]) if site in BUDGETS else mine.get("limit_other", BUDGET))
 
 
 # Requests a day carrying a login, per site -- real HTTP requests, counted one by one (X, Fanbox and Fantia: what gallery-dl asked,
@@ -290,13 +409,18 @@ def _calm(url):
 
 def _rhythm(url, bulk):
     """(seconds between two requests, reading break after this many requests or None, of this many seconds) for a request that carries a cookie
-    login. A forum that stayed quiet is read at FORUM_PACE (_friendly); a file download follows the speed Settings chose (PROFILES) -- faster than that
-    only while the site has said nothing (_calm), and never slower than the careful lane gives. Called under _lock."""
-    pace, every, rest = (FORUM_PACE, FORUM_READ_EVERY, FORUM_READ_BREAK) if site_of(url) in _fast else (LOGIN_PACE, READ_EVERY, READ_BREAK)
-    if bulk and _calm(url):
-        wanted = profile()
-        if wanted["files"] < pace:
-            pace, every, rest = wanted["files"], wanted["every"], wanted["rest"]
+    login. Pages, lists and API calls go at the row's `pace` (a forum that stayed quiet, _friendly, at FORUM_PACE when that is faster); a file download
+    at the row's `files` -- the quiet forum's earned pace stays where it is faster. A site that said a word (not _calm) is read at the careful lane
+    whatever was chosen: never faster than LOGIN_PACE. Called under _lock."""
+    wanted, quiet = profile(), site_of(url) in _fast
+    if quiet:
+        pace, every, rest = min(FORUM_PACE, wanted["pace"]), FORUM_READ_EVERY, FORUM_READ_BREAK
+    else:
+        pace, every, rest = wanted["pace"], READ_EVERY, READ_BREAK
+    if not _calm(url):
+        return max(pace, LOGIN_PACE), READ_EVERY, READ_BREAK
+    if bulk and (wanted["files"] < pace or not quiet):
+        pace, every, rest = wanted["files"], wanted["every"], wanted["rest"]
     return pace, every, rest
 
 
@@ -333,14 +457,14 @@ def spend(url, n=1):
         if not entry or entry[0] != day:
             entry = spent[site] = [day, 0]
         entry[1] += n
-        over = entry[1] >= BUDGETS.get(site, BUDGET)
+        over = entry[1] >= day_limit(site)
         if over or entry[1] % 10 < n:
             _store("spent")
     _flush()
     if over:
         tomorrow = time.mktime(time.strptime(day, "%Y-%m-%d")) + 86400
         pause(url, tomorrow - time.time() + _hours(0.5, 3),
-              "today's %d requests are done; the rest follows tomorrow" % BUDGETS.get(site, BUDGET))
+              "today's %d requests are done; the rest follows tomorrow" % day_limit(site))
 
 
 SCAN_SHARE = 0.5            # a sweep's look at cards that do not download (Refresh all) may use this much of a day's budget
@@ -349,7 +473,8 @@ SCAN_SHARE = 0.5            # a sweep's look at cards that do not download (Refr
 def scan_room(url):
     """Whether a look at a card that does not download may still be made on this site today: a sweep over hundreds of
     follows must leave the rest of the day's requests to the artists that download, to Browse and to single pictures."""
-    site, limit = site_of(url), BUDGETS.get(site_of(url))
+    site = site_of(url)
+    limit = day_limit(site) if site in BUDGETS else None
     if not limit:
         return True
     with _lock:
@@ -379,7 +504,7 @@ def _endpoint(url):
 def _tally_text(site, entry):
     rows = sorted(entry[1].items(), key=lambda kv: -kv[1][0])
     total, refused = sum(r[0] for _, r in rows), sum(r[1] for _, r in rows)
-    budget = BUDGETS.get(site)
+    budget = day_limit(site) if site in BUDGETS else None
     return "requests today on %s: %d%s (%s%s)" % (
         name_of(site), total, " of %d allowed" % budget if budget else "",
         ", ".join("%s %d" % (e, r[0]) for e, r in rows[:5]) + (", ..." if len(rows) > 5 else ""),
@@ -417,7 +542,7 @@ def usage(site):
     day = time.strftime("%Y-%m-%d")
     with _lock:
         spent, tally = _stored("spent").get(site), _stored("tally").get(site)
-    return {"used": spent[1] if spent and spent[0] == day else 0, "budget": BUDGETS.get(site),
+    return {"used": spent[1] if spent and spent[0] == day else 0, "budget": day_limit(site) if site in BUDGETS else None,
             "kinds": [[e, r[0], r[1]] for e, r in sorted(tally[1].items(), key=lambda kv: -kv[1][0])[:8]]
             if tally and tally[0] == day else []}
 
@@ -595,16 +720,25 @@ _EXT = {"image/jpeg": ".jpg", "image/png": ".png", "image/gif": ".gif",
         "audio/mpeg": ".mp3", "audio/ogg": ".ogg", "audio/mp4": ".m4a"}
 
 
-def configure(speed=None):
+def configure(speed=None, tune=None):
     with _lock:
         if speed in PROFILES:
             _limits["speed"] = speed
+        if tune is not None:
+            _limits["tune"] = clean_tune(tune, _limits["speed"])
+        elif speed in PROFILES:
+            _limits["tune"] = clean_tune(_limits["tune"], _limits["speed"])
+        _limits["row"] = _row(_limits["speed"], _limits["tune"])
 
 
 def apply_settings():
     """What Settings say about speed, taken from the database: at the start, when they are saved and when a sync begins."""
     from . import db
-    configure(speed=db.get_setting("speed"))
+    try:
+        tune = json.loads(db.get_setting("speed_tune") or "{}")
+    except ValueError:
+        tune = {}
+    configure(speed=db.get_setting("speed"), tune=tune if isinstance(tune, dict) else {})
 
 
 def _tls13():
@@ -772,7 +906,7 @@ class _Polite:
                 # so a slow answer does not eat it.
                 at = (entry["end"] if self.login and not self.browse else entry["start"]) + pace * random.uniform(*JITTER)
                 reading_break = 0.0                  # (not "pause": that is the module's function to rest a site)
-                if every:                            # (a login's request; none on 'fast', and none for a picture somebody looks at)
+                if every and rest:                   # (a login's request; none on 'fast', and none for a picture somebody looks at)
                     entry["count"] += 1
                     if entry["count"] >= entry["break"] and not self.first:
                         entry["count"], entry["break"] = 0, random.randint(*every)

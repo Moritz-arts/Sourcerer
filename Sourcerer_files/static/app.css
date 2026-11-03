@@ -522,6 +522,29 @@ p.error:empty { display: none; }   /* p only: a status dot is .dot.error, and em
 .segmented button.selected { background: var(--bg-accent); color: var(--text-accent); font-weight: 500; }
 .says { margin: 10px 0 0; padding-left: 18px; font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
 .says li + li { margin-top: 4px; }
+/* Speed & safety: the notice, the risk of what is chosen, one slider per value. r0 no riskier than Normal, r1 riskier, r2 riskier than any level. */
+.risk-note { display: flex; gap: 10px; align-items: flex-start; margin: 4px 0 16px; padding: 10px 12px; border: .5px solid var(--dot-warn);
+  border-radius: var(--radius); background: var(--bg-warning); color: var(--text-warning); font-size: 12.5px; line-height: 1.5; }
+.risk-note .ic { flex: none; width: 18px; height: 18px; margin-top: 1px; }
+.risk-note strong { font-weight: 600; }
+.risk-pill { display: inline-block; margin-left: 8px; padding: 0 8px; border-radius: 10px; font-size: 11px; line-height: 18px; font-weight: 500; }
+.risk-pill.r0 { background: rgba(31, 143, 54, .16); color: var(--fill-ok); }
+.risk-pill.r1 { background: var(--bg-warning); color: var(--text-warning); }
+.risk-pill.r2 { background: var(--bg-danger); color: var(--text-danger); }
+.linkish { background: none; border: 0; padding: 0; margin-left: 6px; color: var(--text-accent); font: inherit; cursor: pointer; text-decoration: underline; }
+.tune h4 { display: flex; align-items: baseline; gap: 8px; margin: 18px 0 2px; font-size: 13px; font-weight: 600; }
+.tune h4 .linkish { margin-left: auto; font-size: 12px; font-weight: 400; }
+.tune .ghint { margin: 0 0 6px; font-size: 12px; color: var(--text-muted); line-height: 1.5; }
+.knob { display: grid; grid-template-columns: 1fr auto; column-gap: 12px; padding: 7px 0 6px; border-top: .5px solid var(--border); }
+.knob label { font-size: 13px; }
+.knob .val { font-size: 13px; font-weight: 500; text-align: right; font-variant-numeric: tabular-nums; }
+.knob input[type=range] { grid-column: 1 / -1; width: 100%; margin: 5px 0 1px; accent-color: var(--fill-ok); }
+.knob .khint { grid-column: 1 / -1; font-size: 11.5px; color: var(--text-muted); line-height: 1.4; }
+.knob.r1 input[type=range] { accent-color: var(--dot-warn); }
+.knob.r1 .val { color: var(--text-warning); }
+.knob.r2 input[type=range] { accent-color: var(--dot-bad); }
+.knob.r2 .val { color: var(--text-danger); }
+.knob.moved label::after { content: " (changed)"; color: var(--text-muted); font-size: 11.5px; }
 .masterrow { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 13px; }
 .masterrow select { flex: 1; }
 

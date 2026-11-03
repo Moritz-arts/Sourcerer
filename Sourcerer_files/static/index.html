@@ -476,20 +476,29 @@
 
       <section data-pane="network">
         <h3>Speed &amp; safety</h3>
-        <p class="hint big">One choice for how fast Sourcerer talks to the sites. Pictures you look at in Browse are fetched the way a browser
-          fetches them; what Sourcerer does by itself -- syncs, scans, downloads -- is spaced out, so that an account is never mistaken for a robot.</p>
+        <p class="hint big">One choice for how fast Sourcerer talks to the sites, and sliders for every value behind it. Pictures you look at in Browse are fetched the
+          way a browser fetches them; what Sourcerer does by itself -- syncs, scans, downloads -- is spaced out, so that an account is never mistaken for a robot.</p>
+        <div class="risk-note" role="note">
+          <svg class="ic"><use href="#i-alert"/></svg>
+          <div><strong>At your own risk.</strong> Sites publish no limits for these requests, and most forbid automated access. Anything faster or more than Careful and
+            Normal can get an account restricted, locked or banned, and a site may block your IP address. Sourcerer's limits are cautious guesses, not a guarantee, and a
+            ban cannot be undone from here. Careful and Normal are what Sourcerer is designed around; whatever you move below is yours.</div>
+        </div>
         <div class="field">
-          <span class="label">Speed</span>
+          <span class="label">Speed <span class="risk-pill" id="risk-pill"></span></span>
           <div class="segmented">
             <button type="button" data-set="speed" data-value="careful">Careful</button>
             <button type="button" data-set="speed" data-value="normal">Normal</button>
             <button type="button" data-set="speed" data-value="fast">Fast</button>
           </div>
           <ul class="says" id="speed-says"></ul>
+          <p class="hint hidden" id="speed-custom">Custom: your sliders on top of <b id="speed-base"></b>.
+            <button type="button" class="linkish" id="speed-reset">Back to <span id="speed-base2"></span></button></p>
         </div>
-        <p class="hint">Whatever you choose: a site that says "too many requests" is left alone as long as it asks, a site that refuses
-          Sourcerer is read carefully for a day, every site has a daily limit for requests made with your login, and a site that is touchy
-          (pixiv, Patreon, X, the boorus) keeps its own lower limit. Automatic syncs start at a slightly different minute each time.</p>
+        <div class="tune" id="tune"></div>
+        <p class="hint">Whatever you choose: a site that says "too many requests" is left alone as long as it asks, a site that refuses Sourcerer is read carefully
+          for a day (whatever the sliders say), and a site that is touchy (pixiv, Patreon, X, the boorus) keeps its own lower limit. Automatic syncs start at a
+          slightly different minute each time.</p>
       </section>
 
       <section data-pane="appearance">

@@ -1134,6 +1134,17 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   24 s, and on the careful lane one picture per 2-3 s, minutes); the host's own limits still hold (`HOSTS`: Fanbox's file host is two at 0.6 s). The user's report that
   started it: a sync's bar read "Downloading 123 / 424 ... 15 KB/s" -- a file every 2-3 s and a rest of 15-60 s every 20-40 files on a forum's, Fanbox's or Fantia's lane.
   Checked by `.github/checks.py` against made-up hosts with the seconds shrunk, **not measured against a real site**; what 'fast' risks is an account, not a page.
+  **Sliders under the levels** (v0.63; `net.KNOBS`, `net.speed_state`, `PUT /api/speed`, setting `speed_tune`): the user wanted every important value adjustable, a notice
+  that it runs at their own risk, and the daily limits too. A level stays one row of `PROFILES`; what a slider moved is kept apart (`speed_tune`, knob -> number) and laid
+  over the row (`_row`; `profile()` is the level's own dict while nothing was moved, so `net.profile() is net.PROFILES["normal"]` still holds then), and a click on a level
+  takes the sliders back -- **not the daily limits** (`limit_<site>` / `limit_other`, `net.day_limit`; the defaults are `BUDGETS` / `BUDGET`: they are not part of a level).
+  The page draws every slider from `KNOBS` (label, range, step, where it turns risky: `safe` = no riskier than Normal, `danger` = riskier than any level offers, `zero`)
+  and colours it 0/1/2 (`knobRisk`; the pill reads Low / Raised / High, so Fast reads "raised"): the page holds no number of its own. The notice "At your own risk" is a plain
+  banner at the top of the pane, no dialog (the no-warning-boxes rule). `pace` (seconds between two pages, lists and API calls with a login) is a row key now
+  (`LOGIN_PACE` in every level); **a site that said a word is still read at the careful lane whatever the sliders say** (`_rhythm`: never faster than `LOGIN_PACE`), and a touchy
+  host (`HOSTS`) keeps its own limit. The server checks, clamps and puts every value on its step (`clean_tune`); one equal to its level's own is no change. `every` is `(n, 2n)`
+  and `rest` `(r, 4r)`: Normal's rest of 6-20 s is 6-24 s only once the rest slider was touched (an untouched knob keeps the level's exact pair). The page's reading breaks for
+  pages (`READ_EVERY`, `READ_BREAK`) are no slider -- they are what accounts are flagged for. Checked by `.github/checks.py` (`tune_checks`) and in Chromium against the real server.
 - **A site that objects rests, all of it** (`net.pause`, saved in the
   setting `paused`): a 429 on a login, a bot check, three refused logins,
   X's ratelimit or lock (gallery-dl `ratelimit: abort`, `_run`). A site is
