@@ -979,13 +979,35 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   at the row's end opens the post on the site (`/api/open-url`); a picture the site no longer lists opens its post instead.
 - **The window's title bar is the page's own bar on Windows** (`desktop._custom_frame`, `server.CUSTOM_FRAME`,
   `/api/window`, `applyFrame`): `WS_CAPTION` is taken off the form (`WS_THICKFRAME` stays, so the edges still resize) and
-  the style is read back -- only then does `/api/state` say `frame: "custom"`, the page draws minimize / maximize / close
-  at its right edge and marks its bar as pywebview's drag region (`DRAG_REGION_DIRECT_TARGET_ONLY`: a drag starts on the
-  bar, not on its buttons; a double-click maximizes). If anything fails the native bar stays and nothing is doubled. **A window without WS_CAPTION maximizes over the
-  whole monitor, taskbar included** (the user saw it): `server.keep_taskbar` gives the form `MaximizedBounds` -- the monitor's work
-  area as an offset from the monitor, found through user32 with the handle kept from the window's own thread
-  (`server.HWND`; `native.Handle` on a server thread may be refused) -- once when the bar is taken off and before every
-  maximize. Not seen on a real Windows desktop yet. macOS and Linux keep their native bars.
+  the style is read back -- only then does the server say `frame: "custom"` (`server.window_state`: in `/api/state`, `/api/lock` and the
+  polled `/api/sync`, so the page learns it even when `_custom_frame` finishes after the first load), and the page draws minimize / maximize /
+  close at its right edge. If anything fails the native bar stays and nothing is doubled; what follows the style change (fit to the screen,
+  maximized bounds) fails on its own and never flips `CUSTOM_FRAME` back. macOS and Linux keep their native bars, and none of this runs there.
+  **The bar moves the window through the system's own move loop, never through pywebview's script drag** (v0.60): pywebview's drag region
+  (`pywebviewMoveWindow`) is a `SetWindowPos` per mouse move, so Windows never docks the window at the screen's edges, never restores it when it
+  is pulled down from maximized, and a maximized window was just displaced. A press on the bar is `POST /api/window {action: "drag"}` ->
+  `server.begin_drag`: on the window's own thread `ReleaseCapture` + `PostMessage(WM_NCLBUTTONDOWN, HTCAPTION)` (what Qt, Tauri and every
+  borderless WinForms window send), then `GetGUIThreadInfo` says whether the thread is in a move loop (`GUI_INMOVESIZE`). **The loop ends at the
+  button's release, so it is not started when the button is already up** (`GetAsyncKeyState`, the *physical* button: `SM_SWAPBUTTON`) -- one that
+  starts then sticks the window to the pointer until the next click; a release that races the start is undone with `WM_CANCELMODE`. **A loop
+  refused twice with the button held (or an exception) switches the bar to the script drag for good** (`NATIVE_DRAG`, `drag: "script"` in
+  `window_state`; the page adds the `pywebview-drag-region` class then -- never while `drag` is native, or both would move the window): the user
+  keeps a window that moves. The loop swallows the release, so the page never sees a double-click: `mousedown` detail / two presses within 500 ms
+  maximize. Written from the Win32 documentation and pywebview's source, tested here with a fake user32 and in Chromium; **not yet seen on a real
+  Windows desktop** -- watch the log line "window: the bar starts the system's move loop" (docking works) or the warning that says it did not.
+  **A modal `<dialog>` makes the whole page inert**: a press on the bar reaches the dialog's backdrop (`event.target` is the dialog) and its window
+  buttons cannot be clicked -- the page's `mousedown` handler (capture, `barHit`) therefore hit-tests the bar by geometry and passes a press on a
+  *backdrop* (not on the dialog's box, which may reach into the bar's rows) to the bar. **The lock screen and the update overlay start below the bar**
+  (`html.frameless .overlay { top: var(--bar-h) }`, `html.locked` hides the page's own buttons) and `/api/window` is in `server._OPEN`: a locked
+  window could neither be moved nor closed. **A window without WS_CAPTION maximizes over the whole monitor, taskbar included** (the user saw
+  it): `server.keep_taskbar` gives the form `MaximizedBounds` -- the monitor's work area as an offset from the monitor, found through user32 with
+  the handle kept from the window's own thread (`server.HWND`; `native.Handle` on a server thread may be refused). It belongs to *one* monitor, so
+  `server.follow_monitor` works it out again when the window arrives on another monitor (`LocationChanged`, one `MonitorFromWindow` per event) and
+  when a move or resize begins (`ResizeBegin`): Win+Up, a drag to the top edge and the system menu do not pass through the page's button.
+  **`server.fit_to_screen`**: the window is made 1280x860 and centred, and on a 1366x768 screen (or 1080p at 150 %) its top -- the bar -- started
+  above the screen, out of reach; it is pulled back into the work area of its monitor. Every Win32 prototype lives in `server._win32()` (one
+  function with two argtypes keeps whoever set it last). The page keeps the maximize icon right by asking `/api/window {action: "state"}` after a
+  `resize`. A viewer (`#gal-view`) is inside the gallery area, below the bar: it never covers it.
 - **Keys act on the open artist** (`S.brArtist`, `artistAct`): there is no card selection any
   more -- the cards' keys once did nothing in Browse, which was the "shortcuts don't work".
   Up/Down/Home/End pick the previous or next artist (the gallery opens 250 ms after the last key),

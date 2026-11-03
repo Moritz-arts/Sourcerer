@@ -311,6 +311,10 @@ html.frameless .toolbar { padding-right: 0; }
 .wc:active:not(:disabled) { transform: none; }
 .wc.close:hover:not(:disabled) { background: #e81123; color: #fff; }
 .wc .ic { width: 15px; height: 15px; }
+/* The bar is the window's title bar here, and a native title bar is never covered: the lock and the update overlay start below it
+   (--bar-h, set by app.js). A locked page keeps the logo, the name and the window's own buttons, nothing that would act. */
+html.frameless .overlay { top: var(--bar-h, 0px); }
+html.locked #views, html.locked #btn-sync-all, html.locked #btn-accounts, html.locked #btn-quit, html.locked #btn-settings { visibility: hidden; }
 .toolbar {
   display: flex; align-items: center; gap: 8px; padding: 9px 14px;
   background: var(--surface-1); border-bottom: .5px solid var(--border);
