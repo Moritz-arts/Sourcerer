@@ -1177,6 +1177,7 @@ def _drag():
         return "script"
     finally:
         _DRAG["busy"] = False
+    log.info("window: the bar was pressed: %s", result)
     if result == "refused":
         _DRAG["refused"] += 1
         if _DRAG["refused"] >= 2:
