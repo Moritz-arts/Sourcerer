@@ -11,13 +11,14 @@ the two runs that read who the login follows -- two more things are added, both 
 * a way round gallery-dl's own reading of a list of users: it looks for them at one place and ends quietly when X moved them
   (the KeyError in `_pagination_users`). Users are looked for anywhere in the answer, and the page after it by the bottom cursor.
 
-When it is "xenforo" -- the listings of a forum's media -- only one thing is added (`xenforo()`): the date each picture's tile shows in
+When it is "xenforo" -- the listings of a forum's media -- two things are added (`xenforo()`): the date each picture's tile shows in
 the list page is handed to gallery-dl's own record of the picture (`date`), which it throws away without `metadata` (one more
-request per picture).
+request per picture), and so is the tile's small picture (`thumb`) -- the grid shows that, a few KB, and not the original of every picture.
 
 Standalone on purpose: it imports nothing of Sourcerer, so it runs as a script (`python gdl_run.py ...`) and, in the one-file
 build, from app.py's `--gallery-dl` before anything else is loaded.
 """
+import html
 import json
 import os
 import re
@@ -171,6 +172,7 @@ TILE_LENGTH = 2500                                    # a tile that never closes
 TIME = re.compile(r"<time\b[^>]*?\bdatetime=[\"']([^\"']+)[\"']", re.I)
 HREF = re.compile(r"href=[\"']([^\"']+)[\"']", re.I)
 DIV = re.compile(r"<(/?)div\b", re.I)
+IMG = re.compile(r"<img\b([^>]*)>", re.I)
 
 
 def tile_of(text):
@@ -184,14 +186,32 @@ def tile_of(text):
     return text[:TILE_LENGTH]
 
 
-def tile_dates(page, dates):
+def tile_thumb(tile):
+    """The address of a tile's small picture: the first image that is not the author's avatar. A lazy-loading theme keeps the address in
+    `data-src` and a placeholder (`data:`) in `src`. None when the tile shows none."""
+    for attrs in IMG.findall(tile):
+        if re.search(r"avatar", attrs, re.I):
+            continue
+        for name in ("data-src", "data-url", "src"):
+            found = re.search(r"\b%s=[\"']([^\"']+)[\"']" % name, attrs, re.I)
+            if found and not found.group(1).startswith("data:"):
+                return html.unescape(found.group(1))
+    return None
+
+
+def tile_dates(page, dates, thumbs=None):
     """{slug: datetime text} of the tiles of a list page -- "title.123" is how gallery-dl names the picture (the last part of its address).
-    A tile that shows no time of its own gives none."""
+    A tile that shows no time of its own gives none. thumbs: {slug: the tile's small picture}, when asked for."""
     for tile in page.split(TILE)[1:]:
         tile = tile_of(tile)
         href, when = HREF.search(tile), TIME.search(tile)
-        if href and when:
-            dates[href.group(1).rstrip("/").rsplit("/", 1)[-1]] = when.group(1)
+        if href:
+            slug = href.group(1).rstrip("/").rsplit("/", 1)[-1]
+            if when:
+                dates[slug] = when.group(1)
+            small = tile_thumb(tile) if thumbs is not None else None
+            if small:
+                thumbs[slug] = small
 
 
 def xenforo():
@@ -216,13 +236,13 @@ def xenforo():
 
 def wrap_xenforo():
     from gallery_dl.extractor import xenforo as module
-    cls, dates = module.XenforoExtractor, {}
+    cls, dates, thumbs = module.XenforoExtractor, {}, {}
 
     def paged(plain):
         def pages(self, *args, **kwargs):
             for page in plain(self, *args, **kwargs):
                 try:
-                    tile_dates(page, dates)
+                    tile_dates(page, dates, thumbs)
                 except Exception:
                     pass
                 yield page
@@ -233,8 +253,11 @@ def wrap_xenforo():
     def media(self, url, file, *args, **kwargs):
         found = plain_media(self, url, file, *args, **kwargs)
         try:
-            if dates.get(file) and isinstance(found, tuple) and isinstance(found[1], dict):
-                found[1]["date"] = dates[file]
+            if isinstance(found, tuple) and isinstance(found[1], dict):
+                if dates.get(file):
+                    found[1]["date"] = dates[file]
+                if thumbs.get(file):
+                    found[1]["thumb"] = thumbs[file]
         except Exception:
             pass
         return found
