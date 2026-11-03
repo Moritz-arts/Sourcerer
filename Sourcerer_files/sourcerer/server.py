@@ -34,10 +34,9 @@ DEDUPES = ("keep_all", "best", "master")
 CHOICES = {"filenames": ("original", "dated"), "theme": ("system", "light", "dark"),
            "auto_sync": ("0", "1"), "import_follows": ("0", "1"), "channel": ("stable", "beta"),
            "tile_logo": ("0", "1"), "scan_on_start": ("0", "1"), "grid_quality": ("best", "fast"),
-           "login_gap": ("careful", "normal", "fast"), "login_pace": ("careful", "normal", "fast"),
+           "speed": tuple(net.PROFILES),
            "browse_window": ("0", "7", "14", "30", "90")}
-RANGES = {"card_size": (160, 800), "auto_hours": (1, 168), "parallel": (1, 64),
-          "per_host": (1, 32), "pace_ms": (0, 5000)}
+RANGES = {"card_size": (160, 800), "auto_hours": (1, 168)}
 
 
 def _background(fn, *args):
@@ -446,7 +445,7 @@ def state():
     have = {a["key"].split(":", 1)[0] for a in rows if a["logged_in"] and _shown(a["key"])}
     on = {s.LABEL: s.KIND in have for s in sources.SITES}
     return jsonify(version=config.VERSION, library=sync.library(), sep=os.sep,
-                   sites=[s.LABEL for s in sources.SITES], settings=db.settings(),
+                   sites=[s.LABEL for s in sources.SITES], settings=db.settings(), speeds=net.PROFILES,
                    fields=[{"label": label, "example": example, "logged_in": on.get(label, False)}
                            for label, example in sources.FIELDS],
                    logins=accounts.problems(rows), pauses=net.pauses(),
@@ -1290,7 +1289,7 @@ def open_url():
 @app.get("/api/settings")
 def get_settings():
     return jsonify(settings=db.settings(), library=sync.library(),
-                   default_library=str(config.DEFAULT_LIBRARY))
+                   default_library=str(config.DEFAULT_LIBRARY), speeds=net.PROFILES)    # (the page says what each level does from these numbers)
 
 
 @app.put("/api/settings")

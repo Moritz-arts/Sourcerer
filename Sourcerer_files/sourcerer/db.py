@@ -207,6 +207,19 @@ def init():
         if not con.execute("SELECT 1 FROM settings WHERE key = 'speed_defaults_v2'").fetchone():
             con.execute("DELETE FROM settings WHERE key IN ('parallel', 'per_host', 'pace_ms', 'login_gap')")
             con.execute("INSERT INTO settings (key, value) VALUES ('speed_defaults_v2', '1')")
+        # One speed choice (net.PROFILES) replaced five settings: parallel downloads, connections per site, the pause between requests, the gap
+        # between artists and the pace of files on a login. What somebody chose on purpose becomes the level that says the same -- by the word
+        # (the gap's, else the files') or, for the numbers, by being as low as 'careful' is -- and the five keys go.
+        if not con.execute("SELECT 1 FROM settings WHERE key = 'speed_v1'").fetchone():
+            old = {r[0]: r[1] for r in con.execute("SELECT key, value FROM settings WHERE key IN ('parallel', 'per_host', 'pace_ms', 'login_gap', 'login_pace')")}
+            level = old.get("login_gap") or old.get("login_pace")
+            if level not in ("careful", "normal", "fast"):
+                low = any(str(old.get(k, "")).isdigit() and int(old[k]) <= most for k, most in (("per_host", 4), ("parallel", 8)))
+                level = "careful" if low else None
+            if level and level != "normal":
+                con.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('speed', ?)", (level,))
+            con.execute("DELETE FROM settings WHERE key IN ('parallel', 'per_host', 'pace_ms', 'login_gap', 'login_pace')")
+            con.execute("INSERT INTO settings (key, value) VALUES ('speed_v1', '1')")
         # A sweep leaves a source alone for a while after it was read (sync._cooling): the gap counts from looked_at, which only a successful
         # read sets -- a look that failed or met a resting site is no reason to wait. What was read before this existed counts from last_checked.
         if not con.execute("SELECT 1 FROM settings WHERE key = 'looked_at_v1'").fetchone():

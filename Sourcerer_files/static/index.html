@@ -408,7 +408,7 @@
     <nav class="rail">
       <button data-pane="library" class="selected"><svg class="ic"><use href="#i-folder"/></svg> Library</button>
       <button data-pane="sync"><svg class="ic"><use href="#i-refresh"/></svg> Sync</button>
-      <button data-pane="network"><svg class="ic"><use href="#i-world"/></svg> Sites &amp; network</button>
+      <button data-pane="network"><svg class="ic"><use href="#i-world"/></svg> Speed &amp; safety</button>
       <button data-pane="appearance"><svg class="ic"><use href="#i-palette"/></svg> Appearance</button>
       <button data-pane="security"><svg class="ic"><use href="#i-lock"/></svg> Security</button>
       <button data-pane="keys"><svg class="ic"><use href="#i-keyboard"/></svg> Keyboard &amp; mouse</button>
@@ -472,60 +472,24 @@
             <option value="12">12 hours</option><option value="24">day</option><option value="168">week</option>
           </select>
         </div>
-        <div class="row">
-          <div><div class="row-title">Parallel downloads</div>
-            <p class="hint">Files downloaded at the same time. More is faster on a fast line; a very high number
-               only helps with many artists at once, and some sites then slow down or refuse you.</p></div>
-          <select id="set-parallel" class="narrow">
-            <option>1</option><option>2</option><option>4</option><option>6</option><option>8</option>
-            <option>12</option><option>16</option><option>24</option><option>32</option><option>48</option><option>64</option>
-          </select>
-        </div>
       </section>
 
       <section data-pane="network">
-        <h3>Sites &amp; network</h3>
-        <p class="hint big">Sourcerer reads public posts through each site's official interface (the
-          Mastodon API, Bluesky's AT Protocol), as a known app: it names itself in every request and
-          never pretends to be a browser. These limits keep it well below what the sites allow, so
-          an account is never mistaken for an attack.</p>
-        <div class="row">
-          <div><div class="row-title">Connections per site</div>
-            <p class="hint">Requests to one site at the same time. Sites that are touchy about it (pixiv, Patreon, logins)
-               keep their own lower limit whatever this says.</p></div>
-          <select id="set-perhost" class="narrow">
-            <option>1</option><option>2</option><option>3</option><option>4</option><option>6</option>
-            <option>8</option><option>12</option><option>16</option><option>24</option><option>32</option>
-          </select>
+        <h3>Speed &amp; safety</h3>
+        <p class="hint big">One choice for how fast Sourcerer talks to the sites. Pictures you look at in Browse are fetched the way a browser
+          fetches them; what Sourcerer does by itself -- syncs, scans, downloads -- is spaced out, so that an account is never mistaken for a robot.</p>
+        <div class="field">
+          <span class="label">Speed</span>
+          <div class="segmented">
+            <button type="button" data-set="speed" data-value="careful">Careful</button>
+            <button type="button" data-set="speed" data-value="normal">Normal</button>
+            <button type="button" data-set="speed" data-value="fast">Fast</button>
+          </div>
+          <ul class="says" id="speed-says"></ul>
         </div>
-        <div class="row">
-          <div><div class="row-title">Pause between requests</div>
-            <p class="hint">Per site. Longer is gentler, shorter is faster.</p></div>
-          <select id="set-pace" class="narrow">
-            <option value="0">none</option><option value="100">0.1 s</option><option value="250">0.25 s</option>
-            <option value="500">0.5 s</option><option value="1000">1 s</option><option value="2000">2 s</option>
-          </select>
-        </div>
-        <div class="row">
-          <div><div class="row-title">Gap between artists on a cookie login</div>
-            <p class="hint">pixiv, X, Patreon and forums are read with your logged-in session, which is what gets locked
-               when it looks like a robot. This is the pause between two artists on the same such site: careful 15-60 s, normal 10-30 s, fast 3-15 s.
-               The one you opened in Browse always goes first, with a short pause. Bluesky, Mastodon, Misskey and boorus are not affected.</p></div>
-          <select id="set-logingap" class="narrow">
-            <option value="careful">careful</option><option value="normal">normal</option><option value="fast">fast</option>
-          </select>
-        </div>
-        <div class="row">
-          <div><div class="row-title">Files from a site with a cookie login</div>
-            <p class="hint">How fast the files of forums, Fanbox and Fantia come: careful one every 2-3 s with a rest now and then, normal one every
-               1-1.6 s, fast one every 0.5-0.8 s. Lists and pages stay careful, and a site that refuses or says "slow down" is read carefully for
-               a day. Pictures you look at in Browse load like in a browser.</p></div>
-          <select id="set-loginpace" class="narrow">
-            <option value="careful">careful</option><option value="normal">normal</option><option value="fast">fast</option>
-          </select>
-        </div>
-        <p class="hint">When a site says "too many requests", Sourcerer waits as long as the site asks
-          before it tries again. Automatic syncs start at a slightly different minute each time.</p>
+        <p class="hint">Whatever you choose: a site that says "too many requests" is left alone as long as it asks, a site that refuses
+          Sourcerer is read carefully for a day, every site has a daily limit for requests made with your login, and a site that is touchy
+          (pixiv, Patreon, X, the boorus) keeps its own lower limit. Automatic syncs start at a slightly different minute each time.</p>
       </section>
 
       <section data-pane="appearance">
