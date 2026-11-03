@@ -1,0 +1,35 @@
+# Drives Sourcerer's real window on a Windows runner with the real mouse (.github/window_test.py): the bar moves
+# the window, a drag to the screen's edge docks it, a drag out of a docked window gives it its size back.
+# Windows only, because that is where the page's own bar is the title bar.
+name: Window test (Windows)
+
+on:
+  pull_request:
+    paths:
+      - "Sourcerer_files/sourcerer/**"
+      - "Sourcerer_files/static/**"
+      - "Sourcerer_files/requirements.txt"
+      - ".github/window_test.py"
+      - ".github/workflows/window-test.yml"
+  workflow_dispatch:
+
+jobs:
+  window:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the packages Sourcerer needs
+        run: python -m pip install -r Sourcerer_files/requirements.txt
+      - name: Move and dock the window with the mouse
+        run: python .github/window_test.py
+      - name: Keep the logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: window-test
+          path: window-test/
+          if-no-files-found: ignore
