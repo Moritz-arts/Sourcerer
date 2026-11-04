@@ -3,6 +3,11 @@
 Newest first. Each entry is made from the commit subjects when a version is made, so a subject is one short,
 plain sentence.
 
+## v0.63 — 2026-11-04
+
+- Gallery: Full shows the pictures in their own shapes again for forums, Mastodon, Misskey and boorus (their site icon no longer decides a tile's shape)
+- Speed & safety: a slider for every important value and for each site's daily limit, with a clear notice that they run at your own risk
+
 ## v0.62 — 2026-11-03
 
 - One speed choice in Settings (Careful, Normal, Fast) replaces five settings, and the pictures you look at load like in a browser
