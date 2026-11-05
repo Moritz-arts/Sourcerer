@@ -189,9 +189,12 @@ def clean_tune(raw, level):
         number = max(knob["low"], min(knob["high"], number))
         number = round(round(number / knob["step"]) * knob["step"], 4)
         number = int(number) if knob["step"] >= 1 else number
-        if abs(number - _base_value(level, key)) > 1e-9:
-            out[key] = number
-    return out
+        out[key] = number
+    if "gap_min" in out or "gap_max" in out:                   # the gap's end is never below its start (_row would raise it unseen)
+        low, high = out.get("gap_min", _base_value(level, "gap_min")), out.get("gap_max", _base_value(level, "gap_max"))
+        if high < low:
+            out["gap_max"] = low
+    return {k: v for k, v in out.items() if abs(v - _base_value(level, k)) > 1e-9}
 
 
 def _row(level, tune):
@@ -228,14 +231,16 @@ def tuning():
     return dict(_limits["tune"])
 
 
-def speed_state():
+def speed_state(full=True):
     """Everything the page needs for Settings > Speed & safety: the level, the sliders (what each is, its range, where it turns risky), the values of every
     level and the values now, and the row the program runs by (the page says in words what the level does from it, so the text cannot drift)."""
     level, tune = _limits["speed"], tuning()
     names = [k["key"] for k in KNOBS]
-    return {"level": level, "tuned": any(k in _SPEED_KEYS for k in tune), "limits_changed": any(k not in _SPEED_KEYS for k in tune),
-            "groups": GROUPS, "knobs": KNOBS, "levels": {n: {k: _base_value(n, k) for k in names} for n in PROFILES},
-            "values": {k: tune.get(k, _base_value(level, k)) for k in names}, "row": profile()}
+    out = {"level": level, "tuned": any(k in _SPEED_KEYS for k in tune), "limits_changed": any(k not in _SPEED_KEYS for k in tune),
+           "values": {k: tune.get(k, _base_value(level, k)) for k in names}, "row": profile()}
+    if full:                                                   # the tables never change: the page asks for them once (/api/state?speed=full)
+        out.update(groups=GROUPS, knobs=KNOBS, levels={n: {k: _base_value(n, k) for k in names} for n in PROFILES})
+    return out
 
 
 def day_limit(site):
@@ -419,7 +424,7 @@ def _rhythm(url, bulk):
         pace, every, rest = wanted["pace"], READ_EVERY, READ_BREAK
     if not _calm(url):
         return max(pace, LOGIN_PACE), READ_EVERY, READ_BREAK
-    if bulk and (wanted["files"] < pace or not quiet):
+    if bulk and (wanted["files"] < pace or not quiet or "files" in _limits["tune"]):      # (a files slider the user moved beats a forum's earned pace)
         pace, every, rest = wanted["files"], wanted["every"], wanted["rest"]
     return pace, every, rest
 

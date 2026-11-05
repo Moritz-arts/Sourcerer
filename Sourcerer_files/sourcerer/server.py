@@ -7,6 +7,7 @@ import collections
 import datetime
 import io
 import json
+import math
 import logging
 import os
 import platform
@@ -445,7 +446,7 @@ def state():
     have = {a["key"].split(":", 1)[0] for a in rows if a["logged_in"] and _shown(a["key"])}
     on = {s.LABEL: s.KIND in have for s in sources.SITES}
     return jsonify(version=config.VERSION, library=sync.library(), sep=os.sep,
-                   sites=[s.LABEL for s in sources.SITES], settings=db.settings(), speed=net.speed_state(),
+                   sites=[s.LABEL for s in sources.SITES], settings=db.settings(), speed=net.speed_state(full=request.args.get("speed") == "full"),
                    fields=[{"label": label, "example": example, "logged_in": on.get(label, False)}
                            for label, example in sources.FIELDS],
                    logins=accounts.problems(rows), pauses=net.pauses(),
@@ -1346,6 +1347,11 @@ def save_speed():
         if value is None:
             mine.pop(key, None)
         else:
+            try:
+                if not math.isfinite(float(value)):
+                    raise ValueError
+            except (TypeError, ValueError):
+                return jsonify(error="%s must be a number." % key), 400
             mine[key] = value
     if body.get("reset") in ("sliders", "limits"):
         limits = body["reset"] == "limits"

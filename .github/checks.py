@@ -440,7 +440,7 @@ def tune_checks():
     client.put("/api/speed", json={"reset": "limits"})
     client.put("/api/settings", json={"speed": "normal"})
     net._state["unfriendly"], net._state["paused"], net._state["spent"] = {}, {}, {}
-    state = client.get("/api/state").get_json()["speed"]
+    state = client.get("/api/state?speed=full").get_json()["speed"]
     names = {k["key"] for k in state["knobs"]}
     want = {"parallel", "per_host", "pause", "pace", "files", "every", "rest", "gap_min", "gap_max", "look", "preview_n", "browse_n",
             "limit_pixiv", "limit_patreon", "limit_x", "limit_fanbox", "limit_fantia", "limit_other"}
@@ -473,9 +473,13 @@ def tune_checks():
 
     client.put("/api/speed", json={"reset": "sliders"})
     check(set(net.tuning()) == {"limit_x"} and net.profile() is net.PROFILES["normal"], "reset takes the sliders back to the level and keeps the limits", net.tuning())
-    got = client.put("/api/speed", json={"tune": {"parallel": 999, "pace": 0.01, "per_host": 24, "pause": 0.1, "files": "soon"}}).get_json()["speed"]["values"]
-    check(got["parallel"] == 64 and got["pace"] == 0.5 and got["per_host"] == 24 and "pause" not in net.tuning() and "files" not in net.tuning(),
-          "a value is clamped into its range; one that equals the level's, or is no number, is no change", (got, net.tuning()))
+    got = client.put("/api/speed", json={"tune": {"parallel": 999, "pace": 0.01, "per_host": 24, "pause": 0.1}}).get_json()["speed"]["values"]
+    check(got["parallel"] == 64 and got["pace"] == 0.5 and got["per_host"] == 24 and "pause" not in net.tuning(),
+          "a value is clamped into its range; one that equals the level's is no change", (got, net.tuning()))
+    before = net.tuning()
+    check(client.put("/api/speed", json={"tune": {"files": "soon"}}).status_code == 400 and net.tuning() == before, "a value that is no number is refused and changes nothing")
+    client.put("/api/speed", json={"tune": {"gap_min": 20, "gap_max": 5}})
+    check(net.profile()["gap"] == (20, 20) and net.tuning().get("gap_max") == 20, "a gap's end below its start is raised where the page sees it", net.tuning())
     check(client.put("/api/speed", json={"tune": {"nonsense": 1}}).status_code == 400 and client.put("/api/speed", json={"tune": [1]}).status_code == 400,
           "an unknown slider and a wrong shape are refused")
     client.put("/api/speed", json={"tune": {"parallel": None}})
@@ -527,7 +531,7 @@ def settings_checks():
     check(client.put("/api/settings", json={"speed": "careful"}).status_code == 200 and net.profile() is net.PROFILES["careful"], "choosing careful reaches net at once")
     check(client.put("/api/settings", json={"speed": "warp"}).status_code == 400, "an unknown level is refused")
     check(client.put("/api/settings", json={"parallel": "8"}).status_code == 400, "the old keys are gone")
-    state = client.get("/api/state").get_json()
+    state = client.get("/api/state?speed=full").get_json()
     check(bool(state.get("speed", {}).get("knobs")) and state["settings"]["speed"] == "careful", "/api/state carries them for the page")
     client.put("/api/settings", json={"speed": "normal"})
 
