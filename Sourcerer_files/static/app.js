@@ -331,10 +331,10 @@ function toggleLog() {
 var lastLoad = 0, loadTimer = 0, LOAD_GAP = 4000;
 function load() {
   lastLoad = Date.now();
-  return api("GET", "/api/state").then(function (d) {
+  return api("GET", "/api/state" + (S.speed && S.speed.knobs ? "" : "?speed=full")).then(function (d) {
     S.artists = d.artists; S.apart = apartSet(d.apart); S.sync = d.sync; S.library = d.library; S.window = d.window;
     S.frame = d.frame; applyFrame();
-    S.sep = d.sep; S.sites = d.sites; S.fields = d.fields; S.settings = d.settings; S.speed = d.speed || {}; S.logins = d.logins || []; S.pauses = d.pauses || [];
+    S.sep = d.sep; S.sites = d.sites; S.fields = d.fields; S.settings = d.settings; S.speed = Object.assign({}, S.speed && S.speed.knobs ? S.speed : {}, d.speed || {}); S.logins = d.logins || []; S.pauses = d.pauses || [];
     $("version").textContent = "v" + d.version;
     $("btn-quit").classList.toggle("hidden", S.window);
     applySettings();
@@ -2431,8 +2431,11 @@ $$("[data-set]").forEach(function (b) {
   });
 });
 // The sliders: moving one shows its value and the risk at once; letting go saves it (the server checks it and says what it made of it).
+var tuneSeq = 0;
 function saveTune(change) {
+  var mine = ++tuneSeq;
   return api("PUT", "/api/speed", change).then(function (d) {
+    if (mine !== tuneSeq) return;                  // a later save answers last; an older answer must not put its state back
     S.speed = d.speed; S.settings = d.settings; fillSettings(); toast("Saved");
   }).catch(function (e) {
     fail(e);
