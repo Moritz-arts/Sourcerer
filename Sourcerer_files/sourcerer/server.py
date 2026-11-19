@@ -707,9 +707,9 @@ def start_sync():
     body = request.get_json(silent=True) or {}
     ids = [int(body["artist_id"])] if body.get("artist_id") else None
     # sources: only these of the card (Browse: download what the filter shows). mode: "download" to
-    # download, "refresh" to only look; none: the card's auto-download decides.
+    # download, "refresh" to only look, "order" to put the saved files in the listing's order; none: the card's auto-download decides.
     only = [int(i) for i in body.get("sources") or []] if ids else None
-    mode = body.get("mode") if body.get("mode") in ("download", "refresh") else None
+    mode = body.get("mode") if body.get("mode") in ("download", "refresh", "order") else None
     order = [i for i in body.get("order") or [] if isinstance(i, int)] if ids is None else None
     # No artist: Refresh all -- every card, in the order the list shows them (sync.enqueue).
     # (a download asked for without an artist is the cards that download, as ever: only a plain Refresh all reaches the rest)

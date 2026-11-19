@@ -157,6 +157,7 @@ COLUMNS = {
         "width": "INTEGER",
         "height": "INTEGER",
         "size": "INTEGER",
+        "stamp": "REAL",                  # the time its saved file was given (sync._stamp): the order it was posted in, kept for the next run and for a file fetched again
     },
 }
 

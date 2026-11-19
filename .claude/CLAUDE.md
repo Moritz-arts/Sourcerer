@@ -977,7 +977,7 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   **green auto-download cloud marks a card that downloads by itself, and only that** (no grey one
   for the others, and never a choice of the number); the switch *Auto-download* beside the head's
   Download button (`#br-auto`) and the artist's right-click menu (edit, auto-download, refresh,
-  download, open folder, merge, delete -- the same keys `Enter A U D O M Del`) turn it on and off.
+  download, open folder, put files in upload order, merge, delete -- the keys `Enter A U D O M Del`, the order has none) turn it on and off.
   **There is no "Download all"**, and **"Refresh all" (F5, Ctrl+R) looks at every artist, one after the other down the list as it
   is shown** (the page sends the ids in that order: `S.brOrderIds`; `enqueue(None, everyone=True, order=...)`, listed cards
   included -- somebody asked for it, and a look does not un-list them): a card with auto-download is looked at *and* downloaded as
@@ -1038,8 +1038,8 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   `server.follow_monitor` works it out again when the window arrives on another monitor (`LocationChanged`, one `MonitorFromWindow` per event) and
   when a move or resize begins (`ResizeBegin`): Win+Up, a drag to the top edge and the system menu do not pass through the page's button.
   **`server.fit_to_screen`**: the window is made 1280x860 and centred, and on a 1366x768 screen (or 1080p at 150 %) its top -- the bar -- started
-  above the screen, out of reach; it is pulled back into the work area of its monitor. Every Win32 prototype lives in `server._win32()` (one
-  function with two argtypes keeps whoever set it last). The page keeps the maximize icon right by asking `/api/window {action: "state"}` after a
+  above the screen, out of reach; it is pulled back into the work area of its monitor. Every window Win32 prototype lives in `server._win32()` (one
+  function with two argtypes keeps whoever set it last; the file times in `sync._kernel32` have a `WinDLL` of their own). The page keeps the maximize icon right by asking `/api/window {action: "state"}` after a
   `resize`. A viewer (`#gal-view`) is inside the gallery area, below the bar: it never covers it.
 - **Bringing the window forward must not touch its state** (`server._forward`, `/api/focus`, a second start): pywebview's `restore()` sets
   the state to Normal on Windows (WinForms) and Qt -- a maximized window shrank at every second start -- and Qt's `on_top` flip
@@ -1409,17 +1409,22 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   a booru's `created_at`, gallery-dl's `date` for X, Fanbox, Fantia and forums, Bluesky `indexedAt` -- not the record's `createdAt`, which is the client's word and
   keeps the old date of an imported post). Nothing reads an image's EXIF or the file's own dates; a new site must hand out the site's time, and one that gives none
   leaves `posted` empty (the run's listing order dates it, below).
-- **A saved file's time is its post's date -- or its place in the listing** (v0.64 `sync._stamp`, v0.66 `sync._timeline`): downloads run side by side and
-  finish in any order, so the save time said nothing about which picture was newer and "newest first" in a file manager (or TrackImage) mixed an artist's
-  latest pictures in. **TrackImage's date is the OLDER of modified and created time** (`media.get_file_date`: mtime, birthtime, and on Windows ctime), so
-  `_stamp` sets both (`os.utime`; on Windows the created time through an own `WinDLL` handle -- no shared `argtypes` -- read back, and said once in the log
-  when it did not take). v0.64 only used `Media.posted`, and a forum's files have none in a sync (the attachment browser dates only where somebody waits,
-  and the gallery's list-page dates are checked only against made-up markup): the user's log had no "saved files were dated" line, nothing changed.
-  `_timeline` gives every file of a run its time before the downloads start: the post's date where there is one, else the listing's order (sources list
-  newest first): STEP (2 s) apart, newest on top, between the dated posts around it, and above what earlier runs gave the card (setting `stamp:<card>`).
-  A post with a date in the future, adopted files and files saved before v0.66 without a date keep their time (delete the folder and press Download to
-  fetch them again in order); a failed file retried later lands on top. `restamp` (setting `file_times_v1`) dated the older files with a post date once.
-  Checked by `.github/checks.py` (`library_checks`).
+- **A saved file's time is its post's date -- or its place in the listing** (v0.64 `sync._stamp`, v0.66 `sync._timeline`, v0.67 neighbours + `_ordered`): downloads
+  run side by side and finish in any order, so the save time said nothing about which picture was newer and "newest first" in a file manager (or TrackImage)
+  mixed an artist's latest pictures in. **TrackImage's date is the OLDER of modified and created time** (`media.get_file_date`: mtime, birthtime, and on Windows
+  ctime), so `_stamp` sets both (`os.utime`; on Windows the created time through `sync._kernel32`, a `WinDLL` of its own, read back, and said once in the log when
+  it did not take; long paths get the `\\?\` prefix). v0.64 only used `Media.posted`, and a forum's files have none in a sync (the attachment browser dates only
+  where somebody waits): the user's log had no "saved files were dated" line, nothing changed. **`_timeline` gives every file of a run its time before the
+  downloads start**: the post's date where there is one, else a place between the nearest posts around it **in the listing** (`_scan` returns the whole listing
+  it walked, known posts too) that have a time -- dated posts and files saved earlier (`files.stamp`, the time each was given, else the file's own) -- STEP (2 s)
+  apart. Nothing around it (a first download, or the newest posts): from now, newest on top. v0.66 put every run above a per-card cursor and so turned a cut-off, cancelled
+  or retried run upside down (the older tail got newer times than the first part): never order a run against *time*, only against its neighbours. A file fetched
+  again after its folder was deleted gets the time it had (`files.stamp`). **The images of one post share its date**, so `_apart` puts them milliseconds apart in the
+  listing's order (the file manager would break the tie by name). **Files saved before** have the time they were downloaded at: the artist's menu *Put files in
+  upload order* (`mode: "order"`, `_ordered`) walks the whole listing -- one request a page, nothing downloaded -- and hands the files' own set of times out
+  again in the listing's order (a dated post's files get its date); sites whose posts all carry a date (`MAX_NEW`: booru, Patreon, pixiv, X) are skipped.
+  `restamp` (setting `file_times_v1`) dated the older files with a post date once, only files Sourcerer saved and nobody touched (their time within ten minutes of
+  their row's `created`): an adopted or edited file keeps its time. A post with a date in the future is undated. Checked by `.github/checks.py` (`library_checks`).
 - **A deleted artist folder is fetched again, a deleted file is not** (v0.65, `sync._saved_keys`): every post in `files` was "known" whether its
   file was still on disk or not, so after the user deleted a card's folder Download said "Checking 1 source ... Finished" with nothing new and made no
   folder (the user's log, 2026-11-19: `Checking` -> `Finished` in 1-6 s, three times). A card **asked for by name** (`not auto`: Refresh, Download, the

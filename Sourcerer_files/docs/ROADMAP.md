@@ -50,6 +50,9 @@ drops every new file, de-duplicated across sources, into a [TrackImage](https://
   an installed Windows copy updates through its installer; other standalone copies are replaced by hand.
 - **Downloads are unsigned** for now (SmartScreen and Gatekeeper warn once).
 - **Brand:** one identity across app, installer, icons and this repository (brand guide in `docs/brand/`).
+- **A saved file's date is the day the source published it,** never when the work was made, and a file manager's "newest first" keeps the upload
+  order: the file's modified and created time are set from the post's date, or -- where a site gives none -- from the listing's order among the
+  posts around it. Files saved before are put in order from the artist's menu (*Put files in upload order*).
 
 ## Done
 

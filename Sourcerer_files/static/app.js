@@ -217,6 +217,7 @@ function renderActivity() {
     var a = artistById(cur.artist_id) || { name: cur.name };
     var scan = cur.phase === "scan", pct = cur.total ? 100 * cur.done / cur.total : 0;
     dyn = { text: cur.mode === "refresh" || cur.mode === "scan" ? "Looking for new posts · " + cur.found + " found"
+                  : cur.mode === "order" ? "Reading the listing to put the files in upload order"
                   : scan ? "Checking sources · " + cur.found + " new"
                   : "Downloading " + cur.done + " / " + cur.total,
             bar: pct, speed: cur.speed ? bytes(cur.speed) + "/s" : "", file: cur.file || "" };
@@ -832,6 +833,13 @@ $("twins-back-x").addEventListener("click", function () { C.parked = false; $("t
 $("br-combine").addEventListener("click", openTwins);
 
 function openFolder(a) { api("POST", "/api/open", { target: "artist", artist_id: a.id }).catch(fail); }
+// Files saved before the order was kept have the times they were downloaded at: walk the listing and give them the upload order (no download).
+function putInOrder(a) {
+  api("POST", "/api/sync", { artist_id: a.id, mode: "order" }).then(function (d) {
+    toast(d.added ? "Putting " + a.name + "'s files in upload order…" : a.name + " is syncing or queued already.");
+    lastKey = ""; return api("GET", "/api/sync");
+  }).then(function (s) { S.sync = s; renderAll(); }).catch(fail);
+}
 
 // ---- the artist's menu, mouse and keyboard ------------------------------------
 
@@ -855,6 +863,7 @@ function artistAct(act, a) {
   else if (act === "sync") sync(a.id);
   else if (act === "download") downloadSelected(a);
   else if (act === "folder") openFolder(a);
+  else if (act === "order") putInOrder(a);
   else if (act === "merge") openMerge(a);
   else if (act === "delete") removeArtist(a);
 }
@@ -1168,7 +1177,7 @@ function renderBrowseHead() {
   var a = G && G.artist, sup = !!a && a.sources.some(function (s) { return s.supported; });
   var cur = a && (S.sync.active || []).filter(function (c) { return c.artist_id === a.id; })[0] || null;
   var queued = a && (S.sync.queue || []).indexOf(a.id) >= 0;
-  $("br-progress").textContent = cur ? (cur.mode === "refresh" || cur.mode === "scan" ? "Looking for new posts…" : cur.phase === "scan" ? "Checking sources…"
+  $("br-progress").textContent = cur ? (cur.mode === "refresh" || cur.mode === "scan" ? "Looking for new posts…" : cur.mode === "order" ? "Putting files in upload order…" : cur.phase === "scan" ? "Checking sources…"
     : "Downloading " + cur.done + " / " + cur.total) : queued ? "Queued" : a && a.pending ? a.pending + (a.pending >= 120 ? "+" : "") + " to download" : "";
   // The artist's picture beside the name (not for "All artists"); replaced only when it changed, or it would blink on every poll.
   var av = a ? avatarHtml(a) : "";

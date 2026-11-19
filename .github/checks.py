@@ -14,7 +14,8 @@ Run by .github/workflows/checks.yml on every pull request, and by hand before pu
   takes three;
 * what a card already has (sync.py: _saved_keys): asked for by name, a file whose folder was deleted is fetched again, one missing from a folder that is
   still there stays deleted, a sweep and an offline library fetch nothing again; a saved file gets its post's date, and where the site gave none the
-  listing's order, newest on top and above what earlier runs gave the card (sync._stamp, _timeline);
+  listing's order among the posts around it (a cut-off run carries on below what it saved, a file fetched again gets its old time), the images of one post
+  apart; restamp and "Put files in upload order" (sync._stamp, _timeline, _ordered, restamp);
 * gallery.picture for a site with no resolver (the booru-like case the forum fix must not change).
 
 A failing check starts with FAIL and makes the exit code 1.
@@ -610,29 +611,106 @@ def library_checks():
     sync._stamp(target, "2999-01-01T00:00:00Z")
     sync._stamp(target, "")
     check(int(os.path.getmtime(target)) == 1709634030, "no date, or one in the future, leaves the time as it was")
-    # the time of files whose posts have no date: the listing's order, newest first, above what an earlier run gave
-    def run(card, *dates):
-        todo = [({"id": 1}, None, types.SimpleNamespace(remote_key="%s-%d" % (card, i), posted=d)) for i, d in enumerate(dates)]
-        got = sync._timeline(card, todo)
-        return [round(got["%s-%d" % (card, i)], 3) for i in range(len(dates))]
+    # the time of a file: the post's date, else the listing's order among the posts around it
+    import calendar
+    T0 = 1709634030.0
+    check(sync._post_time("2024-03-05T10:20:30Z") == T0 and sync._post_time("2024-03-05T19:20:30+0900") == T0 and sync._post_time("2024-03-05T19:20:30+09") == T0
+          and sync._post_time("2024-03-05T10:20:30.1234567Z") == T0 + 0.123456 and sync._post_time("2024-03-05 10:20:30") == T0
+          and sync._post_time("2024-03-05") == T0 - 37230 and sync._post_time("") is None and sync._post_time("soon") is None
+          and sync._post_time("2999-01-01T00:00:00Z") is None, "a post's date is read in every form the sites write it (also on Python 3.10)")
+    SRC = {"id": 1}
+    mk = lambda key, posted="": types.SimpleNamespace(remote_key=key, post_url="", posted=posted)
+
+    def stamps(card, saved, listing, fresh, newkeys=()):
+        """saved: key -> (stamp, path); listing: keys newest first; fresh: the keys to download. The times of the fresh ones, in the listing's order."""
+        with db.connect() as con:
+            con.execute("DELETE FROM files WHERE artist_id = ?", (card,))
+            for key, (st, path) in saved.items():
+                con.execute("INSERT INTO files (artist_id, remote_key, path, stamp) VALUES (?, ?, ?, ?)", (card, key, path, st))
+        media = {k: mk(k, dict(newkeys).get(k, "")) for k in listing}
+        todo = [(SRC, None, media[k]) for k in listing if k in fresh]
+        got = sync._timeline(card, todo, {1: [media[k] for k in listing]})
+        return [round(got[(1, k)] - time.time(), 2) for k in listing if k in fresh]      # (seconds from now)
     with db.connect() as con:
-        con.execute("DELETE FROM settings WHERE key LIKE 'stamp:%'")
-    first = run(7, "", "", "", "", "")
-    check(all(a > b for a, b in zip(first, first[1:])) and abs(first[0] - time.time()) < 5 and abs(first[0] - first[1] - sync.STEP) < 0.01,
-          "undated posts: the newest on top, STEP apart, the first of them now", first)
-    second = run(7, "", "", "")
-    check(min(second) > max(first) and all(a > b for a, b in zip(second, second[1:])), "a later run's posts are all above the earlier run's", (second, first))
-    third = run(7, "", "")
-    check(min(third) > max(second), "and so is the next, even a minute later", (third, second))
-    old = 1709634030.0
-    mixed = run(8, "", "2024-03-05T10:20:30Z", "", "")
-    check(mixed[1] == old and mixed[0] > old and mixed[2] == old - sync.STEP and mixed[3] == old - 2 * sync.STEP,
+        con.execute("INSERT OR IGNORE INTO artists (id, name) VALUES (7, 'Artist C')")
+    first = stamps(7, {}, list("abcde"), set("abcde"))
+    check(all(x > y for x, y in zip(first, first[1:])) and abs(first[0]) < 5 and abs(first[0] - first[1] - sync.STEP) < 0.01,
+          "the first download of undated posts: the newest on top, STEP apart, the first of them now", first)
+    news = stamps(7, {"s1": (time.time() - 100, "x"), "s2": (time.time() - 102, "x")}, ["n1", "n2", "n3", "s1", "s2"], {"n1", "n2", "n3"})
+    check(all(x > y for x, y in zip(news, news[1:])) and min(news) > -100 + 1, "new posts above the newest saved file, in the listing's order", news)
+    close = stamps(7, {"s1": (time.time() - 6, "x")}, ["n%d" % i for i in range(10)] + ["s1"], {"n%d" % i for i in range(10)})
+    check(all(x > y for x, y in zip(close, close[1:])) and min(close) > -6 and max(close) < 3, "... squeezed in when the newest saved file is only seconds old", close)
+    tail = stamps(7, {"s1": (time.time() - 100, "x"), "s2": (time.time() - 102, "x")}, ["s1", "s2", "t1", "t2", "t3"], {"t1", "t2", "t3"})
+    check(all(x > y for x, y in zip(tail, tail[1:])) and max(tail) < -102, "the older tail of a cancelled or cut-off run goes BELOW what the first run saved", tail)
+    mid = stamps(7, {"s1": (time.time() - 100, "x"), "s3": (time.time() - 110, "x")}, ["s1", "f1", "s3"], {"f1"})
+    check(-110 < mid[0] < -100, "a file that failed and comes later goes back between its neighbours", mid)
+    back = stamps(7, {"r1": (time.time() - 500, "/gone/r1.jpg"), "s1": (time.time() - 100, "x")}, ["s1", "r1"], {"r1"})
+    check(abs(back[0] + 500) < 0.1, "a file fetched again after its folder was deleted gets the time it had", back)
+    tie = stamps(7, {}, ["p1", "p2", "p3", "q1"], {"p1", "p2", "p3", "q1"}, [(k, "2024-03-05T10:20:30Z") for k in ("p1", "p2", "p3")])
+    check(tie[0] > tie[1] > tie[2] > tie[3] and (tie[0] - tie[2]) < 0.5 and abs(tie[0] - (T0 - time.time())) < 0.01, "the images of one post: listing order kept a few milliseconds apart", tie)
+    mixed = stamps(7, {}, ["u1", "d1", "u2", "u3"], {"u1", "d1", "u2", "u3"}, [("d1", "2024-03-05T10:20:30Z")])
+    check(abs(mixed[1] - (T0 - time.time())) < 0.01 and mixed[0] > mixed[1] and mixed[2] == round(mixed[1] - sync.STEP, 2) and mixed[3] == round(mixed[1] - 2 * sync.STEP, 2),
           "undated posts sit between their dated neighbours in the listing's order", mixed)
-    tight = run(9, "2024-03-05T10:20:33Z", "", "", "2024-03-05T10:20:30Z")
-    check(tight[0] > tight[1] > tight[2] > tight[3], "and squeezed in when the neighbours are close together", tight)
-    target.write_bytes(b"x")
-    sync._stamp(target, 1000000000.0)
-    check(int(os.path.getmtime(target)) == 1000000000, "a time as a number goes on the file as it is")
+    # the time is kept on the row, and a saved file is stamped through the real path (_fetch)
+    class Cdn(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            body = jpeg((10, 120, 200), (64, 48))
+            self.send_response(200)
+            self.send_header("Content-Type", "image/jpeg")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+    base = serve(Cdn)
+    lib = root / "Fetched"
+    card = {"id": 7, "name": "Artist C", "folder": str(lib), "layout": "together", "dedupe": "keep_all", "master_source_id": None}
+    site = types.SimpleNamespace(LABEL="Test")
+    cur = {"failed": 0, "new": 0, "duplicates": 0, "existing": 0, "file": "", "size": 0}
+    with db.connect() as con:
+        con.execute("DELETE FROM files WHERE artist_id = 7")
+    ok = sync._fetch(card, {"id": None, "url": base + "/m"}, site, Media(remote_key="t:1", url=base + "/1.jpg", post_url="p", posted="", name="one"), cur, 1500000000.0)
+    ok2 = sync._fetch(card, {"id": None, "url": base + "/m"}, site, Media(remote_key="t:2", url=base + "/2.jpg", post_url="p", posted="2020-05-01T12:00:00Z", name="two"), cur)
+    with db.connect() as con:
+        saved = {r["remote_key"]: (r["path"], r["stamp"]) for r in con.execute("SELECT remote_key, path, stamp FROM files WHERE artist_id = 7")}
+    check(ok is True and ok2 is True and os.path.getmtime(saved["t:1"][0]) == 1500000000.0 and saved["t:1"][1] == 1500000000.0
+          and int(os.path.getmtime(saved["t:2"][0])) == calendar.timegm((2020, 5, 1, 12, 0, 0)) and saved["t:2"][1] == os.path.getmtime(saved["t:2"][0]),
+          "a downloaded file is stamped in _fetch (the time given, else its post's date) and the row keeps it", saved)
+    # restamp: Sourcerer's own untouched files get their post's date; an adopted or edited one keeps its time
+    mine, adopted = lib / "mine.jpg", lib / "adopted.jpg"
+    mine.write_bytes(b"x")
+    adopted.write_bytes(b"x")
+    os.utime(adopted, (1400000000, 1400000000))
+    with db.connect() as con:
+        con.execute("DELETE FROM files WHERE artist_id = 7")
+        con.execute("DELETE FROM settings WHERE key = 'file_times_v1'")
+        for key, path in (("m", mine), ("a", adopted)):
+            con.execute("INSERT INTO files (artist_id, remote_key, path, posted) VALUES (7, ?, ?, '2021-01-02T03:04:05Z')", (key, str(path)))
+    sync.restamp()
+    want = calendar.timegm((2021, 1, 2, 3, 4, 5))
+    check(int(os.path.getmtime(mine)) == want and os.path.getmtime(adopted) == 1400000000 and db.get_setting("file_times_v1") == "1",
+          "restamp dates the files Sourcerer saved and leaves an adopted or edited file alone", (os.path.getmtime(mine), os.path.getmtime(adopted)))
+    # "Put in upload order": the set of times is handed out again in the listing's order; dated posts get their date
+    files = []
+    for i in range(4):
+        f = lib / ("o%d.jpg" % i)
+        f.write_bytes(b"x")
+        os.utime(f, (1600000000 + [30, 10, 40, 20][i], 1600000000 + [30, 10, 40, 20][i]))        # saved in a random order
+        files.append(f)
+    with db.connect() as con:
+        con.execute("DELETE FROM files WHERE artist_id = 7")
+        for i, f in enumerate(files):
+            con.execute("INSERT INTO files (artist_id, remote_key, path) VALUES (7, ?, ?)", ("o%d" % i, str(f)))
+    listing = [mk("o2"), mk("o0"), mk("o3"), mk("o1")]                                              # newest first
+    sync._ordered({"id": 7, "name": "Artist C"}, {1: {"looked": True, "order": listing}}, {"artist_id": 7}, set())
+    got = [os.path.getmtime(files[i]) - 1600000000 for i in (2, 0, 3, 1)]
+    check(got == [40, 30, 20, 10], "Put files in upload order: the same times, the latest on the newest listed post", got)
+    mk_dated = [mk("o2", "2022-02-02T00:00:00Z"), mk("o0", "2022-02-02T00:00:00Z"), mk("o3", "2022-01-01T00:00:00Z"), mk("o1")]
+    sync._ordered({"id": 7, "name": "Artist C"}, {1: {"looked": True, "order": mk_dated}}, {"artist_id": 7}, set())
+    d2, d0, d3 = (os.path.getmtime(files[i]) for i in (2, 0, 3))
+    check(d2 > d0 > d3 and d2 - d0 < 0.1 and int(d2) == calendar.timegm((2022, 2, 2, 0, 0, 0)), "... and a dated post's files get its date, the images of one post apart", (d2, d0, d3))
+    check(sync._long("a/b") == os.path.abspath("a/b"), "a path that is not long is left as it is")
     shutil.rmtree(root, ignore_errors=True)
 
 
