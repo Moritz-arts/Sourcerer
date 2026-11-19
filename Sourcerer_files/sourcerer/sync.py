@@ -1017,12 +1017,13 @@ def _sync_artist(artist_id, auto=False, only=None, mode=None):
     for src, _site, m in todo:
         unsettled[src["id"]].add(m.remote_key)
     net.apply_settings()
+    when = _timeline(artist_id, todo)
 
     def one(job):
         src, site, media = job
         if _cancelled(cur):
             return
-        done = _fetch(artist, src, site, media, cur)
+        done = _fetch(artist, src, site, media, cur, when.get(media.remote_key))
         settled = bool(done)
         if done is None:                           # its site rests: not tried, not counted
             failed_sources.add(src["id"])
@@ -1248,9 +1249,9 @@ def _scan(src, site, known, cur, skip=frozenset(), retry=False):
     return fresh, True, False
 
 
-def _fetch(artist, src, site, media, cur):
+def _fetch(artist, src, site, media, cur, when=None):
     """Download one file: True when it is there (or a duplicate), False when it
-    failed, None when its site rests and it was not even asked for."""
+    failed, None when its site rests and it was not even asked for. when: the time the saved file gets (_timeline); none, its post's date."""
     folder = target_folder(artist, site.LABEL)
     if _adopt(artist, src, media, folder, cur):
         return True
@@ -1294,7 +1295,7 @@ def _fetch(artist, src, site, media, cur):
         with db.connect() as con:
             if keep:
                 os.replace(part, path)
-                _stamp(path, media.posted)
+                _stamp(path, when if when is not None else media.posted)
                 for old in replaces:
                     _remove(old["path"])
                     con.execute("UPDATE files SET path = NULL WHERE id = ?", (old["id"],))
@@ -1436,11 +1437,52 @@ def _post_time(posted):
     return ts if 315532800 < ts <= time.time() else None
 
 
-def _stamp(path, posted):
-    """Give a saved file its post's date as modified time (and, on Windows, as created time). Downloads run side by side and finish
-    in any order, so the time a file was saved says nothing about which picture is newer: a file manager's "newest first" showed the
+STEP = 2.0                  # seconds between two posts of a source whose dates are not known (FAT keeps two-second times)
+_stamp_said = []            # the created time that did not take is said once
+
+
+def _timeline(artist_id, todo):
+    """remote_key -> the time each file of this run gets (_stamp). A post's own date where the site gave one; where it did not (a forum's attachments
+    in a sync) the listing's order: sources list newest first, so the posts of a run get times STEP apart with the newest on top, between the dated posts
+    around them. Downloads finish in any order, so the time a file was saved says nothing -- and TrackImage's date is the OLDER of modified and created
+    time, so both are set. A run goes above everything an earlier run gave this card (setting stamp:<card>), or its new posts would sort among the old."""
+    now = time.time()
+    groups = collections.OrderedDict()
+    for src, _site, m in todo:
+        groups.setdefault(src["id"], []).append(m)
+    times = {m.remote_key: _post_time(m.posted) for items in groups.values() for m in items}
+    undated = sum(1 for t in times.values() if t is None)
+    key = "stamp:%d" % artist_id
+    try:
+        base = max(now, float(db.get_setting(key) or 0) + STEP * undated)
+    except ValueError:
+        base = now
+    out = {}
+    for items in groups.values():
+        n, i, hi = len(items), 0, base + STEP
+        while i < n:
+            t = times[items[i].remote_key]
+            if t is not None:
+                out[items[i].remote_key], hi, i = t, t, i + 1
+                continue
+            j = i
+            while j < n and times[items[j].remote_key] is None:
+                j += 1
+            lo = times[items[j].remote_key] if j < n else None
+            step = STEP if lo is None else max(min(STEP, (hi - lo) / (j - i + 1)), 0.001)
+            for k in range(i, j):
+                out[items[k].remote_key] = hi - step * (k - i + 1)
+            i = j
+    if undated:
+        db.set_setting(key, repr(base))
+    return out
+
+
+def _stamp(path, when):
+    """Give a saved file a time as modified time (and, on Windows, as created time): when is a unix time or a post's date. Downloads run side by
+    side and finish in any order, so the time a file was saved says nothing about which picture is newer: a file manager's "newest first" showed the
     artist's latest pictures mixed in. Best effort -- a file that cannot be stamped keeps the time it was saved."""
-    ts = _post_time(posted)
+    ts = when if isinstance(when, (int, float)) else _post_time(when)
     if ts is None:
         return
     try:
@@ -1448,6 +1490,7 @@ def _stamp(path, posted):
     except OSError:
         return
     if os.name == "nt":
+        problem = None
         try:
             import ctypes
             from ctypes import wintypes
@@ -1459,14 +1502,23 @@ def _stamp(path, posted):
             k32.CloseHandle.argtypes = [wintypes.HANDLE]
             handle = k32.CreateFileW(str(path), 0x100, 3, None, 3, 0x80, None)   # FILE_WRITE_ATTRIBUTES, share read+write, OPEN_EXISTING
             if handle in (None, wintypes.HANDLE(-1).value):
-                return
-            try:
-                t = ctypes.c_ulonglong(int((ts + 11644473600) * 10_000_000))    # 100 ns since 1601
-                k32.SetFileTime(handle, ctypes.byref(t), None, None)
-            finally:
-                k32.CloseHandle(handle)
-        except Exception:
-            pass
+                problem = "the file could not be opened (error %d)" % ctypes.get_last_error()
+            else:
+                try:
+                    t = ctypes.c_ulonglong(int((ts + 11644473600) * 10_000_000))    # 100 ns since 1601
+                    if not k32.SetFileTime(handle, ctypes.byref(t), None, None):
+                        problem = "SetFileTime failed (error %d)" % ctypes.get_last_error()
+                finally:
+                    k32.CloseHandle(handle)
+            if not problem:                                           # read it back: this has never run on a real Windows machine before v0.66
+                made = getattr(os.stat(path), "st_birthtime", None) or os.stat(path).st_ctime
+                if abs(made - ts) > 2:
+                    problem = "the created time reads %.0f s off" % (made - ts)
+        except Exception as e:
+            problem = "%s: %s" % (type(e).__name__, e)
+        if problem and not _stamp_said:
+            _stamp_said.append(problem)
+            log.warning("could not set the created time of a saved file (%s); the modified time is set", problem)
 
 
 def restamp():
