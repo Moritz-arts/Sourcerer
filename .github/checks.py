@@ -12,6 +12,8 @@ Run by .github/workflows/checks.yml on every pull request, and by hand before pu
 * the sliders under the levels and the daily limits (net.py: clean_tune, _row, day_limit, server.py: /api/speed);
 * what a refused file does to a site (net.py: _refusal): one file is one refusal and it takes eight different ones in a row, a refused page or list still
   takes three;
+* what a card already has (sync.py: _saved_keys): asked for by name, a file whose folder was deleted is fetched again, one missing from a folder that is
+  still there stays deleted, a sweep and an offline library fetch nothing again; and a saved file gets its post's date (sync._stamp);
 * gallery.picture for a site with no resolver (the booru-like case the forum fix must not change).
 
 A failing check starts with FAIL and makes the exit code 1.
@@ -568,8 +570,50 @@ def gallery_checks():
     check(gallery.picture("cdn", 3, "large")[1] == files["/big.jpg"], "no large address: the url")
 
 
+# ---- what a card already has, and the date of a saved file ------------------------------------------------------------------------------------
+
+def library_checks():
+    import os
+    from sourcerer import sync
+    root = pathlib.Path(tempfile.mkdtemp(prefix="sourcerer-library-"))
+    folder = root / "Artist A"
+    folder.mkdir()
+    (folder / "kept.jpg").write_bytes(b"x")                         # saved and still there
+    (root / "Artist B").mkdir()                                     # a second artist whose folder is still there ...
+    with db.connect() as con:
+        con.execute("DELETE FROM artists")
+        con.execute("INSERT INTO artists (id, name) VALUES (1, 'Artist A')")
+        for key, path in (("a", folder / "kept.jpg"), ("b", folder / "culled.jpg"),             # b: gone from a folder that is still there
+                          ("c", root / "Gone Folder" / "c.jpg"), ("d", root / "Gone Folder" / "d.jpg"),   # the folder was deleted
+                          ("e", None)):                                                          # a duplicate that was never kept
+            con.execute("INSERT INTO files (artist_id, remote_key, path) VALUES (1, ?, ?)", (key, str(path) if path else None))
+    artist = {"id": 1, "name": "Artist A", "folder": str(folder)}
+    with db.connect() as con:
+        asked = sync._saved_keys(con, artist, restore=True)
+        swept = sync._saved_keys(con, artist, restore=False)
+        offline = sync._saved_keys(con, dict(artist, folder=str(root / "unplugged" / "Artist A")), restore=True)
+    check(asked == {"a", "b", "e"}, "asked for by name: a deleted folder's files are fetched again, a culled file and a duplicate stay known", sorted(asked))
+    check(swept == {"a", "b", "c", "d", "e"}, "a sweep never fetches what its folder lost", sorted(swept))
+    check(offline == {"a", "b", "c", "d", "e"}, "a library that is not there is no deleted artist", sorted(offline))
+    # the row of a fetched-again file points at the new place; a copy that is not kept leaves no path, so it stays known
+    with db.connect() as con:
+        sync._record(con, {"id": 1}, {"id": None}, types.SimpleNamespace(remote_key="c", post_url="", posted=""), "sha", str(folder / "c.jpg"), None, 1, 1, 1)
+        sync._record(con, {"id": 1}, {"id": None}, types.SimpleNamespace(remote_key="d", post_url="", posted=""), "sha", None, None, 1, 1, 1)
+        rows = {r[0]: r[1] for r in con.execute("SELECT remote_key, path FROM files")}
+    check(rows["c"] == str(folder / "c.jpg") and rows["d"] is None, "a file fetched again takes its row over; a copy not kept leaves no path", rows)
+    # the date of a saved file
+    target = root / "dated.jpg"
+    target.write_bytes(b"x")
+    sync._stamp(target, "2024-03-05T10:20:30Z")
+    check(int(os.path.getmtime(target)) == 1709634030, "a saved file carries its post's date", os.path.getmtime(target))
+    sync._stamp(target, "2999-01-01T00:00:00Z")
+    sync._stamp(target, "")
+    check(int(os.path.getmtime(target)) == 1709634030, "no date, or one in the future, leaves the time as it was")
+    shutil.rmtree(root, ignore_errors=True)
+
+
 def main():
-    for group in (forum_checks, tile_checks, speed_checks, refusal_checks, tune_checks, settings_checks, gallery_checks):
+    for group in (forum_checks, tile_checks, speed_checks, refusal_checks, tune_checks, settings_checks, gallery_checks, library_checks):
         print("--", group.__name__, flush=True)
         try:
             group()
