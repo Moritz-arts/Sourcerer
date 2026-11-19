@@ -3,6 +3,10 @@
 Newest first. Each entry is made from the commit subjects when a version is made, so a subject is one short,
 plain sentence.
 
+## v0.68 — 2026-11-19
+
+- Refresh all also looks at the accounts every login follows for new ones
+
 ## v0.67 — 2026-11-19
 
 - Bluesky posts are dated by when Bluesky received them, not by the date the client wrote into the record
