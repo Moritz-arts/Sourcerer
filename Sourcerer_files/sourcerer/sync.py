@@ -435,6 +435,7 @@ def scheduler():
         checking.start()
         checking.join(45)
         threading.Thread(target=backfill_avatars, daemon=True, name="avatar-addresses").start()
+        threading.Thread(target=restamp, daemon=True, name="file-times").start()
         if db.get_setting("scan_on_start") == "1":           # as Refresh: a card with auto-download downloads what it finds
             try:
                 if enqueue(auto=True):
@@ -1270,6 +1271,7 @@ def _fetch(artist, src, site, media, cur):
         with db.connect() as con:
             if keep:
                 os.replace(part, path)
+                _stamp(path, media.posted)
                 for old in replaces:
                     _remove(old["path"])
                     con.execute("UPDATE files SET path = NULL WHERE id = ?", (old["id"],))
@@ -1396,6 +1398,72 @@ def _decide(artist, src, sha, phash, width, height, size):
     if quality(width, height, size) > best:
         return True, same
     return False, []
+
+
+def _post_time(posted):
+    """The post's time as a unix timestamp, or None (no date, a date in the future, or before 1980)."""
+    try:
+        dt = datetime.datetime.fromisoformat((posted or "").replace("Z", "+00:00"))
+        ts = (dt if dt.tzinfo else dt.replace(tzinfo=datetime.timezone.utc)).timestamp()
+    except (ValueError, OverflowError, OSError):
+        return None
+    return ts if 315532800 < ts <= time.time() else None
+
+
+def _stamp(path, posted):
+    """Give a saved file its post's date as modified time (and, on Windows, as created time). Downloads run side by side and finish
+    in any order, so the time a file was saved says nothing about which picture is newer: a file manager's "newest first" showed the
+    artist's latest pictures mixed in. Best effort -- a file that cannot be stamped keeps the time it was saved."""
+    ts = _post_time(posted)
+    if ts is None:
+        return
+    try:
+        os.utime(path, (ts, ts))
+    except OSError:
+        return
+    if os.name == "nt":
+        try:
+            import ctypes
+            from ctypes import wintypes
+            k32 = ctypes.WinDLL("kernel32", use_last_error=True)      # our own handle on the DLL: argtypes here must not touch anyone else's
+            k32.CreateFileW.restype = wintypes.HANDLE
+            k32.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
+                                        wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+            k32.SetFileTime.argtypes = [wintypes.HANDLE, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+            k32.CloseHandle.argtypes = [wintypes.HANDLE]
+            handle = k32.CreateFileW(str(path), 0x100, 3, None, 3, 0x80, None)   # FILE_WRITE_ATTRIBUTES, share read+write, OPEN_EXISTING
+            if handle in (None, wintypes.HANDLE(-1).value):
+                return
+            try:
+                t = ctypes.c_ulonglong(int((ts + 11644473600) * 10_000_000))    # 100 ns since 1601
+                k32.SetFileTime(handle, ctypes.byref(t), None, None)
+            finally:
+                k32.CloseHandle(handle)
+        except Exception:
+            pass
+
+
+def restamp():
+    """Once (setting file_times_v1): files saved before v0.64 got the time they were downloaded; give them their post's."""
+    if db.get_setting("file_times_v1"):
+        return
+    done = 0
+    try:
+        with db.connect() as con:
+            rows = con.execute("SELECT path, posted FROM files WHERE path IS NOT NULL AND posted IS NOT NULL AND posted != ''").fetchall()
+        for r in rows:
+            ts = _post_time(r["posted"])
+            try:
+                if ts is not None and abs(os.path.getmtime(r["path"]) - ts) > 1:
+                    _stamp(r["path"], r["posted"])
+                    done += 1
+            except OSError:
+                continue
+        db.set_setting("file_times_v1", "1")
+        if done:
+            log.info("%d saved files were dated by their posts, so a file manager sorts them by when they were posted", done)
+    except Exception:
+        log.exception("dating saved files")
 
 
 def _remove(path):
