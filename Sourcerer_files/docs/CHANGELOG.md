@@ -3,6 +3,10 @@
 Newest first. Each entry is made from the commit subjects when a version is made, so a subject is one short,
 plain sentence.
 
+## v0.66 — 2026-11-19
+
+- Saved files get a date in the listing's order when the site gives none, so newest first matches the artist's order
+
 ## v0.65 — 2026-11-19
 
 - Download fetches an artist's files again after their folder was deleted, instead of finishing with nothing
