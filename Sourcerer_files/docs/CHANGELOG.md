@@ -3,6 +3,10 @@
 Newest first. Each entry is made from the commit subjects when a version is made, so a subject is one short,
 plain sentence.
 
+## v0.64 — 2026-11-19
+
+- Saved files get their post's date as modified and created time, so a file manager's newest first matches the artist's real order
+
 ## v0.63 — 2026-11-04
 
 - Gallery: Full shows the pictures in their own shapes again for forums, Mastodon, Misskey and boorus (their site icon no longer decides a tile's shape)
