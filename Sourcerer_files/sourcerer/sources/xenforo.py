@@ -378,6 +378,21 @@ def _tile_thumb(base, f):
     return _thumb(base, small)
 
 
+def _media(base, host, f):
+    """One media gallery item. Its file's type comes from the listing's extension (the address ends in /full, so nothing else says it): a video is
+    played by the viewer, a GIF or WebP is shown as the file itself where it moves. The tile's small picture is the forum's own thumbnail --
+    a fixed-size crop, which says nothing of the picture's shape (`crop`)."""
+    from . import Media
+    kind, small = _type_of(f.get("ext")), _tile_thumb(base, f)
+    return Media(remote_key="xenforo:%s:%s" % (host, f["id"]), url=f["url"], post_url=_post(f), thumb=small,
+                 # the title is the file name's last resort and what a tile says (the forum's own name for the file
+                 # comes with the download, and wins)
+                 posted=_when(f.get("date")), name=_title(f), mime=kind, video=kind.startswith("video/"), crop=bool(small),
+                 # The forum shows its files to members only: the gallery fetches
+                 # them through Sourcerer, with the login, and makes its own small copy.
+                 large=f["url"], preview_headers={})
+
+
 def _post(f):
     return f["url"].rsplit("/full", 1)[0] + "/" if "/full" in f["url"] else f["url"]
 
@@ -555,7 +570,19 @@ _ROUTE = re.compile(r"attachments/(?:[^/?#]*\.)?(\d+)/?(?:$|[?#])")
 _ANCHOR = re.compile(r'id="post-(\d+)"')
 _POST_TIME = re.compile(r'id="post-(\d+)"|datetime="([^"]+)"', re.I)
 _EXT = re.compile(r"\.(?=[a-z0-9]*[a-z])[a-z0-9]{2,5}$", re.I)       # "a.jpg", not "v2.5": the uploader's name, or a title with a dot
-_VIDEO = (".mp4", ".webm", ".m4v", ".mov")                          # the browser gives no content type
+_TYPES = {"gif": "image/gif", "webp": "image/webp", "apng": "image/apng", "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+          "avif": "image/avif", "bmp": "image/bmp",
+          "mp4": "video/mp4", "m4v": "video/mp4", "webm": "video/webm", "mov": "video/quicktime", "ogv": "video/ogg", "mkv": "video/x-matroska",
+          "avi": "video/x-msvideo", "wmv": "video/x-ms-wmv", "flv": "video/x-flv", "mpg": "video/mpeg", "mpeg": "video/mpeg", "3gp": "video/3gpp"}
+
+
+def _type_of(name):
+    """The content type a file's extension says ("movie.mp4", or just "mp4"), "" when it says nothing: the listing gives no type, and a video
+    or an animated picture must be told from a still one before anything is fetched."""
+    name = str(name or "").strip().lower().rsplit("/", 1)[-1]
+    return _TYPES.get(name.rsplit(".", 1)[-1] if "." in name else name, "")
+
+
 _gallery_route = {}            # host -> whether its media gallery exists (only what was settled is kept)
 _public_hosts = {}             # host -> whether it is a public one (net.public_https), for the run
 
@@ -758,7 +785,7 @@ def _attachment_media(base, root, host, tile, post):
     # `url` is what the data id would be as an attachment id: the address resolve() starts from, and a wrong file where the two differ.
     url, (name, filename) = "%sattachments/%s/" % (root, data_id), _name(alt, data_id)
     return Media(remote_key="xenforo:%s:a%s" % (host, data_id), url=url, large=url, name=name, filename=filename,
-                 post_url=post["url"], posted=_when(post["date"]), thumb=_thumb(base, thumb), video=alt.lower().endswith(_VIDEO),
+                 post_url=post["url"], posted=_when(post["date"]), thumb=_thumb(base, thumb), mime=_type_of(alt), video=_type_of(alt).startswith("video/"),
                  # the forum shows its files to members only: the gallery fetches even the small copies through Sourcerer, with the login
                  preview_headers={})
 
@@ -847,13 +874,5 @@ def pages(url):
         last = ids[-1] if ids else last
         _fill_dates(host, batch, ordered)
         base = _base(url)
-        yield [Media(remote_key="xenforo:%s:%s" % (host, f["id"]), url=f["url"],
-                     post_url=_post(f), thumb=_tile_thumb(base, f),
-                     # the title is the file name's last resort and what a tile says (the forum's own name for the file
-                     # comes with the download, and wins)
-                     posted=_when(f.get("date")), name=_title(f),
-                     # The forum shows its files to members only: the gallery fetches
-                     # them through Sourcerer, with the login, and makes its own small copy.
-                     large=f["url"], preview_headers={})
-               for f in batch]
+        yield [_media(base, host, f) for f in batch]
         base = _base(url)

@@ -1452,7 +1452,7 @@ function viewItem(i) {
   var small = $("gal-grid").querySelector('.gal-tile[data-i="' + i + '"] img');
   small = small && small.complete && small.naturalWidth && small.currentSrc !== it.large ? small.currentSrc : "";
   $("gal-stage").innerHTML = it.video
-    ? '<video controls autoplay loop src="' + esc(it.large) + '"' + (it.thumb ? ' poster="' + esc(it.thumb) + '"' : "") + "></video>"
+    ? '<video controls autoplay loop playsinline src="' + esc(it.large) + '"' + (it.thumb ? ' poster="' + esc(it.thumb) + '"' : "") + "></video>"
     : (small ? '<img class="gal-ph" referrerpolicy="no-referrer" src="' + esc(small) + '" alt="">' : "") +
       '<img referrerpolicy="no-referrer"' + (small ? ' class="gal-big"' : "") + ' src="' + esc(it.large || it.thumb) + '" alt="">';
   var img = $("gal-stage").querySelector("img:last-child");
@@ -1462,14 +1462,27 @@ function viewItem(i) {
     img.onload = function () {
       if (!img.isConnected) return;                // the view moved on: not this item's stand-in any more
       var ph = $("gal-stage").querySelector(".gal-ph"); if (ph) ph.remove(); img.classList.remove("gal-big");
+      if (it.crop && img.naturalWidth && G && G.items[i] === it)           // the whole picture is known now: it tells its tile's shape (a crop could not)
+        galShape($("gal-grid").querySelector('.gal-tile[data-i="' + i + '"]'), img.naturalWidth, img.naturalHeight);
       galPrefetch(i);
     };
     img.onerror = function () {
       if (!img.isConnected) return;
-      if (next.length) img.src = next.shift();
-      else { img.onerror = null; if (small) img.remove(); }
+      if (next.length) return void (img.src = next.shift());
+      img.onerror = null;
+      // Nothing left that shows as a picture: a file the listing did not know for a video (no extension, no type) plays as one, else it is said.
+      if (!it.video && it.large && !small) {
+        var v = document.createElement("video");
+        v.controls = v.autoplay = v.loop = true; v.playsInline = true; v.src = it.large;
+        if (it.thumb) v.poster = it.thumb;
+        v.onerror = function () { galUnplayable(it); };
+        img.replaceWith(v);
+      } else if (small) img.remove();
+      else galUnplayable(it);
     };
   }
+  var vid = $("gal-stage").querySelector("video");
+  if (vid) vid.onerror = function () { galUnplayable(it); };
   // Top left the site's mark; bottom left who it is -- picture and name -- and what is known of the file.
   $("gal-source").innerHTML = siteLogo(it.source, it.kind, it.host) || '<b>' + esc(it.source) + "</b>";
   $("gal-source").title = it.source;
@@ -1480,6 +1493,11 @@ function viewItem(i) {
   $("gal-view").classList.remove("hidden");
   // Near the end of what is listed: the next page, before it is needed.
   if (i > G.items.length - 8) moreGallery();
+}
+
+// A file this window cannot show or play (a codec the web view lacks, a forum that refused it): said once, with the way out -- the post itself.
+function galUnplayable(it) {
+  toast("This file cannot be shown here" + (it.post ? " - press O to open its post." : "."), true);
 }
 
 function galInfoLine(i) {
@@ -1926,6 +1944,7 @@ function galSharpen() {
   var dpr = window.devicePixelRatio || 1;
   Array.prototype.forEach.call($("gal-grid").children, function (tile) {
     var img = tile.firstElementChild, it = G.items[+tile.dataset.i];
+    if (it && it.crop && S.brFit === "full") galWhole(tile, it, img);
     if (!it || !it.mid || tile.dataset.sharp || tile.classList.contains("hidden")) return;
     if (!img || img.tagName !== "IMG" || !img.complete || !img.naturalWidth) return;          // its own picture first
     if (tile.clientWidth * dpr <= img.naturalWidth * 1.2 || (it.w && it.w <= img.naturalWidth * 1.05)) return;
@@ -1937,6 +1956,29 @@ function galSharpen() {
     img.after(big);
     galNear.observe(big);
   });
+}
+
+// A forum's media gallery hands out its small pictures as fixed-size CROPS: in Squares that is what the tile shows anyway, but Full lays a tile out
+// in the picture's own shape, and a crop stretched into it is "zoomed in" (and says nothing of the shape). So in Full the whole picture is laid over
+// the crop (item.whole: the original, which the viewer needs next anyway and the server keeps in memory), and it is what tells the tile's shape.
+function galWhole(tile, it, img) {
+  if (tile.dataset.whole || tile.classList.contains("hidden") || !it.whole) return;
+  if (!img || img.tagName !== "IMG" || !img.complete || !img.naturalWidth) return;          // its own (small) picture first
+  tile.dataset.whole = "1";
+  var big = document.createElement("img");
+  big.className = "sharp whole"; big.alt = ""; big.decoding = "async"; big.referrerPolicy = "no-referrer";
+  big.dataset.lazy = it.whole;
+  big.addEventListener("load", function () { big.classList.add("in"); });
+  img.after(big);
+  galNear.observe(big);
+}
+// A picture that is known whole tells its tile's shape; the rows follow a moment later.
+function galShape(tile, w, h) {
+  if (!tile || !(w > 0 && h > 0)) return;
+  var ar = String(galRatio(w, h));
+  if (tile.dataset.ar === ar) return;
+  tile.dataset.ar = ar;
+  if (S.brFit === "full") galLayoutSoon(150);
 }
 
 function galLayout() {
@@ -1973,9 +2015,12 @@ new ResizeObserver(function () { if (S.brFit === "full") galLayoutSoon(60); }).o
 $("gal-grid").addEventListener("load", function (e) {
   var img = e.target, tile = img.tagName === "IMG" && img.closest(".gal-tile");
   if (tile && !img.classList.contains("sharp")) galSharpenSoon();
+  if (tile && img.classList.contains("whole")) return void galShape(tile, img.naturalWidth, img.naturalHeight);
   // Only the tile's own picture tells its shape. A Mastodon server's, a forum's or a booru's icon (64 px, square) sits in the tile too and
   // loads long before a proxied thumbnail: it was heard first, every tile of such a site stayed square and Full looked like Squares.
   if (!tile || img.parentNode !== tile || img.classList.contains("sharp") || tile.dataset.ar || !img.naturalWidth) return;
+  var own = G && G.items[+tile.dataset.i];
+  if (own && own.crop) return;                                           // a crop of a forum's media gallery: the whole picture tells the shape (galWhole)
   tile.dataset.ar = galRatio(img.naturalWidth, img.naturalHeight);
   if (S.brFit === "full") galLayoutSoon(150);
   else galSharpenSoon();

@@ -822,6 +822,22 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   again fetches neither the page nor the wrong original again) and otherwise raises: the viewer keeps the small copy and a sync fails the file. Checked by `.github/checks.py`
   against a made-up forum whose numbers differ; **not seen on a real forum** (the data-id naming is from XenForo's source, not from the user's forum).
   A thread's attachments still go through gallery-dl.
+- **A forum's clips, animated WebPs and cropped thumbnails** (v0.69; `xenforo._media`, `Media.crop`, `net.fetch_picture` / `net.sniff`, `gallery.picture`
+  "whole", `server.gallery_picture`, `galWhole` / `galShape` in app.js): "some WebP/video from the forums work, some do not; thumbnails are zoomed in" was six
+  causes. (1) **A media-gallery item's address ends in `/full`**, so nothing told a clip from a picture: `video` / `mime` come from the listing's extension
+  (`xenforo._type_of`, a table; an attachment's from its file name) and a file nobody called a video that turns out to be one is judged by its bytes. (2) **A
+  server's type table may not know WebP or WebM and answers `application/octet-stream`** (`fetch_picture` refused it: "sent no picture"): a generic answer is
+  accepted and named by `net.sniff` (the first bytes), anything else still refused. (3) **`fetch_picture`'s 40 MB cap** ("file too large") was a picture's limit
+  applied to clips: videos are held to `video_limit` (300 MB) and kept in memory apart (`VIDEO_MEMORY`, `_cached_video`) so one clip does not push every
+  thumbnail out. (4) **No HTTP Range**: a `<video>` asks for ranges and some engines do not start without them -- the proxy answers 206 from the bytes
+  (`make_conditional`); the library's file route already did. (5) **A video with no poster was served to the tile as its picture** (the clip itself as an
+  `<img>`): its tile has no picture (`thumb` is "" in `item()`, the grid shows the play icon) and the server answers `gallery.NoPicture` with a quiet 404.
+  (6) **The forum's thumbnail is a fixed-size CROP** (square) of the picture: Full mode learned a square from it and stretched the crop into the real shape --
+  "zoomed in". A crop says nothing of the shape: the tile ignores its load (`own.crop`), in Full the whole picture is laid over it (`item.whole`, size `whole`
+  = the original, the one the viewer needs next anyway and the cache already holds), and that tells the tile's shape (`galShape`; the viewer's load corrects it
+  too). Squares keeps the crop (it is what a square shows anyway). A WebP / APNG with no small copy is shown as the file when it moves (`imaging.animated`),
+  else a small picture is made as before. The viewer's last resort for a picture that will not load is a `<video>`, and a file that cannot be shown says so
+  (`galUnplayable`). Checked by `.github/checks.py` (`media_checks`) against made-up files; **not seen on a real forum**.
 - **A Misskey looks like a Mastodon in the address** (`https://misskey.io/@user`) **and answers nothing a
   Mastodon client asks** (404 on `/api/v1/...`): Baraag's follow list names such accounts, and they were
   cards that never worked. `sources/misskey.py` has the whole API (POST + JSON, also what only reads:

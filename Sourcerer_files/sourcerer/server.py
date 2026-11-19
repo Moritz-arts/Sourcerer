@@ -921,18 +921,19 @@ def gallery_progress():
 @app.get("/api/gallery/<gallery_id>/<int:number>/<size>")
 def gallery_picture(gallery_id, number, size):
     _own_page()
-    if size not in ("thumb", "mid", "large"):
+    if size not in ("thumb", "mid", "large", "whole"):
         abort(404)
     try:
         ctype, data = gallery.picture(gallery_id, number, size)
-    except KeyError:
-        abort(404)
+    except (KeyError, gallery.NoPicture):
+        abort(404)                                  # (a video with no poster: the tile keeps its placeholder, nothing to log)
     except Exception as e:
         log.info("gallery picture: %s", net.reason(e))
         abort(502)
     resp = app.response_class(data, mimetype=ctype)
     resp.headers["Cache-Control"] = "no-store"     # in Sourcerer's memory only, not the web view's cache
-    return resp
+    # A <video> asks for its file in ranges (and cannot seek or, in some engines, start without them): answer 206 from the bytes in memory.
+    return resp.make_conditional(request, accept_ranges=True, complete_length=len(data))
 
 
 @app.get("/api/overview")
