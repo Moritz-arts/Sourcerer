@@ -1404,6 +1404,11 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   refresh token; a dead one is an expired login, not a reason to log in
   again. Renew by the token's own lifetime (exp - iat from when it came),
   not the computer's clock, and once more on `ExpiredToken`.
+- **A saved file's modified time is its post's date** (v0.64, `sync._stamp`, `restamp`): downloads run side by side and finish in any
+  order, so the save time said nothing about which picture was newer and "newest first" in a file manager mixed an artist's latest pictures
+  in. `_fetch` stamps right after `os.replace` (`os.utime`; on Windows the created time too, through an own `WinDLL` handle -- no shared
+  `argtypes`), a post with no date or one in the future keeps the save time, adopted files are left as they are, and `restamp` fixes the
+  older files once at start (setting `file_times_v1`). The page's own sort (`posted`) was never affected.
 - **A file already there is never downloaded again** (`sync._adopt`): the
   `archive` table keeps what deleted cards had, and a file under its own name
   in the card's folder (`_local_names`, `Media.local`) is taken over.
