@@ -713,6 +713,10 @@ def start_sync():
     order = [i for i in body.get("order") or [] if isinstance(i, int)] if ids is None else None
     # No artist: Refresh all -- every card, in the order the list shows them (sync.enqueue).
     # (a download asked for without an artist is the cards that download, as ever: only a plain Refresh all reaches the rest)
+    if ids is None and mode is None:
+        # ... and the accounts every login follows are looked at too, for new ones (the cheap lists at once; X's, Fanbox's and Fantia's keep their
+        # minimum between two looks: a whole list read on every press would be an account's day). One card's Refresh reads that card and its sources only.
+        follows.look_async()
     return jsonify(added=sync.enqueue(ids, only=only, mode=mode, everyone=ids is None and mode is None, order=order))
 
 
