@@ -1404,11 +1404,17 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   refresh token; a dead one is an expired login, not a reason to log in
   again. Renew by the token's own lifetime (exp - iat from when it came),
   not the computer's clock, and once more on `ExpiredToken`.
-- **A saved file's modified time is its post's date** (v0.64, `sync._stamp`, `restamp`): downloads run side by side and finish in any
-  order, so the save time said nothing about which picture was newer and "newest first" in a file manager mixed an artist's latest pictures
-  in. `_fetch` stamps right after `os.replace` (`os.utime`; on Windows the created time too, through an own `WinDLL` handle -- no shared
-  `argtypes`), a post with no date or one in the future keeps the save time, adopted files are left as they are, and `restamp` fixes the
-  older files once at start (setting `file_times_v1`). The page's own sort (`posted`) was never affected.
+- **A saved file's time is its post's date -- or its place in the listing** (v0.64 `sync._stamp`, v0.66 `sync._timeline`): downloads run side by side and
+  finish in any order, so the save time said nothing about which picture was newer and "newest first" in a file manager (or TrackImage) mixed an artist's
+  latest pictures in. **TrackImage's date is the OLDER of modified and created time** (`media.get_file_date`: mtime, birthtime, and on Windows ctime), so
+  `_stamp` sets both (`os.utime`; on Windows the created time through an own `WinDLL` handle -- no shared `argtypes` -- read back, and said once in the log
+  when it did not take). v0.64 only used `Media.posted`, and a forum's files have none in a sync (the attachment browser dates only where somebody waits,
+  and the gallery's list-page dates are checked only against made-up markup): the user's log had no "saved files were dated" line, nothing changed.
+  `_timeline` gives every file of a run its time before the downloads start: the post's date where there is one, else the listing's order (sources list
+  newest first): STEP (2 s) apart, newest on top, between the dated posts around it, and above what earlier runs gave the card (setting `stamp:<card>`).
+  A post with a date in the future, adopted files and files saved before v0.66 without a date keep their time (delete the folder and press Download to
+  fetch them again in order); a failed file retried later lands on top. `restamp` (setting `file_times_v1`) dated the older files with a post date once.
+  Checked by `.github/checks.py` (`library_checks`).
 - **A deleted artist folder is fetched again, a deleted file is not** (v0.65, `sync._saved_keys`): every post in `files` was "known" whether its
   file was still on disk or not, so after the user deleted a card's folder Download said "Checking 1 source ... Finished" with nothing new and made no
   folder (the user's log, 2026-11-19: `Checking` -> `Finished` in 1-6 s, three times). A card **asked for by name** (`not auto`: Refresh, Download, the

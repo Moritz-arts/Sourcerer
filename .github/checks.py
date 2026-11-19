@@ -13,7 +13,8 @@ Run by .github/workflows/checks.yml on every pull request, and by hand before pu
 * what a refused file does to a site (net.py: _refusal): one file is one refusal and it takes eight different ones in a row, a refused page or list still
   takes three;
 * what a card already has (sync.py: _saved_keys): asked for by name, a file whose folder was deleted is fetched again, one missing from a folder that is
-  still there stays deleted, a sweep and an offline library fetch nothing again; and a saved file gets its post's date (sync._stamp);
+  still there stays deleted, a sweep and an offline library fetch nothing again; a saved file gets its post's date, and where the site gave none the
+  listing's order, newest on top and above what earlier runs gave the card (sync._stamp, _timeline);
 * gallery.picture for a site with no resolver (the booru-like case the forum fix must not change).
 
 A failing check starts with FAIL and makes the exit code 1.
@@ -609,6 +610,29 @@ def library_checks():
     sync._stamp(target, "2999-01-01T00:00:00Z")
     sync._stamp(target, "")
     check(int(os.path.getmtime(target)) == 1709634030, "no date, or one in the future, leaves the time as it was")
+    # the time of files whose posts have no date: the listing's order, newest first, above what an earlier run gave
+    def run(card, *dates):
+        todo = [({"id": 1}, None, types.SimpleNamespace(remote_key="%s-%d" % (card, i), posted=d)) for i, d in enumerate(dates)]
+        got = sync._timeline(card, todo)
+        return [round(got["%s-%d" % (card, i)], 3) for i in range(len(dates))]
+    with db.connect() as con:
+        con.execute("DELETE FROM settings WHERE key LIKE 'stamp:%'")
+    first = run(7, "", "", "", "", "")
+    check(all(a > b for a, b in zip(first, first[1:])) and abs(first[0] - time.time()) < 5 and abs(first[0] - first[1] - sync.STEP) < 0.01,
+          "undated posts: the newest on top, STEP apart, the first of them now", first)
+    second = run(7, "", "", "")
+    check(min(second) > max(first) and all(a > b for a, b in zip(second, second[1:])), "a later run's posts are all above the earlier run's", (second, first))
+    third = run(7, "", "")
+    check(min(third) > max(second), "and so is the next, even a minute later", (third, second))
+    old = 1709634030.0
+    mixed = run(8, "", "2024-03-05T10:20:30Z", "", "")
+    check(mixed[1] == old and mixed[0] > old and mixed[2] == old - sync.STEP and mixed[3] == old - 2 * sync.STEP,
+          "undated posts sit between their dated neighbours in the listing's order", mixed)
+    tight = run(9, "2024-03-05T10:20:33Z", "", "", "2024-03-05T10:20:30Z")
+    check(tight[0] > tight[1] > tight[2] > tight[3], "and squeezed in when the neighbours are close together", tight)
+    target.write_bytes(b"x")
+    sync._stamp(target, 1000000000.0)
+    check(int(os.path.getmtime(target)) == 1000000000, "a time as a number goes on the file as it is")
     shutil.rmtree(root, ignore_errors=True)
 
 
