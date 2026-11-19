@@ -36,7 +36,7 @@ class Media:
     remote_key: str      # unique per artist and file -- never downloaded twice
     url: str             # the original file, not a preview
     post_url: str
-    posted: str          # ISO date the post was made
+    posted: str          # ISO date the SOURCE published it (upload / post date) -- never when the work was made: it dates the saved file and sorts the gallery
     name: str            # short id, the file name's last resort
     mime: str = ""       # content type when the site states it
     filename: str = ""   # the file's own name on the site, when it has one

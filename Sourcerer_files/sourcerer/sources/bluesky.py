@@ -331,7 +331,8 @@ def pages(url):
                     url="%s/xrpc/com.atproto.sync.getBlob?%s" % (
                         pds, urllib.parse.urlencode({"did": did, "cid": cid})),
                     post_url="https://bsky.app/profile/%s/post/%s" % (did, rkey),
-                    posted=record.get("createdAt") or post.get("indexedAt") or "",
+                    # When Bluesky received it, not the record's createdAt: that is the client's word, and a post imported from elsewhere carries its old date.
+                    posted=post.get("indexedAt") or record.get("createdAt") or "",
                     # Bluesky keeps no file names; the blob's id stands in for one.
                     name=cid[-16:], mime=mime, filename=cid,
                     thumb=view.get("thumb") or view.get("thumbnail") or "",

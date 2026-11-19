@@ -1404,6 +1404,11 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   refresh token; a dead one is an expired login, not a reason to log in
   again. Renew by the token's own lifetime (exp - iat from when it came),
   not the computer's clock, and once more on `ExpiredToken`.
+- **`Media.posted` is the day the SOURCE published it, never when the work was made** (the user's rule, 2026-11-19: a picture drawn three years ago and uploaded
+  tomorrow is dated tomorrow). Every site gives its own post / upload time (pixiv `createDate`, Mastodon / Misskey `created_at`, Patreon `published_at`,
+  a booru's `created_at`, gallery-dl's `date` for X, Fanbox, Fantia and forums, Bluesky `indexedAt` -- not the record's `createdAt`, which is the client's word and
+  keeps the old date of an imported post). Nothing reads an image's EXIF or the file's own dates; a new site must hand out the site's time, and one that gives none
+  leaves `posted` empty (the run's listing order dates it, below).
 - **A saved file's time is its post's date -- or its place in the listing** (v0.64 `sync._stamp`, v0.66 `sync._timeline`): downloads run side by side and
   finish in any order, so the save time said nothing about which picture was newer and "newest first" in a file manager (or TrackImage) mixed an artist's
   latest pictures in. **TrackImage's date is the OLDER of modified and created time** (`media.get_file_date`: mtime, birthtime, and on Windows ctime), so
