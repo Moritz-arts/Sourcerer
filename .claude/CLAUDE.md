@@ -474,8 +474,9 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   over) is read again only up to its first page of known accounts -- the newest follows come first. A
   list ends where the site says (Bluesky's cursor, pixiv's total, no Link header), never on an empty
   page, and every walk has a page cap. Needs the setting `import_follows`; started after a login
-  (`accounts.CHANGED`), 90-150 s after start (once the account check marked expired logins) and every
-  10-14 h.
+  (`accounts.CHANGED`), 90-150 s after start (once the account check marked expired logins), every
+  10-14 h and **at Refresh all** (v0.68, `server.start_sync` with no artist and no mode: `follows.look_async()` with no `only`, so the cheap lists are read at
+  once and X, Fanbox and Fantia keep their `FOLLOWS_HOURS` minimum; a card's own Refresh never reads a follow list, and the automatic sync does not either).
 - **The same artist on several sites is one card, automatically** (`follows._Twins`, `follows.combine`): an account that
   comes in with a followed list joins the card of the same artist when that card has no source on the same site; after every
   look (a login, the start, every 10-14 h) the *listed* cards that are twins of another card are merged into it

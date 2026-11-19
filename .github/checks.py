@@ -16,6 +16,7 @@ Run by .github/workflows/checks.yml on every pull request, and by hand before pu
   still there stays deleted, a sweep and an offline library fetch nothing again; a saved file gets its post's date, and where the site gave none the
   listing's order among the posts around it (a cut-off run carries on below what it saved, a file fetched again gets its old time), the images of one post
   apart; restamp and "Put files in upload order" (sync._stamp, _timeline, _ordered, restamp);
+* Refresh all also looks at the accounts every login follows (server.py: start_sync -> follows.look_async), one card's Refresh and a download do not;
 * gallery.picture for a site with no resolver (the booru-like case the forum fix must not change).
 
 A failing check starts with FAIL and makes the exit code 1.
@@ -714,8 +715,32 @@ def library_checks():
     shutil.rmtree(root, ignore_errors=True)
 
 
+def refresh_checks():
+    from sourcerer import follows, sync
+    calls = []
+    real = follows.look_async, sync.enqueue
+    follows.look_async = lambda only=None: calls.append(("follows", only))
+    sync.enqueue = lambda *a, **k: calls.append(("enqueue", k.get("mode"))) or 0
+    try:
+        client = server.app.test_client()
+
+        def asked(body):
+            calls.clear()
+            status = client.post("/api/sync", json=body).status_code
+            return status, [c[0] for c in calls]
+        everyone = asked({"order": [1, 2]})
+        one = asked({"artist_id": 1})
+        download = asked({"mode": "download"})
+        arranged = asked({"artist_id": 1, "mode": "order"})
+    finally:
+        follows.look_async, sync.enqueue = real
+    check(everyone == (200, ["follows", "enqueue"]), "Refresh all also looks at the accounts every login follows", everyone)
+    check(one == (200, ["enqueue"]) and arranged == (200, ["enqueue"]), "one card's Refresh reads that card and its sources only", (one, arranged))
+    check(download == (200, ["enqueue"]), "a download of the cards that download reads no follow list", download)
+
+
 def main():
-    for group in (forum_checks, tile_checks, speed_checks, refusal_checks, tune_checks, settings_checks, gallery_checks, library_checks):
+    for group in (forum_checks, tile_checks, speed_checks, refusal_checks, tune_checks, settings_checks, gallery_checks, library_checks, refresh_checks):
         print("--", group.__name__, flush=True)
         try:
             group()
