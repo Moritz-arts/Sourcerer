@@ -24,6 +24,7 @@ Byte-identical files are kept once unless the choice is keep_all. Pictures
 are compared only across sources: two similar posts on one site are usually
 two versions the artist meant to post.
 """
+import calendar
 import collections
 import datetime
 import glob
@@ -884,11 +885,12 @@ def _sync_artist(artist_id, auto=False, only=None, mode=None):
         # No mode asked for: a card with auto-download downloads what it finds, any other only looks.
         download = (mode or ("download" if artist["auto_download"] else "refresh")) == "download"
         scanning = mode == "scan"
+        ordering = mode == "order"          # (walk every page and put the saved files in the listing's order: no download)
         rows = con.execute("SELECT * FROM sources WHERE artist_id = ? ORDER BY id",
                            (artist_id,)).fetchall()
         # (a scan compares with the last look, not the library: a big card's keys are not read for nothing)
-        known = set() if scanning else _saved_keys(con, artist, restore=not auto)
-        held = [] if scanning else con.execute("SELECT remote_key, count FROM failures WHERE artist_id = ?",
+        known = set() if scanning or ordering else _saved_keys(con, artist, restore=not auto)
+        held = [] if scanning or ordering else con.execute("SELECT remote_key, count FROM failures WHERE artist_id = ?",
                                                (artist_id,)).fetchall()
     # A site that skips what is saved by a work's first page (pixiv) must still list a work
     # whose other pages are unfinished -- and not one given up on, which would be listed on
@@ -904,7 +906,7 @@ def _sync_artist(artist_id, auto=False, only=None, mode=None):
     cur = {"artist_id": artist_id, "name": artist["name"], "phase": "scan", "done": 0, "total": 0,
            "first": any(not s["complete"] for s in srcs), "new": 0, "duplicates": 0,
            "failed": 0, "existing": 0, "file": "", "size": 0, "found": 0,
-           "mode": "download" if download else "scan" if scanning else "refresh"}
+           "mode": "download" if download else "scan" if scanning else "order" if ordering else "refresh"}
     with _lock:
         _running[artist_id] = cur
         if len(_running) == 1:
@@ -929,7 +931,7 @@ def _sync_artist(artist_id, auto=False, only=None, mode=None):
         login = login if login and accounts.logged_in(login) else None
         careful = bool(login) and accounts.careful(login)      # only a cookie login is spaced out: see accounts.careful
         stamp = accounts.saved(login) if login else None
-        out = {"fresh": [], "walked": None, "looked": False, "careful": None, "site": site}
+        out = {"fresh": [], "walked": None, "looked": False, "careful": None, "site": site, "order": []}
         error = level = None
         rest = net.paused(src["url"])
         if rest:                                  # not even one request: the site said stop
@@ -947,8 +949,10 @@ def _sync_artist(artist_id, auto=False, only=None, mode=None):
                 _space_out(where, artist_id, focused)
                 out["careful"] = where
             try:
-                if download:
-                    fresh, out["walked"], capped = _scan(src, site, known, cur, skip, bool(pending))
+                if ordering and getattr(site, "MAX_NEW", 0):
+                    return None                       # (a site whose posts all carry their date: the files have it already)
+                if download or ordering:
+                    fresh, out["walked"], capped, out["order"] = _scan(src, site, known, cur, skip, bool(pending))
                 elif scanning:
                     fresh, capped = _peek(src, site, cur), False
                 else:
@@ -1007,6 +1011,8 @@ def _sync_artist(artist_id, auto=False, only=None, mode=None):
 
     if scanning:
         return _peeked(artist, todo, cur, logins, looked)
+    if ordering:
+        return _ordered(artist, {sid: out for sid, out in results.items() if out}, cur, logins)
     if not download:
         return _looked(artist, todo, cur, logins, looked)
     with _lock:
@@ -1017,13 +1023,13 @@ def _sync_artist(artist_id, auto=False, only=None, mode=None):
     for src, _site, m in todo:
         unsettled[src["id"]].add(m.remote_key)
     net.apply_settings()
-    when = _timeline(artist_id, todo)
+    when = _timeline(artist_id, todo, {sid: out["order"] for sid, out in results.items() if out})
 
     def one(job):
         src, site, media = job
         if _cancelled(cur):
             return
-        done = _fetch(artist, src, site, media, cur, when.get(media.remote_key))
+        done = _fetch(artist, src, site, media, cur, when.get((src["id"], media.remote_key)))
         settled = bool(done)
         if done is None:                           # its site rests: not tried, not counted
             failed_sources.add(src["id"])
@@ -1115,6 +1121,45 @@ def _peeked(artist, todo, cur, logins, looked):
     elif todo:
         event("info", "%d new post%s online since the last look" % (len(todo), "" if len(todo) == 1 else "s"), artist,
               new=len(todo))
+
+
+def _ordered(artist, results, cur, logins):
+    """The end of a walk that puts the saved files in the listing's order ("Put in upload order"): files saved before the order was kept have the
+    times they were downloaded at, in whatever order the downloads finished. The files of a source whose posts carry no date keep the set of times
+    they have -- handed out again, the latest to the newest listed post -- and a dated post's files get its date (the images of one post a few
+    milliseconds apart, as _apart does). Nothing is downloaded and no file leaves its folder; the walk is the cost (one request a page)."""
+    artist_id = artist["id"]
+    for where in logins:
+        _used[where] = (artist_id, time.monotonic())
+    with db.connect() as con:
+        rows = {r["remote_key"]: r for r in con.execute("SELECT id, remote_key, path FROM files WHERE artist_id = ?", (artist_id,))}
+    marks, files = [], 0
+    for out in results.values():
+        if not out.get("looked"):
+            continue
+        saved = []                                       # (post, its row, the file's time now), the listing's order
+        for m in out["order"]:
+            r = rows.get(m.remote_key)
+            try:
+                if r is not None and r["path"]:
+                    saved.append((m, r, os.path.getmtime(r["path"])))
+            except OSError:
+                continue
+        dated = _apart([_post_time(m.posted) for m, _r, _t in saved])
+        spare = iter(sorted((t for (_m, _r, t), d in zip(saved, dated) if d is None), reverse=True))
+        for (m, r, now), d in zip(saved, dated):
+            files += 1
+            want = d if d is not None else next(spare)
+            if abs(want - now) > 0.5 and not _cancelled(cur):
+                got = _stamp(r["path"], want)
+                if got is not None:
+                    marks.append((got, r["id"]))
+    with db.connect() as con:
+        con.executemany("UPDATE files SET stamp = ? WHERE id = ?", marks)
+    if _cancelled(cur):
+        event("cancelled", "Cancelled", artist)
+    else:
+        event("done", "%d of %d saved files put in upload order" % (len(marks), files), artist, new=len(marks))
 
 
 def _glance(src, site, known, cur):
@@ -1214,13 +1259,14 @@ def _walk_again(src, site):
 
 def _scan(src, site, known, cur, skip=frozenset(), retry=False):
     """What this source has that is new: (media newest first, walked-to-the-end
-    flag, stopped-at-a-cap flag). skip: what a site that can skip what is known
+    flag, stopped-at-a-cap flag, the listing as it was walked, known posts too: _timeline places the new ones among them). skip: what a site that can skip what is known
     without asking for it (pixiv's chunks) may leave out; retry: some file is
     unfinished, so such a site walks on instead of stopping at the first known page."""
-    fresh, seen = [], set()
+    fresh, seen, order = [], set(), []
     skips = getattr(site, "SKIPS_KNOWN", False)
     listing = site.pages(src["url"], skip) if skips else site.pages(src["url"])
     for number, page in enumerate(listing, 1):
+        order += page
         if number == 1 and not skips:        # (a site that skips what is saved lists only part of its first page)
             snapshots.save(src["id"], page)
         new = [m for m in page if m.remote_key not in known and m.remote_key not in seen]
@@ -1235,18 +1281,18 @@ def _scan(src, site, known, cur, skip=frozenset(), retry=False):
             event("info", "%s: %d new files this time; the next sync fetches more." % (site.LABEL, cap))
             if skips:                      # a work cut in two must be listed again
                 _held(src["artist_id"], [m.remote_key for m in fresh[cap:]])
-            return fresh[:cap], False, True
+            return fresh[:cap], False, True, order
         # Newest first: once a page holds something already seen, everything
         # older was seen too -- but only after one sync has gone all the way.
         if src["complete"] and len(new) < len(page) and not (skips and retry) and not _walk_again(src, site):
-            return fresh, True, False
+            return fresh, True, False, order
         if number >= MAX_PAGES:
             event("info", "%s: stopped after %d pages; the next sync carries on." % (
                 site.LABEL, number))
-            return fresh, False, True
+            return fresh, False, True, order
         if _cancelled(cur):
-            return fresh, False, False
-    return fresh, True, False
+            return fresh, False, False, order
+    return fresh, True, False, order
 
 
 def _fetch(artist, src, site, media, cur, when=None):
@@ -1295,7 +1341,7 @@ def _fetch(artist, src, site, media, cur, when=None):
         with db.connect() as con:
             if keep:
                 os.replace(part, path)
-                _stamp(path, when if when is not None else media.posted)
+                stamped = _stamp(path, when if when is not None else media.posted)
                 for old in replaces:
                     _remove(old["path"])
                     con.execute("UPDATE files SET path = NULL WHERE id = ?", (old["id"],))
@@ -1305,24 +1351,24 @@ def _fetch(artist, src, site, media, cur, when=None):
                 part.unlink(missing_ok=True)
                 with _lock:
                     cur["duplicates"] += 1
-            _record(con, artist, src, media, sha, str(path) if keep else None, phash, width, height, size)
+            _record(con, artist, src, media, sha, str(path) if keep else None, phash, width, height, size, stamped if keep else None)
     return True
 
 
-def _record(con, artist, src, media, sha, path, phash, width, height, size):
+def _record(con, artist, src, media, sha, path, phash, width, height, size, stamp=None):
     """The file's row. One that exists keeps its place -- unless its file is gone (the user deleted it and downloaded it again,
     maybe under another name): then it points at the new one, or the picture would stay "not downloaded"."""
     old = con.execute("SELECT id, path FROM files WHERE artist_id = ? AND remote_key = ?",
                       (artist["id"], media.remote_key)).fetchone()
     if old is None:
         con.execute("INSERT INTO files (artist_id, source_id, remote_key, sha256, path, post_url, posted, phash, "
-                    "width, height, size) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "width, height, size, stamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (artist["id"], src["id"], media.remote_key, sha, path, media.post_url, media.posted,
-                     phash, width, height, size))
+                     phash, width, height, size, stamp))
     elif not (old["path"] and os.path.isfile(old["path"])):
         if path:
-            con.execute("UPDATE files SET source_id = ?, sha256 = ?, path = ?, phash = ?, width = ?, height = ?, size = ? "
-                        "WHERE id = ?", (src["id"], sha, path, phash, width, height, size, old["id"]))
+            con.execute("UPDATE files SET source_id = ?, sha256 = ?, path = ?, phash = ?, width = ?, height = ?, size = ?, "
+                        "stamp = COALESCE(?, stamp) WHERE id = ?", (src["id"], sha, path, phash, width, height, size, stamp, old["id"]))
         elif old["path"]:                      # fetched again and it is a copy of a file kept elsewhere: no path left, so it stays known
             con.execute("UPDATE files SET path = NULL WHERE id = ?", (old["id"],))
 
@@ -1427,10 +1473,23 @@ def _decide(artist, src, sha, phash, width, height, size):
     return False, []
 
 
+_ISO = re.compile(r"(\d{4}-\d\d-\d\d)(?:[T ](\d\d:\d\d)(?::(\d\d))?(?:[.,](\d+))?)?\s*(Z|[+-]\d\d(?::?\d\d)?)?")
+
+
 def _post_time(posted):
-    """The post's time as a unix timestamp, or None (no date, a date in the future, or before 1980)."""
+    """The post's time as a unix timestamp, or None (no date, a date in the future, or before 1980). Python 3.10's fromisoformat reads few forms
+    (no "+0900", fractions of 3 or 6 digits only), and the sites write all of them, so the text is put into one it reads."""
+    m = _ISO.fullmatch((posted or "").strip())
+    if not m:
+        return None
+    day, hm, sec, frac, zone = m.groups()
+    text = "%sT%s:%s" % (day, hm or "00:00", sec or "00")
+    if frac:
+        text += "." + frac[:6].ljust(6, "0")
+    if zone:
+        text += "+00:00" if zone == "Z" else zone if ":" in zone else (zone + ":00" if len(zone) == 3 else zone[:3] + ":" + zone[3:])
     try:
-        dt = datetime.datetime.fromisoformat((posted or "").replace("Z", "+00:00"))
+        dt = datetime.datetime.fromisoformat(text)
         ts = (dt if dt.tzinfo else dt.replace(tzinfo=datetime.timezone.utc)).timestamp()
     except (ValueError, OverflowError, OSError):
         return None
@@ -1438,105 +1497,192 @@ def _post_time(posted):
 
 
 STEP = 2.0                  # seconds between two posts of a source whose dates are not known (FAT keeps two-second times)
-_stamp_said = []            # the created time that did not take is said once
+_stamp_said = []            # a failure to set a file's time is said once
 
 
-def _timeline(artist_id, todo):
-    """remote_key -> the time each file of this run gets (_stamp). A post's own date where the site gave one; where it did not (a forum's attachments
-    in a sync) the listing's order: sources list newest first, so the posts of a run get times STEP apart with the newest on top, between the dated posts
-    around them. Downloads finish in any order, so the time a file was saved says nothing -- and TrackImage's date is the OLDER of modified and created
-    time, so both are set. A run goes above everything an earlier run gave this card (setting stamp:<card>), or its new posts would sort among the old."""
-    now = time.time()
-    groups = collections.OrderedDict()
-    for src, _site, m in todo:
-        groups.setdefault(src["id"], []).append(m)
-    times = {m.remote_key: _post_time(m.posted) for items in groups.values() for m in items}
-    undated = sum(1 for t in times.values() if t is None)
-    key = "stamp:%d" % artist_id
-    try:
-        base = max(now, float(db.get_setting(key) or 0) + STEP * undated)
-    except ValueError:
-        base = now
-    out = {}
-    for items in groups.values():
-        n, i, hi = len(items), 0, base + STEP
-        while i < n:
-            t = times[items[i].remote_key]
-            if t is not None:
-                out[items[i].remote_key], hi, i = t, t, i + 1
-                continue
-            j = i
-            while j < n and times[items[j].remote_key] is None:
-                j += 1
-            lo = times[items[j].remote_key] if j < n else None
-            step = STEP if lo is None else max(min(STEP, (hi - lo) / (j - i + 1)), 0.001)
-            for k in range(i, j):
-                out[items[k].remote_key] = hi - step * (k - i + 1)
-            i = j
-    if undated:
-        db.set_setting(key, repr(base))
+def _apart(times):
+    """Posts made in the same second (the images of one post) get times a few milliseconds apart, newest listed first, so the listing's order is
+    what a file manager's sort shows: it would break the tie by file name. times: the listing's order, None for a post with no time yet."""
+    out, i = list(times), 0
+    while i < len(out):
+        j = i + 1
+        while out[i] is not None and j < len(out) and out[j] == out[i]:
+            j += 1
+        if j - i > 1:
+            step = min(0.01, 0.9 / (j - i))
+            for e in range(j - i):
+                out[i + e] = out[i] - step * e
+        i = j
     return out
 
 
-def _stamp(path, when):
-    """Give a saved file a time as modified time (and, on Windows, as created time): when is a unix time or a post's date. Downloads run side by
-    side and finish in any order, so the time a file was saved says nothing about which picture is newer: a file manager's "newest first" showed the
-    artist's latest pictures mixed in. Best effort -- a file that cannot be stamped keeps the time it was saved."""
-    ts = when if isinstance(when, (int, float)) else _post_time(when)
-    if ts is None:
-        return
-    try:
-        os.utime(path, (ts, ts))
-    except OSError:
-        return
-    if os.name == "nt":
-        problem = None
+def _timeline(artist_id, todo, orders=None):
+    """(source id, remote_key) -> the time each file of this run gets (_stamp). A post's own date where the site gave one -- the day the SOURCE published
+    it, never when the work was made. Where it did not (a forum's attachments in a sync) the listing's order: sources list newest first, so an undated
+    post goes between the nearest posts around it in the listing that have a time -- dated posts, and files saved earlier (the time each was given:
+    files.stamp, else the file's own). That keeps a run that carries on an older tail (a sync that was cancelled, cut off, or retried) below what the
+    first run saved, a file that failed and comes later in its place, and a file whose folder was deleted at the time it had. Nothing around it (the
+    first download, or the newest posts): STEP apart from now, newest on top. Downloads finish in any order, so the time a file was saved says nothing,
+    and TrackImage's date is the OLDER of modified and created time: both are set. orders: source id -> its listing as it was walked (_scan)."""
+    now = time.time()
+    with db.connect() as con:
+        rows = {r["remote_key"]: (r["stamp"], r["path"])
+                for r in con.execute("SELECT remote_key, stamp, path FROM files WHERE artist_id = ?", (artist_id,))}
+
+    def saved_time(key):
+        stamp, path = rows[key]
+        if stamp is not None:
+            return stamp
         try:
+            return os.path.getmtime(path) if path else None
+        except OSError:
+            return None
+
+    def settle(out, sid, run, hi, lo):
+        """The undated posts of `run`, between the time above them (hi) and below them (lo); either may be None."""
+        k = len(run)
+        if hi is None:                                      # the top of the listing: from now on, and above whatever is below
+            hi = now + STEP if lo is None or lo < now else lo + STEP * (k + 1)
+        step = STEP if lo is None or hi <= lo else max(min(STEP, (hi - lo) / (k + 1)), 0.001)
+        for j, key in enumerate(run, 1):
+            out[(sid, key)] = hi - step * j
+
+    groups = collections.OrderedDict()
+    for src, _site, m in todo:
+        groups.setdefault(src["id"], []).append(m)
+    out = {}
+    for sid, items in groups.items():
+        fresh = {m.remote_key for m in items}
+        seq = list((orders or {}).get(sid) or [])
+        listed = {m.remote_key for m in seq}
+        seq += [m for m in items if m.remote_key not in listed]       # (all of them, when the listing is not known)
+        keys, times, news = [], [], []
+        for m in seq:
+            k = m.remote_key
+            if k in fresh:
+                t = _post_time(m.posted)
+                keys.append(k)
+                times.append(t if t is not None or k not in rows else rows[k][0])   # (a file fetched again: back where it was)
+                news.append(True)
+            elif k in rows:
+                keys.append(k)
+                times.append(saved_time(k))
+                news.append(False)
+        spread = _apart([t if n else None for t, n in zip(times, news)])
+        times = [s if n and s is not None else t for t, s, n in zip(times, spread, news)]
+        hi, run = None, []
+        for key, t, new in zip(keys, times, news):
+            if t is None:
+                if new:
+                    run.append(key)
+                continue
+            if run:
+                settle(out, sid, run, hi, t)
+                run = []
+            hi = t
+            if new:
+                out[(sid, key)] = t
+        if run:
+            settle(out, sid, run, hi, None)
+    return out
+
+
+_k32 = []
+_k32_lock = threading.Lock()
+
+
+def _kernel32():
+    """The kernel32 calls that set a file's created time, declared once on a DLL of our own: argtypes set here touch nobody else's."""
+    with _k32_lock:
+        if not _k32:
             import ctypes
             from ctypes import wintypes
-            k32 = ctypes.WinDLL("kernel32", use_last_error=True)      # our own handle on the DLL: argtypes here must not touch anyone else's
+            k32 = ctypes.WinDLL("kernel32", use_last_error=True)
             k32.CreateFileW.restype = wintypes.HANDLE
             k32.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
                                         wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
             k32.SetFileTime.argtypes = [wintypes.HANDLE, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
             k32.CloseHandle.argtypes = [wintypes.HANDLE]
-            handle = k32.CreateFileW(str(path), 0x100, 3, None, 3, 0x80, None)   # FILE_WRITE_ATTRIBUTES, share read+write, OPEN_EXISTING
+            _k32.append(k32)
+        return _k32[0]
+
+
+def _long(path):
+    """A path Windows opens beyond 260 characters (the prefix), as it is."""
+    p = os.path.abspath(str(path))
+    if os.name != "nt" or len(p) < 240 or p.startswith("\\\\?\\"):
+        return p
+    return "\\\\?\\UNC\\" + p[2:] if p.startswith("\\\\") else "\\\\?\\" + p
+
+
+def _say_once(text):
+    if not _stamp_said:
+        _stamp_said.append(text)
+        log.warning("could not set the time of a saved file (%s): the files keep the time they were saved", text)
+
+
+def _stamp(path, when):
+    """Give a saved file a time as modified time (and, on Windows, as created time): when is a unix time or a post's date. Downloads run side by
+    side and finish in any order, so the time a file was saved says nothing about which picture is newer: a file manager's "newest first" showed the
+    artist's latest pictures mixed in. Best effort -- a file that cannot be stamped keeps the time it was saved. Returns the time it got, or None."""
+    ts = when if isinstance(when, (int, float)) else _post_time(when)
+    if ts is None:
+        return None
+    target = _long(path)
+    try:
+        os.utime(target, (ts, ts))
+    except OSError as e:
+        _say_once("%s" % e)
+        return None
+    if os.name == "nt":
+        problem = None
+        try:
+            import ctypes
+            from ctypes import wintypes
+            k32 = _kernel32()
+            handle = k32.CreateFileW(target, 0x100, 3, None, 3, 0x80, None)   # FILE_WRITE_ATTRIBUTES, share read+write, OPEN_EXISTING
             if handle in (None, wintypes.HANDLE(-1).value):
-                problem = "the file could not be opened (error %d)" % ctypes.get_last_error()
+                problem = "the created time: the file could not be opened (error %d)" % ctypes.get_last_error()
             else:
                 try:
                     t = ctypes.c_ulonglong(int((ts + 11644473600) * 10_000_000))    # 100 ns since 1601
                     if not k32.SetFileTime(handle, ctypes.byref(t), None, None):
-                        problem = "SetFileTime failed (error %d)" % ctypes.get_last_error()
+                        problem = "the created time: SetFileTime failed (error %d)" % ctypes.get_last_error()
                 finally:
                     k32.CloseHandle(handle)
-            if not problem:                                           # read it back: this has never run on a real Windows machine before v0.66
-                made = getattr(os.stat(path), "st_birthtime", None) or os.stat(path).st_ctime
+            if not problem:                                           # read it back: a share that takes the call and ignores it is a failure too
+                made = getattr(os.stat(target), "st_birthtime", None) or os.stat(target).st_ctime
                 if abs(made - ts) > 2:
                     problem = "the created time reads %.0f s off" % (made - ts)
         except Exception as e:
             problem = "%s: %s" % (type(e).__name__, e)
-        if problem and not _stamp_said:
-            _stamp_said.append(problem)
-            log.warning("could not set the created time of a saved file (%s); the modified time is set", problem)
+        if problem:
+            _say_once(problem)
+    return ts
 
 
 def restamp():
-    """Once (setting file_times_v1): files saved before v0.64 got the time they were downloaded; give them their post's."""
+    """Once (setting file_times_v1): files saved before v0.64 got the time they were downloaded; give them their post's. Only files Sourcerer saved and
+    nobody touched since: the file's time is still the one it was saved at (within ten minutes of its row), so a file Sourcerer adopted from the user's
+    own folder, or one edited later, keeps its time."""
     if db.get_setting("file_times_v1"):
         return
-    done = 0
+    done, marks = 0, []
     try:
         with db.connect() as con:
-            rows = con.execute("SELECT path, posted FROM files WHERE path IS NOT NULL AND posted IS NOT NULL AND posted != ''").fetchall()
+            rows = con.execute("SELECT id, path, posted, created FROM files WHERE path IS NOT NULL AND posted IS NOT NULL AND posted != ''").fetchall()
         for r in rows:
             ts = _post_time(r["posted"])
             try:
-                if ts is not None and abs(os.path.getmtime(r["path"]) - ts) > 1:
-                    _stamp(r["path"], r["posted"])
-                    done += 1
-            except OSError:
+                saved = calendar.timegm(time.strptime(r["created"], "%Y-%m-%d %H:%M:%S"))
+                if ts is not None and abs(os.path.getmtime(r["path"]) - saved) <= 600 and abs(os.path.getmtime(r["path"]) - ts) > 1:
+                    if _stamp(r["path"], ts) is not None:
+                        marks.append((ts, r["id"]))
+                        done += 1
+            except (OSError, ValueError, TypeError):
                 continue
+        with db.connect() as con:
+            con.executemany("UPDATE files SET stamp = ? WHERE id = ?", marks)
         db.set_setting("file_times_v1", "1")
         if done:
             log.info("%d saved files were dated by their posts, so a file manager sorts them by when they were posted", done)
