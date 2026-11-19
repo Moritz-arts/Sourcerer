@@ -3,6 +3,11 @@
 Newest first. Each entry is made from the commit subjects when a version is made, so a subject is one short,
 plain sentence.
 
+## v0.67 — 2026-11-19
+
+- Bluesky posts are dated by when Bluesky received them, not by the date the client wrote into the record
+- Saved files keep the upload order: a resumed run goes below what it saved, the images of one post stay apart, and old files can be put in order from the artist's menu
+
 ## v0.66 — 2026-11-19
 
 - Saved files get a date in the listing's order when the site gives none, so newest first matches the artist's order
