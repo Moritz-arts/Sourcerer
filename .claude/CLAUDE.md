@@ -1409,6 +1409,14 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   in. `_fetch` stamps right after `os.replace` (`os.utime`; on Windows the created time too, through an own `WinDLL` handle -- no shared
   `argtypes`), a post with no date or one in the future keeps the save time, adopted files are left as they are, and `restamp` fixes the
   older files once at start (setting `file_times_v1`). The page's own sort (`posted`) was never affected.
+- **A deleted artist folder is fetched again, a deleted file is not** (v0.65, `sync._saved_keys`): every post in `files` was "known" whether its
+  file was still on disk or not, so after the user deleted a card's folder Download said "Checking 1 source ... Finished" with nothing new and made no
+  folder (the user's log, 2026-11-19: `Checking` -> `Finished` in 1-6 s, three times). A card **asked for by name** (`not auto`: Refresh, Download, the
+  menu) now counts a file as not saved when its *folder* is gone -- the activity log says "N saved files gone with their folder: fetched again" -- while a
+  file missing from a folder that is still there was culled on purpose and stays known (the schema's old promise), a **sweep** (automatic sync, Refresh all, the
+  scan at start) never fetches again (a folder somebody moved away would cost thousands of requests), and nothing is restored while the library's own
+  folder is missing (an unplugged drive is no deleted artist). `_record` points the old row at the new file, or clears its path when the copy was not kept.
+  Checked by `.github/checks.py` (`library_checks`).
 - **A file already there is never downloaded again** (`sync._adopt`): the
   `archive` table keeps what deleted cards had, and a file under its own name
   in the card's folder (`_local_names`, `Media.local`) is taken over.

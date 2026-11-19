@@ -852,6 +852,30 @@ def _held(artist_id, keys):
                         [(artist_id, k) for k in keys])
 
 
+def _saved_keys(con, artist, restore):
+    """The remote keys the card already has. When somebody asked for this card by name (restore), a file whose FOLDER is gone does not count: the
+    user deleted the artist's folder and wants it back -- every post stayed "known" and Download said "Finished" with nothing saved and no folder
+    made. A file missing from a folder that is still there was culled on purpose and stays known, and a sweep never fetches again (a folder somebody
+    moved away would cost thousands of requests). Nothing is restored while the library's own folder is missing: an unplugged drive is no deleted artist."""
+    rows = con.execute("SELECT remote_key, path FROM files WHERE artist_id = ?", (artist["id"],)).fetchall()
+    if not restore or not artist_folder(artist).parent.exists():
+        return {r[0] for r in rows}
+    there, gone, keys = {}, 0, set()
+    for key, path in rows:
+        if path:
+            folder = os.path.dirname(path)
+            if folder not in there:
+                there[folder] = os.path.isdir(folder)
+            if not there[folder]:
+                gone += 1
+                continue
+        keys.add(key)
+    if gone:
+        event("info", "%d saved file%s gone with %s folder: fetched again" % (
+            gone, "" if gone == 1 else "s", "its" if gone == 1 else "their"), artist)
+    return keys
+
+
 def _sync_artist(artist_id, auto=False, only=None, mode=None):
     with db.connect() as con:
         artist = con.execute("SELECT * FROM artists WHERE id = ?", (artist_id,)).fetchone()
@@ -863,8 +887,7 @@ def _sync_artist(artist_id, auto=False, only=None, mode=None):
         rows = con.execute("SELECT * FROM sources WHERE artist_id = ? ORDER BY id",
                            (artist_id,)).fetchall()
         # (a scan compares with the last look, not the library: a big card's keys are not read for nothing)
-        known = set() if scanning else {r[0] for r in con.execute(
-            "SELECT remote_key FROM files WHERE artist_id = ?", (artist_id,))}
+        known = set() if scanning else _saved_keys(con, artist, restore=not auto)
         held = [] if scanning else con.execute("SELECT remote_key, count FROM failures WHERE artist_id = ?",
                                                (artist_id,)).fetchall()
     # A site that skips what is saved by a work's first page (pixiv) must still list a work
@@ -1295,9 +1318,12 @@ def _record(con, artist, src, media, sha, path, phash, width, height, size):
                     "width, height, size) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (artist["id"], src["id"], media.remote_key, sha, path, media.post_url, media.posted,
                      phash, width, height, size))
-    elif path and not (old["path"] and os.path.isfile(old["path"])):
-        con.execute("UPDATE files SET source_id = ?, sha256 = ?, path = ?, phash = ?, width = ?, height = ?, size = ? "
-                    "WHERE id = ?", (src["id"], sha, path, phash, width, height, size, old["id"]))
+    elif not (old["path"] and os.path.isfile(old["path"])):
+        if path:
+            con.execute("UPDATE files SET source_id = ?, sha256 = ?, path = ?, phash = ?, width = ?, height = ?, size = ? "
+                        "WHERE id = ?", (src["id"], sha, path, phash, width, height, size, old["id"]))
+        elif old["path"]:                      # fetched again and it is a copy of a file kept elsewhere: no path left, so it stays known
+            con.execute("UPDATE files SET path = NULL WHERE id = ?", (old["id"],))
 
 
 def _local_names(media):
