@@ -56,6 +56,7 @@ from . import accounts, db, imaging, net, snapshots, sources, sync
 
 log = logging.getLogger(__name__)
 MEMORY = 160 << 20           # bytes of fetched pictures kept, the oldest dropped first
+VIDEO_MEMORY = 320 << 20     # ... and of videos, kept apart: one clip must not push every picture of the grid out
 IDLE = 1800                  # a gallery nobody asked anything of this long is closed (the page reopens one after 15 minutes anyway)
 MAX_GALLERIES = 8            # the page keeps up to 7 aside beside the one it shows
 PAGE = 60                    # items a page asks for at a time
@@ -75,6 +76,7 @@ _lock = threading.Lock()
 _galleries = {}
 _cache = collections.OrderedDict()       # (gallery, item, size) -> (content type, bytes)
 _cached = [0]
+_cached_video = [0]
 _flight = {}                             # (gallery, item, size) -> Event, while it is being fetched
 _serial = set()                          # sites with a serial source being listed now
 _spaced = {}                             # login site -> (card id, when another card may ask it): All artists
@@ -129,6 +131,19 @@ def _gif(m):
         return False
     return (m.mime or "").lower() == "image/gif" or \
         (m.filename or m.url or "").lower().split("?", 1)[0].endswith(".gif")
+
+
+def _maybe_animated(m):
+    """Whether the file may be an animated WebP or APNG: the listing cannot say (the file does), so the grid asks for the file and shows it
+    as it is when it moves, else a small picture made from it."""
+    if m.video or _gif(m):
+        return False
+    return (m.mime or "").lower() in ("image/webp", "image/apng") or \
+        (m.filename or m.url or "").lower().split("?", 1)[0].endswith((".webp", ".apng"))
+
+
+class NoPicture(Exception):
+    """There is no picture to hand out for this size (a video the forum gave no poster for): the tile keeps its placeholder, nothing is logged."""
 
 
 class _Source:
@@ -494,6 +509,10 @@ class _Gallery:
             d.update(thumb=proxy + "thumb", large=proxy + "large")
         else:
             d.update(thumb=m.thumb, large=m.large or m.thumb)
+        if m.video and not m.thumb:
+            d["thumb"] = ""                          # no poster: the tile says "video" instead of asking for the clip as if it were a picture
+        if m.crop and m.thumb and not m.video and not gif and m.preview_headers is not None:
+            d["crop"], d["whole"] = True, proxy + "whole"      # the grid's picture is a crop of it: Full mode asks for the whole one (picture "whole")
         if getattr(s.site, "animation", None) and m.remote_key.endswith("_ugoira"):
             d["anim"] = True                         # the large view plays it; the grid keeps the still
         if gif:
@@ -668,17 +687,22 @@ def close(gallery_id):
 _no_animation = {}                       # gallery -> item numbers whose animation failed: not asked again while it is open
 
 
+def _video_of(data):
+    return bool(data) and str(data[0]).startswith("video/")
+
+
 def _forget(gallery_id):
     with _lock:
         for key in [k for k in _cache if k[0] == gallery_id]:
             old = _cache.pop(key, None)
             if old:
-                _cached[0] -= len(old[1])
+                (_cached_video if _video_of(old) else _cached)[0] -= len(old[1])
         _no_animation.pop(gallery_id, None)
 
 
 def _kept(gallery_id, key, data):
-    """Keep fetched bytes in memory (the oldest dropped first); nothing of a gallery that closed meanwhile."""
+    """Keep fetched bytes in memory (the oldest dropped first, pictures and videos each within their own budget); nothing of a gallery that
+    closed meanwhile."""
     if not data:                                     # (nothing to keep: a None here once poisoned the cache, see _once)
         return
     with _lock:
@@ -686,12 +710,13 @@ def _kept(gallery_id, key, data):
             return
         old = _cache.pop(key, None)
         if old:
-            _cached[0] -= len(old[1])
+            (_cached_video if _video_of(old) else _cached)[0] -= len(old[1])
         _cache[key] = data
-        _cached[0] += len(data[1])
-        while _cached[0] > MEMORY and len(_cache) > 1:
-            gone = _cache.popitem(last=False)[1]
-            _cached[0] -= len(gone[1]) if gone else 0
+        (_cached_video if _video_of(data) else _cached)[0] += len(data[1])
+        for video, used, cap in ((False, _cached, MEMORY), (True, _cached_video, VIDEO_MEMORY)):
+            same = [k for k, v in _cache.items() if v and _video_of(v) == video]
+            while used[0] > cap and len(same) > 1:
+                used[0] -= len(_cache.pop(same.pop(0))[1])
 
 
 def _once(gallery_id, key, make):
@@ -725,12 +750,17 @@ def _file_of(site, m, address):
 
 
 def picture(gallery_id, number, size):
-    """(content type, bytes) of an item's grid picture, its screen-sized "mid" or its large view, fetched
-    with the headers its site wants and kept in memory only. Kept by address, not by size: a site whose
+    """(content type, bytes) of an item's grid picture, its screen-sized "mid", its large view or -- "whole" -- the picture the grid's small
+    one is only a crop of, fetched with the headers its site wants and kept in memory only. Kept by address, not by size: a site whose
     grid picture is the viewer's picture (a booru's sample) is asked once."""
     g = _get(gallery_id)
     s, m = g.items[number]
     thumb = size == "thumb"
+    whole = size == "whole"
+    if whole:
+        size = "large"
+    if m.video and not m.thumb and size != "large":
+        raise NoPicture()                            # a video the site gave no poster for: the tile keeps its placeholder, the viewer plays it
     animate = getattr(s.site, "animation", None)
     if size == "large" and animate and number not in _no_animation.get(gallery_id, ()):
         # a site's animation (pixiv's ugoira) plays in the large view. It answers None for a work that is no ugoira, and an
@@ -761,6 +791,7 @@ def picture(gallery_id, number, size):
         except (requests.ConnectionError, requests.Timeout):
             time.sleep(0.8)
             return net.fetch_picture(address, headers=m.preview_headers or None, first=size == "large")
+        # (a video is fetched the same way: net.fetch_picture allows it up to video_limit)
 
     def fetch(address, check=None):
         def make():
@@ -778,8 +809,13 @@ def picture(gallery_id, number, size):
         if not thumb or not m.thumb or not fallback or fallback == url:
             raise
         data = fetch(fallback, fallback_check)
+    if data[0].startswith("video/") and not m.video:
+        m.video = True                               # the file said what the listing did not: the viewer plays it from now on (item() tells the page again)
     if thumb and not m.thumb and data[0].startswith("image/") and not _gif(m):
-        # A forum gives no small picture: one is made here, in memory, from the original the viewer will want too.
+        # A forum gives no small picture: one is made here, in memory, from the original the viewer will want too -- unless the file moves
+        # (an animated WebP or APNG: the listing cannot say, the file does), which the grid then shows as it is.
+        if _maybe_animated(m) and imaging.animated(data[1]):
+            return data
         return _once(gallery_id, (gallery_id, number, url, "small"),
                      lambda: ("image/jpeg", imaging.preview(io.BytesIO(data[1]), 400)))
     return data

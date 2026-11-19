@@ -18,6 +18,9 @@ Run by .github/workflows/checks.yml on every pull request, and by hand before pu
   apart; restamp and "Put files in upload order" (sync._stamp, _timeline, _ordered, restamp);
 * Refresh all also looks at the accounts every login follows (server.py: start_sync -> follows.look_async), one card's Refresh and a download do not;
 * gallery.picture for a site with no resolver (the booru-like case the forum fix must not change).
+* a forum's videos, animated WebPs and crops (xenforo._media, net.fetch_picture / sniff, gallery.picture, server.py): the type comes from the extension and
+  from the file's first bytes when the server says only octet-stream, a clip is held to a larger limit than a picture and kept apart in memory, a video with
+  no poster has no tile picture, a clip is served in ranges (206), the whole picture of a cropped tile is the original.
 
 A failing check starts with FAIL and makes the exit code 1.
 """
@@ -573,6 +576,135 @@ def gallery_checks():
     check(gallery.picture("cdn", 3, "large")[1] == files["/big.jpg"], "no large address: the url")
 
 
+def media_checks():
+    def webp(frames):
+        out = io.BytesIO()
+        pics = [Image.new("RGB", (64, 48), c) for c in ((255, 0, 0), (0, 255, 0), (0, 0, 255))][:frames]
+        pics[0].save(out, "WEBP", save_all=frames > 1, append_images=pics[1:], duration=80, loop=0)
+        return out.getvalue()
+    clip = b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom" + bytes(range(256)) * 40
+    files = {"/clip.mp4": (clip, "application/octet-stream"), "/loop.webp": (webp(3), "application/octet-stream"), "/still.webp": (webp(1), "image/webp"),
+             "/wide.jpg": (jpeg((10, 120, 200), (1200, 400)), "image/jpeg"), "/crop.jpg": (jpeg((10, 120, 200), (200, 200)), "image/jpeg"),
+             "/noise": (bytes(range(256)) * 20, "application/octet-stream"), "/page": (b"<html>no</html>", "text/html"),
+             "/huge.mp4": (b"\x00\x00\x00\x18ftypmp42" + b"\x00" * (41 << 20), "video/mp4")}
+
+    class Cdn(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            got = files.get(self.path)
+            if got is None:
+                self.send_response(404)
+                self.end_headers()
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", got[1])
+            self.send_header("Content-Length", str(len(got[0])))
+            self.end_headers()
+            try:
+                self.wfile.write(got[0])
+            except ConnectionError:                  # (a reader that gave up on a file above its limit)
+                pass
+    base = serve(Cdn)
+
+    check([xenforo._type_of(x) for x in ("mp4", "Movie.WEBM", ".gif", "x.webp", "a.b.mov", "", None, "txt")] ==
+          ["video/mp4", "video/webm", "image/gif", "image/webp", "video/quicktime", "", "", ""], "a forum file's type comes from its extension")
+    m = xenforo._media("https://forum.example", "forum.example", {"id": "5", "url": "https://forum.example/media/x.5/full", "ext": "mp4",
+                                                                   "thumb": "/data/xfmg/thumbnail/0/5-ab.jpg"})
+    check(m.video and m.mime == "video/mp4" and m.crop and m.preview_headers == {}, "a media gallery's clip is a video, its poster a crop", m)
+    m = xenforo._media("https://forum.example", "forum.example", {"id": "6", "url": "https://forum.example/media/y.6/full", "ext": "webp"})
+    check(not m.video and m.mime == "image/webp" and not m.crop, "a WebP is no video; no thumbnail, no crop", m)
+    check(net.sniff(files["/clip.mp4"][0]) == "video/mp4" and net.sniff(files["/loop.webp"][0]) == "image/webp" and net.sniff(b"nothing") == "" and
+          net.sniff(b"\x1a\x45\xdf\xa3" + b"\0" * 12) == "video/webm" and net.sniff(b"\x00\x00\x00\x18ftypavif" + b"\0" * 4) == "image/avif",
+          "the first bytes tell a picture from a video")
+    got = net.fetch_picture(base + "/loop.webp")
+    check(got[0] == "image/webp" and got[1] == files["/loop.webp"][0], "a WebP sent as octet-stream is accepted and named by its bytes", got[0])
+    got = net.fetch_picture(base + "/clip.mp4")
+    check(got[0] == "video/mp4", "a clip sent as octet-stream is a video", got[0])
+    for path, why in (("/noise", "octet-stream that is nothing known"), ("/page", "an HTML page")):
+        try:
+            net.fetch_picture(base + path)
+            check(False, "refused: " + why)
+        except RuntimeError as e:
+            check("sent no picture" in str(e), "refused: " + why, str(e))
+    got = net.fetch_picture(base + "/huge.mp4")
+    check(got[0] == "video/mp4" and len(got[1]) > 40 << 20, "a video above a picture's limit is still fetched", got[0])
+    try:
+        net.fetch_picture(base + "/huge.mp4", video_limit=1 << 20)
+        check(False, "a video is held to its own limit")
+    except ValueError:
+        check(True, "a video is held to its own limit")
+    check(imaging_animated(files["/loop.webp"][0]) and not imaging_animated(files["/still.webp"][0]) and not imaging_animated(b"junk"),
+          "an animated WebP is told from a still one")
+
+    def item(**kw):
+        fields = dict(remote_key="k", url=base + "/wide.jpg", post_url="p", posted="", name="n", thumb="", large=base + "/wide.jpg", preview_headers={})
+        fields.update(kw)
+        return Media(**fields)
+    site = types.SimpleNamespace()
+    items = [item(url=base + "/clip.mp4", large=base + "/clip.mp4", video=True, mime="video/mp4"),                       # 0: a video with no poster
+             item(url=base + "/loop.webp", large=base + "/loop.webp", mime="image/webp"),                                # 1: animated, no small copy
+             item(url=base + "/still.webp", large=base + "/still.webp", mime="image/webp"),                              # 2: still, no small copy
+             item(thumb=base + "/crop.jpg", crop=True),                                                                  # 3: a crop of a wide picture
+             item(url=base + "/clip.mp4", large=base + "/clip.mp4", thumb=base + "/crop.jpg", video=True, crop=True),    # 4: a video with a poster
+             item(url=base + "/clip.mp4", large=base + "/clip.mp4")]                                                     # 5: a clip nobody called one
+    gallery._galleries["vid"] = types.SimpleNamespace(items=[(types.SimpleNamespace(site=site), m) for m in items], seen=0)
+    try:
+        gallery.picture("vid", 0, "thumb")
+        check(False, "a video with no poster has no picture")
+    except gallery.NoPicture:
+        check(True, "a video with no poster has no picture")
+    check(gallery.picture("vid", 0, "large")[0] == "video/mp4", "... and plays from its own address")
+    got = gallery.picture("vid", 1, "thumb")
+    check(got[0] == "image/webp" and got[1] == files["/loop.webp"][0], "an animated WebP is shown as the file when it has no small copy", got[0])
+    got = gallery.picture("vid", 2, "thumb")
+    check(got[0] == "image/jpeg", "a still WebP gets a small picture made from it", got[0])
+    check(gallery.picture("vid", 3, "thumb")[1] == files["/crop.jpg"][0], "a crop's grid picture is the forum's small copy")
+    whole = gallery.picture("vid", 3, "whole")
+    check(whole[1] == files["/wide.jpg"][0] and whole[1] == gallery.picture("vid", 3, "large")[1], "its whole picture is the original, the viewer's too")
+    check(gallery.picture("vid", 4, "thumb")[1] == files["/crop.jpg"][0], "a video's poster is its small copy")
+    gallery.picture("vid", 5, "large")
+    check(gallery._cached_video[0] >= len(clip) and gallery._cached[0] >= len(files["/wide.jpg"][0]), "videos and pictures are counted apart",
+          (gallery._cached_video[0], gallery._cached[0]))
+    gallery._forget("vid")
+    check(gallery._cached_video[0] == 0 or "vid" in gallery._galleries, "closing a gallery gives its clips back")
+    gallery._galleries.pop("vid", None)
+
+    # the items a page gets
+    g = gallery._Gallery.__new__(gallery._Gallery)
+    g.id, g.sharp, g.saved, g.told = "vid", False, {}, {}
+    row = {"id": 1}
+    src = types.SimpleNamespace(label="XenForo", kind="xenforo", host="forum.example", row=row, site=site, artist={"id": 7, "name": "Artist A"})
+    g.items = {n + 1: (src, m) for n, m in enumerate(items)}
+    g.saved = {}
+    g._there = lambda r: True
+    got = {n: g.item(n) for n in g.items}
+    check(got[1]["video"] and got[1]["thumb"] == "", "a clip with no poster: no tile picture is asked for", got[1])
+    check(got[4]["crop"] and got[4]["whole"].endswith("/4/whole") and "crop" not in got[1], "a cropped tile says where its whole picture is")
+    check("crop" not in got[5] or not got[5]["crop"], "a video's poster is no crop to unfold")
+
+    # served in ranges, and "whole" is a size
+    client = server.app.test_client()
+    gallery._galleries["vid2"] = types.SimpleNamespace(items=[(types.SimpleNamespace(site=site), items[5])], seen=0)
+    r = client.get("/api/gallery/vid2/0/large", headers={"Range": "bytes=4-11"})
+    check(r.status_code == 206 and r.data == clip[4:12] and r.headers.get("Content-Range") == "bytes 4-11/%d" % len(clip), "a clip is served in ranges", (r.status_code, r.headers))
+    r = client.get("/api/gallery/vid2/0/large")
+    check(r.status_code == 200 and r.headers.get("Accept-Ranges") == "bytes" and r.data == clip and r.headers["Content-Type"].startswith("video/mp4"),
+          "... and whole with the range promised", (r.status_code, r.headers))
+    gallery._galleries["vid3"] = types.SimpleNamespace(items=[(types.SimpleNamespace(site=site), items[0])], seen=0)
+    check(client.get("/api/gallery/vid3/0/thumb").status_code == 404, "a video with no poster answers 404, not 502")
+    check(client.get("/api/gallery/vid2/0/whole").status_code == 200 and client.get("/api/gallery/vid2/0/bogus").status_code == 404, "whole is a size, others are not")
+    for name in ("vid2", "vid3"):
+        gallery._forget(name)
+        gallery._galleries.pop(name, None)
+
+
+def imaging_animated(data):
+    from sourcerer import imaging
+    return imaging.animated(data)
+
+
 # ---- what a card already has, and the date of a saved file ------------------------------------------------------------------------------------
 
 def library_checks():
@@ -740,7 +872,7 @@ def refresh_checks():
 
 
 def main():
-    for group in (forum_checks, tile_checks, speed_checks, refusal_checks, tune_checks, settings_checks, gallery_checks, library_checks, refresh_checks):
+    for group in (forum_checks, tile_checks, speed_checks, refusal_checks, tune_checks, settings_checks, gallery_checks, media_checks, library_checks, refresh_checks):
         print("--", group.__name__, flush=True)
         try:
             group()

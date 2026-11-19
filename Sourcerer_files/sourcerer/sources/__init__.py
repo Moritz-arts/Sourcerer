@@ -56,6 +56,9 @@ class Media:
     # Headers the picture hosts want (pixiv, Gelbooru: a Referer): the gallery
     # then fetches thumb and large through Sourcerer instead of the page.
     preview_headers: dict = None
+    # The small picture is a fixed-size CROP of the original (a forum's media gallery cuts its thumbnails): it shows the middle of the picture and says
+    # nothing about its shape, so Full mode asks for the whole picture instead (gallery.picture "whole").
+    crop: bool = False
 
 
 class LoginRequired(Exception):

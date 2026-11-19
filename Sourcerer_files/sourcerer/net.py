@@ -1271,20 +1271,50 @@ def _stream(url, part, digest, mime_hint, progress, headers):
     return part, digest.hexdigest(), ext, name
 
 
-def fetch_picture(url, headers=None, limit=40 << 20, first=False):
+_GENERIC = ("", "application/octet-stream", "binary/octet-stream", "application/x-octet-stream", "application/unknown")
+
+
+def sniff(data):
+    """The content type of a picture or video by its first bytes ("" when they say nothing known): a server whose type table does not know WebP or
+    WebM answers application/octet-stream, which is no reason to refuse the file."""
+    head = bytes(data[:16])
+    if head[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if head[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if head[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return "image/webp"
+    if head[4:8] == b"ftyp":
+        return "image/avif" if head[8:12] in (b"avif", b"avis") else "video/mp4"
+    if head[:4] == b"\x1a\x45\xdf\xa3":
+        return "video/webm"
+    if head[:4] == b"OggS":
+        return "video/ogg"
+    return ""
+
+
+def fetch_picture(url, headers=None, limit=40 << 20, first=False, video_limit=300 << 20):
     """A picture or video for the gallery, as (content type, bytes): asked for
     once, no retries -- a preview is not worth asking a site twice -- and only
-    a picture or a video is accepted."""
+    a picture or a video is accepted (a generic answer is judged by the file's first bytes). A picture
+    is held to `limit`, a video to `video_limit`: a clip is bigger than any picture and is not a thumbnail."""
     with _Polite(url, _carries_login(url, headers), first, preview=not first, browse=not first):
         resp = _get(url, stream=True, headers=headers, tries=1, pooled=True, file=True)
         try:
             ctype = (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
-            if not ctype.startswith(("image/", "video/")):
+            if not ctype.startswith(("image/", "video/")) and ctype not in _GENERIC:
                 raise RuntimeError("%s sent no picture" % urllib.parse.urlparse(url).hostname)
-            data = resp.raw.read(limit + 1, decode_content=True)
+            cap = video_limit if ctype.startswith("video/") or ctype in _GENERIC else limit
+            data = resp.raw.read(cap + 1, decode_content=True)
         finally:
             resp.close()
-    if len(data) > limit:
+    if ctype in _GENERIC:
+        ctype = sniff(data)
+        if not ctype:
+            raise RuntimeError("%s sent no picture" % urllib.parse.urlparse(url).hostname)
+    if len(data) > (video_limit if ctype.startswith("video/") else limit):
         raise ValueError("file too large")
     return ctype, data
 
