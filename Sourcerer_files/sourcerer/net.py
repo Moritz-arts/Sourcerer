@@ -38,6 +38,7 @@ import json
 import logging
 import mimetypes
 import os
+import pathlib
 import random
 import re
 import socket
@@ -57,7 +58,7 @@ RETRIES = 4
 
 _local = threading.local()
 _lock = threading.Lock()
-_hosts = {}                 # (host, carries a login, small pictures, a token only, a picture somebody looks at) -> its limiter's state
+_hosts = {}                 # (host, carries a login, small pictures, a token only, a picture somebody looks at, a file download) -> its limiter's state
 _limits = {"speed": "normal", "tune": {}, "row": None}      # the level of PROFILES Settings chose, what was moved on top of it, the row that makes (configure)
 CAP = 300                   # the longest Retry-After waited out; a longer one pauses the site
 
@@ -113,11 +114,11 @@ FORUM_READ_BREAK = (6, 20)
 # picture is a file. A site that said a word lately (_calm) is read carefully whatever is chosen. 'normal' is what the settings were until v0.62
 # (the user's own, 2026-10-23) with the pictures as a browser takes them; 'careful' is v0.33's.
 PROFILES = {
-    "careful": {"parallel": 8, "per_host": 4, "pause": 0.25, "gap": (15, 60), "pace": LOGIN_PACE, "files": 2.0, "every": (20, 40), "rest": (15, 60),
-                "look": 1.0, "preview": (4, 0.08), "browse": (3, 0.3)},
-    "normal": {"parallel": 24, "per_host": 32, "pause": 0.1, "gap": (3, 15), "pace": LOGIN_PACE, "files": 1.0, "every": (40, 80), "rest": (6, 20),
-               "look": 0.5, "preview": (6, 0.0), "browse": (6, 0.0)},
-    "fast": {"parallel": 48, "per_host": 32, "pause": 0.0, "gap": (1, 6), "pace": LOGIN_PACE, "files": 0.5, "every": None, "rest": None,
+    "careful": {"parallel": 8, "per_host": 4, "pause": 0.25, "gap": (15, 60), "pace": LOGIN_PACE, "files": 2.0, "login_files": 1, "every": (20, 40),
+                "rest": (15, 60), "look": 1.0, "preview": (4, 0.08), "browse": (3, 0.3)},
+    "normal": {"parallel": 24, "per_host": 32, "pause": 0.1, "gap": (3, 15), "pace": LOGIN_PACE, "files": 0.6, "login_files": 2, "every": (40, 80),
+               "rest": (6, 20), "look": 0.5, "preview": (6, 0.0), "browse": (6, 0.0)},
+    "fast": {"parallel": 48, "per_host": 32, "pause": 0.0, "gap": (1, 6), "pace": LOGIN_PACE, "files": 0.1, "login_files": 6, "every": None, "rest": None,
              "look": 0.25, "preview": (6, 0.0), "browse": (6, 0.0)},
 }
 
@@ -150,7 +151,8 @@ KNOBS = [
     _knob("per_host", "downloads", "Connections per site", "", 1, 32, 1, "high", 32, 32, False, "A touchy site keeps its own lower limit."),
     _knob("pause", "downloads", "Pause between two requests to a site", "s", 0, 2, 0.05, "low", 0.1, -1, False, "Sites without a login."),
     _knob("pace", "login", "Between two pages or lists", "s", 0.5, 10, 0.1, "low", LOGIN_PACE, 1.0, True, "Pages, lists and API calls with your login."),
-    _knob("files", "login", "Between two files", "s", 0, 5, 0.05, "low", 1.0, 0.5, True, "Files with your login."),
+    _knob("login_files", "login", "Files at once", "", 1, 8, 1, "high", 2, 6, True, "Files with your login; a touchy site keeps its own lower limit."),
+    _knob("files", "login", "A new file starts every", "s", 0, 5, 0.05, "low", 0.6, 0.1, True, "Files with your login: the gap between two starts."),
     _knob("every", "login", "Reading break after", "files", 0, 120, 5, "high", 40, 1000, True, "0: no breaks.", zero=1),
     _knob("rest", "login", "A reading break lasts", "s", 0, 120, 1, "low", 6, 1, True, "", zero=1),
     _knob("gap_min", "login", "Between two artists, at least", "s", 0, 120, 1, "low", 3, 1, True, "Sourcerer draws a gap between the two."),
@@ -169,7 +171,7 @@ _SPEED_KEYS = {k["key"] for k in KNOBS if k["group"] != "limits"}
 def _base_value(level, key):
     """What a knob is at a level of PROFILES (a daily limit: its default)."""
     row = PROFILES.get(level) or PROFILES["normal"]
-    if key in ("parallel", "per_host", "pause", "pace", "files", "look"):
+    if key in ("parallel", "per_host", "login_files", "pause", "pace", "files", "look"):
         return row[key]
     return {"every": row["every"][0] if row["every"] else 0, "rest": row["rest"][0] if row["rest"] else 0, "gap_min": row["gap"][0],
             "gap_max": row["gap"][1], "preview_n": row["preview"][0], "browse_n": row["browse"][0]}.get(key, (_BY_KEY.get(key) or {}).get("default"))
@@ -201,7 +203,7 @@ def _row(level, tune):
     if not mine:
         return base
     row = dict(base)
-    for key in ("parallel", "per_host"):
+    for key in ("parallel", "per_host", "login_files"):
         if key in mine:
             row[key] = int(mine[key])
     for key in ("pause", "pace", "files", "look"):
@@ -875,13 +877,18 @@ class _Polite:
             elif self.login:                     # Settings can make this gentler, never faster
                 base, every, rest = _rhythm(self.url, self.bulk)
                 limit, pace = 1, max(pace, base)
+                if self.bulk and _calm(self.url):
+                    # A file is a file, not a page or a list (what an account is flagged for): several at once, a new one started every `pace`
+                    # seconds, the way a browser opens its connections to a site. A touchy host keeps its own limit; a site that said a
+                    # word is read one file at a time (_calm).
+                    limit = max(1, min(int(speed.get("login_files") or 1), own[0]))
                 if self.first:                   # somebody waits: the gap of a person browsing, not of a scan
                     pace = max(speed["pause"], min(own[1], speed["look"]), speed["look"] / 2)
             elif self.token:
                 limit, pace = 1, max(pace, TOKEN_PACE if not self.first else 0.3)
             elif self.preview:
                 limit, pace = speed["preview"]
-            lane = (self.host, self.login, self.preview, self.token, self.browse)
+            lane = (self.host, self.login, self.preview, self.token, self.browse, self.bulk)
             entry = _hosts.get(lane)
             if entry is None or entry["limit"] != limit:
                 entry = _hosts[lane] = {
@@ -904,7 +911,7 @@ class _Polite:
             with _lock:
                 # One at a time: the gap runs from the end of the last request,
                 # so a slow answer does not eat it.
-                at = (entry["end"] if self.login and not self.browse else entry["start"]) + pace * random.uniform(*JITTER)
+                at = (entry["end"] if self.login and not self.browse and limit == 1 else entry["start"]) + pace * random.uniform(*JITTER)
                 reading_break = 0.0                  # (not "pause": that is the module's function to rest a site)
                 if every and rest:                   # (a login's request; none on 'fast', and none for a picture somebody looks at)
                     entry["count"] += 1
@@ -1239,6 +1246,17 @@ def download(url, folder, mime_hint="", progress=None, headers=None):
         return _stream(url, part, digest, mime_hint, progress, headers)
 
 
+def clean_parts(folder, older=3600):
+    """What a download that was cut off (the window closed, the power went) left in a folder: its unfinished .part file. Only those untouched for
+    `older` seconds -- another download may be writing one."""
+    try:
+        for part in pathlib.Path(folder).glob(".????????????.part"):
+            if time.time() - part.stat().st_mtime > older:
+                part.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
 def _stream(url, part, digest, mime_hint, progress, headers):
     resp = _get(url, stream=True, headers=headers, file=True)
     try:
@@ -1254,15 +1272,21 @@ def _stream(url, part, digest, mime_hint, progress, headers):
             total = int(resp.headers.get("Content-Length") or 0)
         except ValueError:
             total = 0
+        written = 0
         with open(part, "wb") as out:
             for chunk in resp.iter_content(1 << 16):
                 digest.update(chunk)
                 out.write(chunk)
+                written += len(chunk)
                 if progress:
                     progress(len(chunk))
                 if watch:
                     done += len(chunk)
                     watch(done, total)
+        # A connection that closed early is not a short file: with the length known (and no compression to change it) it is an error, or a
+        # picture cut off in the middle would be kept as the whole one.
+        if total and written != total and not resp.headers.get("Content-Encoding"):
+            raise requests.exceptions.ChunkedEncodingError("the connection closed after %d of %d bytes" % (written, total))
     except BaseException:
         part.unlink(missing_ok=True)
         raise

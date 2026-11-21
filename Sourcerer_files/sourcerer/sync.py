@@ -67,6 +67,7 @@ COOL_OPEN = (1, 6, 24)
 FOCUS_GAP = (4, 10)          # ... for the card somebody has opened in Browse: they are waiting
 PICK_FROM = 40               # the next card is the first of this many waiting ones whose sites are not cooling down
 GIVE_UP = 3                  # syncs a file may fail before its source completes without it
+OFFLINE_AFTER = 4            # downloads in a row that lose their connection before the rest of a sync is left for the next one
 
 _lock = threading.Lock()
 _save = threading.Lock()     # deciding and saving happen one file at a time
@@ -454,14 +455,7 @@ def scheduler():
                 except Exception:
                     log.exception("account check")
             try:
-                if db.get_setting("auto_sync") != "1":
-                    continue
-                now = time.time()
-                if now >= _next_auto(now):
-                    hours = db.setting_int("auto_hours", 1, 168)
-                    # Not every n hours on the dot: a regular robot is the easiest to spot.
-                    db.set_setting("next_auto", str(now + hours * 3600 * random.uniform(0.85, 1.2)))
-                    db.set_setting("last_auto", datetime.datetime.now(datetime.timezone.utc).isoformat())
+                if _auto_due(time.time()):
                     time.sleep(random.randint(0, 180))
                     if enqueue(auto=True):
                         event("info", "Automatic sync started")
@@ -497,6 +491,17 @@ def backfill_avatars():
             with db.connect() as con:
                 con.execute("UPDATE artists SET avatar_checked = COALESCE(avatar_checked, ?) WHERE id = ?", (_now(), artist_id))
         time.sleep(random.uniform(4, 9))
+
+
+def _auto_due(now):
+    """Whether the automatic sync is due now (Settings > Sync: on, and its time has come -- also after Sourcerer was closed for days: the time is kept).
+    When it is, the next one is set: not every n hours on the dot, a regular robot is the easiest to spot."""
+    if db.get_setting("auto_sync") != "1" or now < _next_auto(now):
+        return False
+    hours = db.setting_int("auto_hours", 1, 168)
+    db.set_setting("next_auto", str(now + hours * 3600 * random.uniform(0.85, 1.2)))
+    db.set_setting("last_auto", datetime.datetime.now(datetime.timezone.utc).isoformat())
+    return True
 
 
 def _next_auto(now):
@@ -1018,6 +1023,14 @@ def _sync_artist(artist_id, auto=False, only=None, mode=None):
     with _lock:
         cur.update(phase="download", total=len(todo))
     failed_sources = set()
+    # A source that was complete is not complete until this sync has got everything it found: stopped half way (a crash, the connection, the window
+    # closed, Cancel), the next sync must walk on, or its early stop at the first known page would skip what was never saved.
+    unfinished = [(src["id"],) for src in {s["id"]: s for s, _site, _m in todo}.values() if src["complete"]]
+    if unfinished:
+        with db.connect() as con:
+            con.executemany("UPDATE sources SET complete = 0 WHERE id = ?", unfinished)
+    for folder in {target_folder(artist, site.LABEL) for _src, site, _m in todo}:
+        net.clean_parts(folder)                    # (what a download that was cut off left behind)
     remaining = collections.Counter(src["id"] for src, _site, _m in todo)   # per source: still to download
     unsettled = collections.defaultdict(set)                                  # ... and which
     for src, _site, m in todo:
@@ -1028,6 +1041,9 @@ def _sync_artist(artist_id, auto=False, only=None, mode=None):
     def one(job):
         src, site, media = job
         if _cancelled(cur):
+            return
+        if cur.get("offline"):                     # the connection is down: nothing more is tried this time, the next sync carries on
+            failed_sources.add(src["id"])
             return
         done = _fetch(artist, src, site, media, cur, when.get((src["id"], media.remote_key)))
         settled = bool(done)
@@ -1321,6 +1337,21 @@ def _fetch(artist, src, site, media, cur, when=None):
         return None
     except Exception as e:
         reason = net.reason(e)
+        if isinstance(e, (requests.ConnectionError, requests.Timeout, requests.exceptions.ChunkedEncodingError)) and "CERTIFICATE" not in str(e):
+            # The network, not the file: a connection that dropped says nothing against it, so it is not counted towards giving up on it; it
+            # is tried again at the next sync. A few in a row mean the connection is down: the rest of this sync is not tried at all.
+            with _lock:
+                cur["failed"] += 1
+                cur["dropped"] = cur.get("dropped", 0) + 1
+                first, lost = cur["dropped"] == 1, cur["dropped"] >= OFFLINE_AFTER and not cur.get("offline")
+                if lost:
+                    cur["offline"] = True
+            if lost:
+                event("warn", "The connection is down (%s): what is left waits for the next sync" % reason, artist)
+            elif first:
+                event("warn", "A download was interrupted (%s): it is tried again at the next sync" % reason, artist,
+                      post=media.post_url or "", key=media.remote_key)
+            return None
         login = sources.account_key(src["url"])
         if login and reason.startswith(net.LOGIN_PREFIX) and accounts.logged_in(login):
             _login_ran_out(login, site.LABEL)     # pixiv's /pages answers a dead login with 401
@@ -1331,6 +1362,8 @@ def _fetch(artist, src, site, media, cur, when=None):
         with _lock:
             cur["failed"] += 1
         return False
+    with _lock:
+        cur["dropped"] = 0                         # (a file came through: the connection is there)
     size = part.stat().st_size
     phash, width, height = imaging.info(part)
     with _save:

@@ -16,6 +16,10 @@ Run by .github/workflows/checks.yml on every pull request, and by hand before pu
   still there stays deleted, a sweep and an offline library fetch nothing again; a saved file gets its post's date, and where the site gave none the
   listing's order among the posts around it (a cut-off run carries on below what it saved, a file fetched again gets its old time), the images of one post
   apart; restamp and "Put files in upload order" (sync._stamp, _timeline, _ordered, restamp);
+* files with a login go several at once, a new one started every `files` seconds (net.py: _Polite bulk lane, login_files), one at a time on a site that said a word;
+* a sync that was stopped (the connection dropped, Cancel, a crash) is carried on: what was saved stays, the source is walked again, a dropped connection is not counted against
+  a file, a cut-off file is no file, leftover .part files are cleaned; the automatic sync queues the cards with auto-download and is due after Sourcerer was closed
+  for days (sync.py: _sync_artist, _fetch, _auto_due, enqueue);
 * Refresh all also looks at the accounts every login follows (server.py: start_sync -> follows.look_async), one card's Refresh and a download do not;
 * gallery.picture for a site with no resolver (the booru-like case the forum fix must not change).
 * a forum's videos, animated WebPs and crops (xenforo._media, net.fetch_picture / sniff, gallery.picture, server.py): the type comes from the extension and
@@ -274,7 +278,7 @@ def tile_checks():
 # ---- the speed choice -------------------------------------------------------------------------------------------------------------------------
 
 def speed_checks():
-    need = {"parallel", "per_host", "pause", "gap", "pace", "files", "every", "rest", "look", "preview", "browse"}
+    need = {"parallel", "per_host", "pause", "gap", "pace", "files", "login_files", "every", "rest", "look", "preview", "browse"}
     check(set(net.PROFILES) == {"careful", "normal", "fast"} and all(set(p) == need for p in net.PROFILES.values()), "three levels, each says everything")
     n = net.PROFILES["normal"]
     check((n["parallel"], n["per_host"], n["pause"], n["gap"]) == (24, 32, 0.1, (3, 15)), "normal is what the settings were (24 at once, 32 per site, 0.1 s, a gap of 3-15 s)")
@@ -288,11 +292,11 @@ def speed_checks():
     check(net._rhythm(site_url, True)[0] == 2.0, "careful files: LOGIN_PACE")
     net.configure(speed="normal")
     got = net._rhythm(site_url, True)
-    check(got[0] == 1.0 and got[1] == (40, 80) and got[2] == (6, 20), "normal files: 1.0 s, a rest of 6-20 s every 40-80", got)
+    check(got[0] == 0.6 and got[1] == (40, 80) and got[2] == (6, 20), "normal files: a new one every 0.6 s, a rest of 6-20 s every 40-80", got)
     check(net._rhythm(site_url, False)[0] == 2.0, "a page keeps LOGIN_PACE whatever is chosen")
     net.configure(speed="fast")
     got = net._rhythm(site_url, True)
-    check(got[0] == 0.5 and got[1] is None, "fast files: 0.5 s, no rest", got)
+    check(got[0] == 0.1 and got[1] is None, "fast files: a new one every 0.1 s, no rest", got)
     net._state["unfriendly"][site] = time.time() + 3600
     got = net._rhythm(site_url, True)
     check(got[0] == 2.0 and got[1] == (20, 40), "a site that said a word is read carefully even under fast", got)
@@ -345,11 +349,29 @@ def speed_checks():
         net.HOSTS["downloads.fanbox.cc"] = (2, 0.05)
         fresh("fast")
         check(lane("https://downloads.fanbox.cc/images/a.jpg", 6, 0.4, browse=True)[1] == 2, "fast: Fanbox's file host keeps its own two at once")
-        for name, least in (("normal", 0.1), ("fast", 0.05)):
+        for name, at_once, apart in (("careful", 1, 0.2), ("normal", 2, 0.06), ("fast", 6, 0.01)):
             fresh(name)
-            starts, peak = lane(site_url, 4, 0.05, bulk=True)
+            starts, peak = lane(site_url, 8, 0.15, bulk=True)
             gaps = [b - a for a, b in zip(starts, starts[1:])]
-            check(peak == 1 and all(g >= least - 0.01 for g in gaps), "%s: files one at a time, %.2f s after the end of the last" % (name, least), (peak, gaps))
+            check(peak == at_once and all(g >= apart - 0.01 for g in gaps),
+                  "%s: files with a login %d at once, a new one at least %.2f s after the last START" % (name, at_once, apart), (peak, gaps))
+        fresh("careful")
+        starts, peak = lane(site_url, 4, 0.05, bulk=True)
+        gaps = [b - a for a, b in zip(starts, starts[1:])]
+        check(peak == 1 and all(g >= 0.2 + 0.04 for g in gaps), "careful: one file at a time, the gap counted from the END of the last one", (peak, gaps))
+        fresh("fast")
+        lane(site_url, 1, 0.01, login=True)                              # (pages and lists keep the one-at-a-time lane of their own)
+        starts, peak = lane(site_url, 4, 0.1)
+        check(peak == 1, "fast: pages and lists with a login are still one at a time", peak)
+        net._state["unfriendly"][site] = time.time() + 3600
+        fresh("fast")
+        starts, peak = lane(site_url, 4, 0.05, bulk=True)
+        check(peak == 1, "a site that said a word is read one file at a time, whatever is chosen", peak)
+        net._state["unfriendly"].clear()
+        net.HOSTS["slow.example"] = (2, 0.05)
+        fresh("fast")
+        starts, peak = lane("https://slow.example/a.jpg", 6, 0.15, bulk=True)
+        check(peak == 2, "a touchy host keeps its own two at once", peak)
         net.HOSTS["www.pixiv.net"] = (1, 1.5)
         for name in ("careful", "normal", "fast"):
             fresh(name)
@@ -450,7 +472,7 @@ def tune_checks():
     net._state["unfriendly"], net._state["paused"], net._state["spent"] = {}, {}, {}
     state = client.get("/api/state").get_json()["speed"]
     names = {k["key"] for k in state["knobs"]}
-    want = {"parallel", "per_host", "pause", "pace", "files", "every", "rest", "gap_min", "gap_max", "look", "preview_n", "browse_n",
+    want = {"parallel", "per_host", "login_files", "pause", "pace", "files", "every", "rest", "gap_min", "gap_max", "look", "preview_n", "browse_n",
             "limit_pixiv", "limit_patreon", "limit_x", "limit_fanbox", "limit_fantia", "limit_other"}
     check(names == want, "every important value has a slider, and every daily limit", sorted(names ^ want))
     check(state["level"] == "normal" and not state["tuned"] and state["values"]["parallel"] == 24 and state["values"]["limit_x"] == 600,
@@ -603,15 +625,16 @@ def media_checks():
                 self.send_response(404)
                 self.end_headers()
                 return
+            sent[self.path] = 0                      # (before anything is sent: the reader may leave on the headers)
             self.send_response(200)
             self.send_header("Content-Type", got[1])
             self.send_header("Content-Length", str(len(got[0])))
             self.end_headers()
-            sent[self.path] = 0
             try:
                 for at in range(0, len(got[0]), 1 << 16):         # (in chunks: what a reader that gave up never received is counted)
                     self.wfile.write(got[0][at:at + (1 << 16)])
                     sent[self.path] += 1 << 16
+                    time.sleep(0.001)                # (so a reader that has left is noticed within a few chunks, not after the kernel's buffers are full)
             except ConnectionError:                  # (a reader that gave up on a file above its limit)
                 pass
     base = serve(Cdn)
@@ -654,12 +677,12 @@ def media_checks():
         net.fetch_picture(base + "/big.zip")
         check(False, "a zip sent as octet-stream is refused")
     except net.NoPicture:
-        check(sent.get("/big.zip", 1 << 40) < 30 << 20, "... from its first bytes: the 60 MB behind them are not downloaded", sent.get("/big.zip"))
+        check(sent.get("/big.zip", 0) < 30 << 20, "... from its first bytes: the 60 MB behind them are not downloaded", sent.get("/big.zip"))
     try:
         net.fetch_picture(base + "/big.mp4", allow_video=False)
         check(False, "a clip is refused where a still is wanted")
     except net.NoPicture:
-        check(sent.get("/big.mp4", 1 << 40) < 30 << 20, "a clip is refused where a still is wanted, before its body is read", sent.get("/big.mp4"))
+        check(sent.get("/big.mp4", 0) < 30 << 20, "a clip is refused where a still is wanted, before its body is read", sent.get("/big.mp4"))
     try:
         net.fetch_picture(base + "/clip.mp4", allow_video=False)
         check(False, "an octet-stream clip is refused where a still is wanted")
@@ -777,6 +800,143 @@ def media_checks():
 def imaging_animated(data):
     from sourcerer import imaging
     return imaging.animated(data)
+
+
+def resume_checks():
+    import os
+    from sourcerer import sources, sync
+    root = pathlib.Path(tempfile.mkdtemp(prefix="sourcerer-resume-"))
+    folder = root / "Artist R"
+    folder.mkdir()
+    N, GOOD = 30, 12
+    state = {"drop": True}
+
+    def picture(n):
+        return jpeg(((n * 37) % 256, (n * 91) % 256, (n * 53) % 256), (64, 48))
+
+    class Cdn(http.server.BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def log_message(self, *args):
+            pass
+
+        def finish(self):
+            try:
+                super().finish()
+            except ConnectionError:                  # (the connection this handler closed on purpose)
+                pass
+
+        def do_GET(self):
+            n = int(self.path.strip("/").split(".")[0])
+            if (state["drop"] and n >= GOOD) or n == 999:           # the connection is gone / closes in the middle of a file
+                body = picture(1)
+                self.send_response(200)
+                self.send_header("Content-Type", "image/jpeg")
+                self.send_header("Content-Length", str(len(body) * 2 if n == 999 else len(body)))
+                self.end_headers()
+                if n == 999:
+                    self.wfile.write(body)
+                self.close_connection = True
+                self.connection.close()
+                return
+            body = picture(n)
+            self.send_response(200)
+            self.send_header("Content-Type", "image/jpeg")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+    base = serve(Cdn)
+
+    def pages(url):
+        for first in range(0, N, 10):                                     # three pages of ten, newest first
+            yield [Media(remote_key="r%d" % n, url="%s/%d.jpg" % (base, n), post_url="p", posted="", name="n%d" % n, filename="") for n in range(first, first + 10)]
+    fake = types.SimpleNamespace(KIND="fake", LABEL="Fakesite", match=lambda url: url.startswith("https://fake.test/"), pages=pages, profile=lambda url: {})
+    sources.SITES.insert(0, fake)
+    retries, net.RETRIES = net.RETRIES, 1
+    old_library = db.get_setting("library")
+    try:
+        with db.connect() as con:
+            con.execute("DELETE FROM artists WHERE id = 21")
+            con.execute("INSERT INTO artists (id, name, folder, layout, dedupe, auto_download, listed) VALUES (21, 'Artist R', ?, 'together', 'keep_all', 1, 0)", (str(folder),))
+            con.execute("INSERT INTO sources (id, artist_id, kind, url, complete) VALUES (21, 21, 'fake', 'https://fake.test/r', 1)")    # (read to its end by an earlier sync)
+        old = folder / ".aaaaaaaaaaaa.part"
+        old.write_bytes(b"x")
+        os.utime(old, (time.time() - 7200, time.time() - 7200))
+        fresh = folder / ".bbbbbbbbbbbb.part"
+        fresh.write_bytes(b"x")
+        sync._sync_artist(21)                                              # the connection drops after the first files
+        with db.connect() as con:
+            saved = con.execute("SELECT COUNT(*) FROM files WHERE artist_id = 21 AND path IS NOT NULL").fetchone()[0]
+            complete = con.execute("SELECT complete FROM sources WHERE id = 21").fetchone()[0]
+            counted = con.execute("SELECT COUNT(*) FROM failures WHERE artist_id = 21").fetchone()[0]
+        check(0 < saved < N, "an interrupted sync keeps what it saved and not more", saved)
+        check(complete == 0, "... and leaves the source to be walked again (its early stop would skip what was never saved)", complete)
+        check(counted == 0, "a connection that dropped is not counted against the files (they are not given up on)", counted)
+        check(not old.exists() and fresh.exists(), "the leftover of a cut-off download is cleaned up, one that is being written is not")
+        check(not [f for f in folder.glob(".*.part") if f != fresh], "no unfinished file stays behind")
+        state["drop"] = False
+        sync._sync_artist(21)                                              # later: the connection is back
+        with db.connect() as con:
+            files = [r[0] for r in con.execute("SELECT path FROM files WHERE artist_id = 21 AND path IS NOT NULL")]
+            complete = con.execute("SELECT complete FROM sources WHERE id = 21").fetchone()[0]
+        check(len(files) == N and all(os.path.isfile(f) for f in files), "the next sync downloads the files that are missing, all %d are there" % N, len(files))
+        check(complete == 1, "... and the source is complete again")
+        # a file that was cut off in the middle is no file
+        try:
+            net.download("%s/999.jpg" % base, folder)
+            check(False, "a connection that closes in the middle of a file is an error")
+        except Exception:
+            check(not [f for f in folder.glob(".*.part") if f != fresh], "a connection that closes in the middle of a file is an error, no part of it is kept")
+    finally:
+        net.RETRIES = retries
+        sources.SITES.remove(fake)
+
+    # automatic sync: what it queues, and when
+    sync._running.pop(21, None)                                            # (the worker takes a card out of this when it is done; the test ran it by hand)
+    queued_before = list(sync._queue)
+    spawn, sync._spawn = sync._spawn, lambda: None
+    try:
+        with db.connect() as con:
+            con.execute("DELETE FROM artists WHERE id IN (31, 32, 33, 34)")
+            for i, (name, auto, listed, last) in enumerate((("Auto", 1, 0, "datetime('now')"), ("Manual", 0, 0, "datetime('now')"),
+                                                            ("Listed auto", 1, 1, "datetime('now')"), ("Never read", 0, 1, "NULL"))):
+                con.execute("INSERT INTO artists (id, name, auto_download, listed, last_sync) VALUES (?, ?, ?, ?, %s)" % last, (31 + i, name, auto, listed))
+        sync._queue.clear()
+        sync.enqueue(auto=True)
+        queued, modes = set(sync._queue), dict(sync._modes)
+        check(21 in queued and 31 in queued, "automatic sync queues the cards with auto-download", sorted(queued))
+        check(32 not in queued and 33 not in queued, "... and not the ones without it, nor a card that is only listed")
+        check(34 in queued and modes.get(34) == "scan" and modes.get(31) is None, "... a listed card never read is only scanned, the others download", modes)
+        sync._queue.clear()
+        client = server.app.test_client()
+        client.post("/api/artists/33/auto-download", json={"on": True})
+        with db.connect() as con:
+            listed = con.execute("SELECT listed FROM artists WHERE id = 33").fetchone()[0]
+        sync.enqueue(auto=True)
+        check(listed == 0 and 33 in sync._queue, "switching auto-download on takes a listed card into the routine", (listed, sorted(sync._queue)))
+    finally:
+        sync._spawn = spawn
+        sync._queue.clear()
+        sync._queue.extend(queued_before)
+        sync._modes.clear()
+        sync._auto.clear()
+    now = time.time()
+    saved_settings = {k: db.get_setting(k) for k in ("auto_sync", "auto_hours", "next_auto", "last_auto")}
+    try:
+        db.set_setting("auto_sync", "1")
+        db.set_setting("auto_hours", "6")
+        db.set_setting("next_auto", str(now + 3600))
+        check(not sync._auto_due(now), "automatic sync waits for its time")
+        db.set_setting("next_auto", str(now - 5 * 86400))                  # (Sourcerer was closed for days)
+        check(sync._auto_due(now), "... and is due as soon as Sourcerer runs after it was closed for days")
+        nxt = float(db.get_setting("next_auto"))
+        check(now + 6 * 3600 * 0.85 - 1 <= nxt <= now + 6 * 3600 * 1.2 + 1 and not sync._auto_due(now), "... then the next one is set hours ahead", nxt - now)
+        db.set_setting("auto_sync", "0")
+        db.set_setting("next_auto", str(now - 100))
+        check(not sync._auto_due(now), "switched off, it never starts")
+    finally:
+        for k, v in saved_settings.items():
+            db.set_setting(k, v or "")
 
 
 # ---- what a card already has, and the date of a saved file ------------------------------------------------------------------------------------
@@ -946,7 +1106,7 @@ def refresh_checks():
 
 
 def main():
-    for group in (forum_checks, tile_checks, speed_checks, refusal_checks, tune_checks, settings_checks, gallery_checks, media_checks, library_checks, refresh_checks):
+    for group in (forum_checks, tile_checks, speed_checks, refusal_checks, tune_checks, settings_checks, gallery_checks, media_checks, resume_checks, library_checks, refresh_checks):
         print("--", group.__name__, flush=True)
         try:
             group()
