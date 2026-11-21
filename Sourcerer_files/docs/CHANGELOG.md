@@ -3,6 +3,12 @@
 Newest first. Each entry is made from the commit subjects when a version is made, so a subject is one short,
 plain sentence.
 
+## v0.69 — 2026-11-21
+
+- Forums: clips and animated WebPs play, and Full mode shows whole pictures instead of cropped thumbnails
+- Clips, sounds and attachments of every site are told by type and shown right, and the grid never downloads one as a picture
+- Files with a login download several at once, and a sync that was stopped is carried on by the next one
+
 ## v0.68 — 2026-11-19
 
 - Refresh all also looks at the accounts every login follows for new ones
