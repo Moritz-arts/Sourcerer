@@ -11,7 +11,7 @@ and the account check read the page's `data-user-type` (a visitor's is "visitor"
 import random
 import re
 
-from . import _gdl
+from . import _gdl, kinds
 from .. import accounts, db, net
 
 KIND = "fantia"
@@ -125,5 +125,6 @@ def pages(url):
                      posted=f.get("date") or "", name="%s_%s" % (f["post"], f["file"]),
                      # "album_image" is a redirect to the picture, not a name: the server's own name is used.
                      filename="%s.%s" % (f["key"], f["ext"]) if f.get("key") and f.get("ext") else "",
-                     headers={"Referer": HOME + "/"}, large=f["url"], preview_headers={"Referer": HOME + "/"})
+                     headers={"Referer": HOME + "/"}, large=f["url"], preview_headers={"Referer": HOME + "/"},
+                     **kinds.typed(f.get("ext")))                                 # (a clip, a sound or a plain attachment is no picture)
                for f in batch if f.get("url") and f.get("file") is not None and not str(f["url"]).startswith("text:")]

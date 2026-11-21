@@ -822,6 +822,33 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   again fetches neither the page nor the wrong original again) and otherwise raises: the viewer keeps the small copy and a sync fails the file. Checked by `.github/checks.py`
   against a made-up forum whose numbers differ; **not seen on a real forum** (the data-id naming is from XenForo's source, not from the user's forum).
   A thread's attachments still go through gallery-dl.
+- **Clips, sounds, animated WebPs, plain attachments and cropped thumbnails** (v0.69; `sources/kinds.py`, `xenforo._media`, `Media.crop`, `net.fetch_picture` /
+  `net.sniff` / `net.NoPicture`, `gallery.picture` "whole", `gallery._no_still`, `server.gallery_picture`, `galWhole` / `galShape` / `galMarkVideo` in app.js):
+  "some WebP/video from the forums work, some do not; thumbnails are zoomed in" was several causes, and the review of "all formats shown right" found the same
+  gaps on other sites. (1) **A file's type is told by its name** (`kinds.type_of`, one table for pictures, clips, sounds and plain files -- `kinds.FILE` -- used by
+  XenForo, Fanbox, Fantia, Mastodon; `kinds.typed(name)` is the `{"mime", "video"}` a `Media` gets). A media-gallery item's address ends in `/full`, and
+  **its `ext` is cut from the uploader's TITLE, not from the file** (a clip titled "Sunset" says nothing): that guess is only a head start, the bytes decide
+  (3, 5). Fanbox and Fantia gave no type at all, so their mp4 files were pictures (tile with a photo icon, the whole clip fetched as its "thumbnail").
+  A sound or a clip is `item.video` (the viewer's player plays both); **a clip, a sound or a plain file with no small picture has no tile picture** (`_no_still`:
+  `thumb` is "", the tile shows the play icon or a name) and `gallery.picture` answers `NoPicture` for every size but the viewer's -- also the Artists view
+  (`overview`, `snapshot_picture`), which downloaded whole clips to find no still. (2) **A server's type table may not know WebP or WebM and answers
+  `application/octet-stream`**: `fetch_picture` reads the first 32 bytes of such an answer and judges them with `net.sniff` (a HEIC is an image no engine shows,
+  not a clip), and **only then** reads on -- a zip is never downloaded to find out it is no picture. **`allow_video=False` refuses a clip or a sound from its
+  headers** (every caller that wants a still: grid and mid pictures, "whole", snapshots, profile pictures, site icons -- before it, any octet-stream or video
+  answer made `limit` meaningless and cost up to 300 MB). (3) A clip is held to `video_limit` (300 MB), not a picture's 40 MB, and kept in memory apart
+  (`VIDEO_MEMORY`, `_cached_video`) so one clip does not push every thumbnail out; a clip the viewer cached is never handed to the grid as a picture.
+  (4) **No HTTP Range**: a `<video>` asks for ranges and some engines do not start without them -- the proxy answers 206 from the bytes (`make_conditional`); the
+  library's file route already did. (5) **The viewer's last resort for a picture that will not load is a `<video>`** (also where the grid's picture is there: a
+  forum's clip always has its small copy), tried *before* the grid's picture stands in; it marks the item and its tile as a clip when it plays (`galMarkVideo`) and
+  says so when nothing shows (`galUnplayable`). (6) **The forum's thumbnail is a fixed-size CROP** (square): Full mode learned a square from it and stretched the
+  crop into the real shape -- "zoomed in". A crop says nothing of the shape: the tile ignores its load (`own.crop`), and in Full the **whole** picture is laid
+  over it (`item.whole`, size `whole`: a copy of `WHOLE` (960) px made in memory -- or the file itself when it moves -- from the original, which is **not** kept; the
+  viewer's cached one is used when there is one) and that tells the tile's shape (`galShape`; the viewer's load corrects it too). It is an ordinary grid request
+  (`first=False`, the `browse` lane, no priority). **This is the one case where the grid downloads an original** (the forum's only other size is the crop);
+  Squares keeps the crop, an item in the library has the library's thumbnail and no `crop` (`item()` drops it), a clip or an attachment never has one. A WebP / APNG
+  with no small copy is shown as the file when it moves (`imaging.animated`), else a small picture is made as before. Checked by `.github/checks.py`
+  (`media_checks`) and in Chromium against the real server with made-up files (an untyped clip with a crop poster, a zip, a clip that cannot play, an animated WebP,
+  a wide crop in Full mode: its tile is 3:1 and wears the whole picture); **not seen on a real forum**.
 - **A Misskey looks like a Mastodon in the address** (`https://misskey.io/@user`) **and answers nothing a
   Mastodon client asks** (404 on `/api/v1/...`): Baraag's follow list names such accounts, and they were
   cards that never worked. `sources/misskey.py` has the whole API (POST + JSON, also what only reads:
@@ -1314,7 +1341,7 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   1200 px master, X `name=large`, Bluesky's fullsize, Patreon's `default_large`, a booru's sample) becomes the tile's
   picture, so there is no blocky small stage and nothing laid over it; a downloaded picture's thumbnail is made at 960 px
   (`/api/thumb/<id>?s=`). A site that only has the original (Mastodon, Misskey, forums) keeps its small preview -- the
-  original is never fetched for a grid. `fast` -- **the standard since v0.34, the user saw no difference** -- is the old behaviour: small pictures, `galSharpen` for wide tiles.
+  original is never fetched for a grid (the one exception: Full mode over a forum's cropped thumbnails, *Clips, sounds...* below). `fast` -- **the standard since v0.34, the user saw no difference** -- is the old behaviour: small pictures, `galSharpen` for wide tiles.
 - **Grid pictures must be sharp enough for their tile** (in `fast`). Sources hand out their own small sizes
   and the tile decides how far it is stretched: pixiv 540 px (360 was blocky), danbooru 720,
   Gelbooru/Moebooru/e621 the sample instead of the 150 px preview. Full mode spreads a wide

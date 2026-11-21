@@ -39,6 +39,15 @@ def distance(a, b):
     return bin(int(a, 16) ^ int(b, 16)).count("1")
 
 
+def animated(data):
+    """Whether an image file has more than one frame (an animated WebP, APNG or GIF)."""
+    try:
+        with Image.open(io.BytesIO(data)) as img:
+            return bool(getattr(img, "is_animated", False))
+    except Exception:
+        return False
+
+
 def preview(src, size=480):
     """A downloaded picture made small, in memory, for a card: the card shows the
     downloads themselves, and no second copy of any picture is written anywhere."""

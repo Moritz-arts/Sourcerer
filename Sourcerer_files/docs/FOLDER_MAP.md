@@ -25,6 +25,7 @@ Sourcerer/                        <- what Sourcerer.zip unpacks to; move it free
     │   ├─ gdl_run.py             gallery-dl's entry point; reports the limits X announces (listings) and, for X's follows, traces X's answers (standalone: imports nothing of ours)
     │   ├─ sources/               one module per site
     │   │   ├─ __init__.py        Media, site_for, normalize, describe, profile
+    │   │   ├─ kinds.py           what a file's name says it is: picture, clip, sound or plain file (imports nothing of ours)
     │   │   ├─ mastodon.py        Mastodon / fediverse, its API; login per server (OAuth)
     │   │   ├─ misskey.py         Misskey and its forks (misskey.io...), public notes; login per server (MiAuth)
     │   │   ├─ bluesky.py         Bluesky, its API, original blobs; login with an app password
