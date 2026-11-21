@@ -2404,8 +2404,8 @@ function speedSays(p) {
   var s = function (a) { return n(a[0]) + "-" + n(a[1]) + " s"; }, n = function (x) { return String(Math.round(x * 100) / 100); };
   return [
     "Downloads: up to " + p.parallel + " files at once, " + p.per_host + " per site" + (p.pause ? ", at least " + n(p.pause) + " s between two requests to one site." : "."),
-    "Sites with your login (pixiv, X, Patreon, Fanbox, Fantia, forums): a page or list every " + n(p.pace) + "-" + n(p.pace * 1.6) + " s, " + s(p.gap) + " between two artists, a file about every " +
-      n(p.files * 1.3) + " s" + (p.every ? ", a rest of " + s(p.rest) + " every " + p.every[0] + "-" + p.every[1] + " files." : ", no rest."),
+    "Sites with your login (pixiv, X, Patreon, Fanbox, Fantia, forums): a page or list every " + n(p.pace) + "-" + n(p.pace * 1.6) + " s, " + s(p.gap) + " between two artists, a new file about every " +
+      n(p.files * 1.3) + " s (" + ((p.login_files || 1) > 1 ? "up to " + p.login_files + " at once" : "one at a time") + ")" + (p.every ? ", a rest of " + s(p.rest) + " every " + p.every[0] + "-" + p.every[1] + " files." : ", no rest."),
     "Browse: a page of such a site every " + n(p.look) + "-" + n(p.look * 1.6) + " s; pictures " + p.preview[0] + " at a time" +
       (p.preview[1] ? ", " + n(p.preview[1]) + " s apart" : ", all at once, like a browser") + "."
   ];

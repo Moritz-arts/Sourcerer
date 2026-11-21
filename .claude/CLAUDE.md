@@ -1173,6 +1173,28 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   host (`HOSTS`) keeps its own limit. The server checks, clamps and puts every value on its step (`clean_tune`); one equal to its level's own is no change. `every` is `(n, 2n)`
   and `rest` `(r, 4r)`: Normal's rest of 6-20 s is 6-24 s only once the rest slider was touched (an untouched knob keeps the level's exact pair). The page's reading breaks for
   pages (`READ_EVERY`, `READ_BREAK`) are no slider -- they are what accounts are flagged for. Checked by `.github/checks.py` (`tune_checks`) and in Chromium against the real server.
+- **Files with a login go several at once** (v0.69; `PROFILES["login_files"]`, `net._Polite` bulk lane; supersedes the `files` numbers above): "I download at ~500 KB/s,
+  Firefox would be faster" was measured, not guessed -- a made-up CDN on loopback, the real `sync._fetch` and lanes: **a host with no login 28 files/s (54 MB/s), a host
+  with a login 1.5 files/s (3 MB/s)** -- the login lane let one file at a time through, a gap (`files`) after the END of each, so the gap was the whole speed: 0.65 s
+  per file = ~500 KB/s for 330 KB pictures (forums, Fanbox, Fantia; pixiv / X / Patreon files come from hosts with no login and were never held by it). A file is a file,
+  not a page or a list (what an account is flagged for), so the bulk lane (its own `_hosts` key element) now takes `login_files` at once -- careful 1, **normal 2**, **fast 6**
+  (a browser opens six) -- a new one *started* `files` seconds after the last START (careful 2.0, normal 0.6, fast 0.1; the end-based gap stays where the lane is one at
+  a time: pages, lists, careful). Unchanged: `HOSTS` (a touchy host keeps its own lower limit), a site that said a word (`_calm`: one file at a time, `LOGIN_PACE`), the
+  daily `BUDGETS` (they count these requests too, so a fast level reaches a forum's 3000 sooner), pages / lists / API calls. Two sliders under Speed & safety ("Files at once",
+  "A new file starts every"); on Fast the loopback run went from 1.5 to 7.6 files/s. Checked by `.github/checks.py` (`speed_checks`); the real sites' answer is not known.
+- **A stopped sync is carried on by the next one** (v0.69; `sync._sync_artist`, `_fetch`, `net.clean_parts`, `_auto_due`): the user asked whether closing the window or losing the
+  connection mid-download is picked up again. Files are saved one by one (a `.part` file renamed when whole, its row written after), so what was saved stays; what
+  was not is found by the next sync -- **unless the source was `complete`**, whose early stop at the first page with a known post skips older posts that were never
+  saved (a backlog stopped half way: the newest are known, the oldest are not). So a source that has something to download is set `complete = 0` when the download
+  begins and set back only when the sync went all the way without a failure or a Cancel (the rule the code always said, `Complete only after a sync went all the way`, but
+  never enforced for a source that was complete already). **A connection that drops is not the file's fault** (`ConnectionError`, `Timeout`, a body cut off --
+  `ChunkedEncodingError`): not counted towards `GIVE_UP`, logged once, and `OFFLINE_AFTER` (4) in a row with none coming through in between leave the rest of the sync untried
+  ("The connection is down ... waits for the next sync") instead of 48 workers asking for hours. `_stream` compares the bytes with `Content-Length` (no compression): a
+  cut-off picture is an error, never a kept file. A `.part` older than an hour in a card's folder is removed when it downloads (`net.clean_parts`). The automatic sync is
+  `_auto_due` (Settings > Sync on and its time come, kept in `next_auto`, so also after Sourcerer was closed for days): it queues the cards with auto-download that are
+  not only listed (`enqueue(auto=True)`), turning auto-download on takes a listed card in, and a sweep still leaves a source alone that was read lately (`_cooling`: pixiv / Patreon /
+  Fanbox / Fantia 6 h, X / forums 12 h at the shortest, longer for a quiet artist; Bluesky / Mastodon / Misskey / boorus 1 h): "Every 6 hours" is the sweep, not a promise
+  to read every source that often. Checked by `.github/checks.py` (`resume_checks`: a made-up site whose connection drops, then comes back).
 - **A site that objects rests, all of it** (`net.pause`, saved in the
   setting `paused`): a 429 on a login, a bot check, three refused logins,
   X's ratelimit or lock (gallery-dl `ratelimit: abort`, `_run`). A site is
