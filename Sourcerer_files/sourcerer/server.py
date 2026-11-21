@@ -615,7 +615,7 @@ def avatar(artist_id):
             abort(404)
         try:
             _ctype, raw = net.fetch_picture(url, headers=json.loads(row["avatar_headers"]) if row["avatar_headers"] else None,
-                                            limit=6 << 20)
+                                            limit=6 << 20, allow_video=False)
             data = imaging.avatar(io.BytesIO(raw))
         except Exception as e:
             log.info("profile picture of card %d: %s", artist_id, net.reason(e))
@@ -647,7 +647,7 @@ def _site_icon_from(host):
             if not net.public_https(url):
                 continue
             try:
-                ctype, raw = net.fetch_picture(url, limit=1 << 20)
+                ctype, raw = net.fetch_picture(url, limit=1 << 20, allow_video=False)
                 return imaging.site_icon(io.BytesIO(raw))
             except Exception as e:
                 why = net.reason(e)
@@ -925,8 +925,8 @@ def gallery_picture(gallery_id, number, size):
         abort(404)
     try:
         ctype, data = gallery.picture(gallery_id, number, size)
-    except (KeyError, gallery.NoPicture):
-        abort(404)                                  # (a video with no poster: the tile keeps its placeholder, nothing to log)
+    except (KeyError, net.NoPicture):
+        abort(404)                                  # (a clip with no poster, a zip: the tile keeps its placeholder, nothing to log)
     except Exception as e:
         log.info("gallery picture: %s", net.reason(e))
         abort(502)
@@ -950,7 +950,7 @@ def snap_thumb(source_id):
     _own_page()
     try:
         ctype, data = gallery.snapshot_picture(source_id, request.args.get("k", ""))
-    except KeyError:
+    except (KeyError, net.NoPicture):
         abort(404)
     except Exception as e:
         log.info("snapshot picture: %s", net.reason(e))

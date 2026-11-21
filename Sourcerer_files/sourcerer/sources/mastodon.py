@@ -19,7 +19,7 @@ import urllib.parse
 import requests
 
 from .. import accounts, config, net
-from . import misskey
+from . import kinds, misskey
 
 log = logging.getLogger(__name__)
 KIND = "mastodon"
@@ -303,5 +303,6 @@ def _media(server, status, media, src):
                  filename=urllib.parse.unquote(urllib.parse.urlparse(url).path.rsplit("/", 1)[-1]),
                  thumb=media.get("preview_url") or "", large=url,
                  video=media.get("type") in ("video", "gifv"),
+                 mime=kinds.type_of(url) or ("audio/mpeg" if media.get("type") == "audio" else ""),
                  width=((media.get("meta") or {}).get("original") or {}).get("width") or 0,
                  height=((media.get("meta") or {}).get("original") or {}).get("height") or 0)

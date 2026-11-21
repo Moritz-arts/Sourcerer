@@ -14,7 +14,7 @@ import re
 
 import requests
 
-from . import _gdl
+from . import _gdl, kinds
 from .. import accounts, net
 
 KIND = "fanbox"
@@ -140,5 +140,5 @@ def pages(url):
                      posted=f.get("date") or "", name="%s_%s" % (f["post"], f["num"]),
                      filename="%s.%s" % (f["key"], f["ext"]) if f.get("key") and f.get("ext") else "",
                      headers=HEADERS, large=f["url"], width=f.get("w") or 0, height=f.get("h") or 0,
-                     preview_headers=HEADERS)
+                     preview_headers=HEADERS, **kinds.typed(f.get("ext")))        # (a clip, a sound or a plain attachment is no picture)
                for f in found]

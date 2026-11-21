@@ -29,7 +29,7 @@ import urllib.parse
 
 import requests
 
-from . import _gdl
+from . import _gdl, kinds
 from .. import accounts, config, db, net
 
 log = logging.getLogger(__name__)
@@ -570,17 +570,7 @@ _ROUTE = re.compile(r"attachments/(?:[^/?#]*\.)?(\d+)/?(?:$|[?#])")
 _ANCHOR = re.compile(r'id="post-(\d+)"')
 _POST_TIME = re.compile(r'id="post-(\d+)"|datetime="([^"]+)"', re.I)
 _EXT = re.compile(r"\.(?=[a-z0-9]*[a-z])[a-z0-9]{2,5}$", re.I)       # "a.jpg", not "v2.5": the uploader's name, or a title with a dot
-_TYPES = {"gif": "image/gif", "webp": "image/webp", "apng": "image/apng", "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
-          "avif": "image/avif", "bmp": "image/bmp",
-          "mp4": "video/mp4", "m4v": "video/mp4", "webm": "video/webm", "mov": "video/quicktime", "ogv": "video/ogg", "mkv": "video/x-matroska",
-          "avi": "video/x-msvideo", "wmv": "video/x-ms-wmv", "flv": "video/x-flv", "mpg": "video/mpeg", "mpeg": "video/mpeg", "3gp": "video/3gpp"}
-
-
-def _type_of(name):
-    """The content type a file's extension says ("movie.mp4", or just "mp4"), "" when it says nothing: the listing gives no type, and a video
-    or an animated picture must be told from a still one before anything is fetched."""
-    name = str(name or "").strip().lower().rsplit("/", 1)[-1]
-    return _TYPES.get(name.rsplit(".", 1)[-1] if "." in name else name, "")
+_type_of = kinds.type_of                                                   # (the table lives in kinds.py: Fanbox, Fantia and Mastodon read it too)
 
 
 _gallery_route = {}            # host -> whether its media gallery exists (only what was settled is kept)
