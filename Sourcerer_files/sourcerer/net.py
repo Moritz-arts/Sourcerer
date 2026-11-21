@@ -1272,11 +1272,17 @@ def _stream(url, part, digest, mime_hint, progress, headers):
 
 
 _GENERIC = ("", "application/octet-stream", "binary/octet-stream", "application/x-octet-stream", "application/unknown")
+_PLAYED = ("video/", "audio/")
+
+
+class NoPicture(RuntimeError):
+    """What was asked for is no picture the grid can show (a page, a zip, a clip where a still was wanted): refused from the first bytes, the rest
+    of the body is never read. The gallery's route answers it with a quiet 404."""
 
 
 def sniff(data):
-    """The content type of a picture or video by its first bytes ("" when they say nothing known): a server whose type table does not know WebP or
-    WebM answers application/octet-stream, which is no reason to refuse the file."""
+    """The content type of a picture, a clip or a sound by its first bytes ("" when they say nothing known): a server whose type table does not
+    know WebP or WebM answers application/octet-stream, which is no reason to refuse the file."""
     head = bytes(data[:16])
     if head[:3] == b"\xff\xd8\xff":
         return "image/jpeg"
@@ -1284,37 +1290,56 @@ def sniff(data):
         return "image/png"
     if head[:6] in (b"GIF87a", b"GIF89a"):
         return "image/gif"
+    if head[:2] == b"BM" and len(head) > 14:
+        return "image/bmp"
     if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
         return "image/webp"
+    if head[:4] == b"RIFF" and head[8:12] == b"WAVE":
+        return "audio/wav"
     if head[4:8] == b"ftyp":
-        return "image/avif" if head[8:12] in (b"avif", b"avis") else "video/mp4"
+        brand = head[8:12]
+        if brand in (b"avif", b"avis"):
+            return "image/avif"
+        if brand in (b"heic", b"heix", b"hevc", b"hevx", b"heim", b"heis", b"mif1", b"msf1"):
+            return "image/heic"                        # no browser engine shows it: said so, not mistaken for a clip
+        return "audio/mp4" if brand in (b"M4A ", b"M4B ") else "video/mp4"
     if head[:4] == b"\x1a\x45\xdf\xa3":
         return "video/webm"
     if head[:4] == b"OggS":
         return "video/ogg"
+    if head[:3] == b"ID3" or head[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"):
+        return "audio/mpeg"
+    if head[:4] == b"fLaC":
+        return "audio/flac"
     return ""
 
 
-def fetch_picture(url, headers=None, limit=40 << 20, first=False, video_limit=300 << 20):
-    """A picture or video for the gallery, as (content type, bytes): asked for
-    once, no retries -- a preview is not worth asking a site twice -- and only
-    a picture or a video is accepted (a generic answer is judged by the file's first bytes). A picture
-    is held to `limit`, a video to `video_limit`: a clip is bigger than any picture and is not a thumbnail."""
+def fetch_picture(url, headers=None, limit=40 << 20, first=False, video_limit=300 << 20, allow_video=True):
+    """A picture, a clip or a sound for the gallery, as (content type, bytes): asked for once, no retries -- a preview is not worth asking a
+    site twice -- and nothing else is accepted (NoPicture). A generic answer (octet-stream) is judged by its first bytes, which are read before
+    anything more: a zip is never downloaded to find out. A picture is held to `limit`, a clip to `video_limit`; `allow_video=False` (a grid
+    picture, a profile picture, an icon: callers that want a still) refuses a clip before its body is read, whatever its size."""
     with _Polite(url, _carries_login(url, headers), first, preview=not first, browse=not first):
         resp = _get(url, stream=True, headers=headers, tries=1, pooled=True, file=True)
         try:
+            host = urllib.parse.urlparse(url).hostname
             ctype = (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
-            if not ctype.startswith(("image/", "video/")) and ctype not in _GENERIC:
-                raise RuntimeError("%s sent no picture" % urllib.parse.urlparse(url).hostname)
-            cap = video_limit if ctype.startswith("video/") or ctype in _GENERIC else limit
-            data = resp.raw.read(cap + 1, decode_content=True)
+            if not ctype.startswith(("image/",) + _PLAYED) and ctype not in _GENERIC:
+                raise NoPicture("%s sent no picture" % host)
+            head = b""
+            if ctype in _GENERIC:
+                head = resp.raw.read(32, decode_content=True)
+                ctype = sniff(head)
+                if not ctype:
+                    raise NoPicture("%s sent no picture" % host)
+            played = ctype.startswith(_PLAYED)
+            if played and not allow_video:
+                raise NoPicture("%s sent a clip, not a picture" % host)
+            cap = video_limit if played else limit
+            data = head + resp.raw.read(cap + 1 - len(head), decode_content=True)
         finally:
             resp.close()
-    if ctype in _GENERIC:
-        ctype = sniff(data)
-        if not ctype:
-            raise RuntimeError("%s sent no picture" % urllib.parse.urlparse(url).hostname)
-    if len(data) > (video_limit if ctype.startswith("video/") else limit):
+    if len(data) > cap:
         raise ValueError("file too large")
     return ctype, data
 

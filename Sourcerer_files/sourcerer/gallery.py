@@ -53,9 +53,11 @@ import uuid
 import requests
 
 from . import accounts, db, imaging, net, snapshots, sources, sync
+from .sources import kinds
 
 log = logging.getLogger(__name__)
 MEMORY = 160 << 20           # bytes of fetched pictures kept, the oldest dropped first
+WHOLE = 960                  # the long side of the copy laid over a forum's cropped thumbnail (picture "whole")
 VIDEO_MEMORY = 320 << 20     # ... and of videos, kept apart: one clip must not push every picture of the grid out
 IDLE = 1800                  # a gallery nobody asked anything of this long is closed (the page reopens one after 15 minutes anyway)
 MAX_GALLERIES = 8            # the page keeps up to 7 aside beside the one it shows
@@ -133,17 +135,27 @@ def _gif(m):
         (m.filename or m.url or "").lower().split("?", 1)[0].endswith(".gif")
 
 
+def _plays(m):
+    """Whether the post's file is played (a clip, a sound) rather than shown: the viewer gives it a player."""
+    return bool(m.video) or kinds.plays(m.mime)
+
+
+def _no_still(m):
+    """A clip, a sound or a plain file the site gave no small picture for: there is nothing to show in the grid, and its file must never be
+    fetched as if it were one (a clip is up to 300 MB, a zip is not an image)."""
+    return not m.thumb and (_plays(m) or kinds.is_file(m.mime))
+
+
 def _maybe_animated(m):
     """Whether the file may be an animated WebP or APNG: the listing cannot say (the file does), so the grid asks for the file and shows it
     as it is when it moves, else a small picture made from it."""
-    if m.video or _gif(m):
+    if _plays(m) or _gif(m):
         return False
     return (m.mime or "").lower() in ("image/webp", "image/apng") or \
         (m.filename or m.url or "").lower().split("?", 1)[0].endswith((".webp", ".apng"))
 
 
-class NoPicture(Exception):
-    """There is no picture to hand out for this size (a video the forum gave no poster for): the tile keeps its placeholder, nothing is logged."""
+NoPicture = net.NoPicture                    # nothing to hand out for this size: the tile keeps its placeholder, nothing is logged
 
 
 class _Source:
@@ -496,7 +508,7 @@ class _Gallery:
     def item(self, number):
         s, m = self.items[number]
         d = {"id": number, "source": s.label, "kind": s.kind, "host": s.host, "src": s.row["id"], "info": bool(getattr(s.site, "info", None)), "posted": m.posted, "w": m.width,
-             "h": m.height, "video": bool(m.video), "post": m.post_url, "saved": False, "fname": _fname(m),
+             "h": m.height, "video": _plays(m), "post": m.post_url, "saved": False, "fname": _fname(m),
              "key": m.remote_key,
              "artist": s.artist["name"], "artist_id": s.artist["id"]}
         mine = self.saved.get((s.artist["id"], m.remote_key))
@@ -509,9 +521,9 @@ class _Gallery:
             d.update(thumb=proxy + "thumb", large=proxy + "large")
         else:
             d.update(thumb=m.thumb, large=m.large or m.thumb)
-        if m.video and not m.thumb:
-            d["thumb"] = ""                          # no poster: the tile says "video" instead of asking for the clip as if it were a picture
-        if m.crop and m.thumb and not m.video and not gif and m.preview_headers is not None:
+        if _no_still(m):
+            d["thumb"] = ""                          # no poster: the tile says "video" (or shows a name) instead of asking for the file as if it were a picture
+        if m.crop and m.thumb and not _plays(m) and not kinds.is_file(m.mime) and not gif and m.preview_headers is not None:
             d["crop"], d["whole"] = True, proxy + "whole"      # the grid's picture is a crop of it: Full mode asks for the whole one (picture "whole")
         if getattr(s.site, "animation", None) and m.remote_key.endswith("_ugoira"):
             d["anim"] = True                         # the large view plays it; the grid keeps the still
@@ -521,7 +533,7 @@ class _Gallery:
             d.update(gif=True, thumb=animated, large=animated)
         # A screen-sized rendition that is not the original file nor the grid's picture: what a tile that
         # the grid's small one cannot fill sharply (Full mode's wide pictures) is sharpened with.
-        if not mine and m.large and m.large not in (m.url, m.thumb) and not m.video and not gif:
+        if not mine and m.large and m.large not in (m.url, m.thumb) and not _plays(m) and not gif:
             d["mid"] = proxy + "mid" if m.preview_headers is not None else m.large
             if sharp:                                # the grid shows it at once: no blocky stage, nothing laid over it
                 d["thumb"] = d.pop("mid")
@@ -533,6 +545,7 @@ class _Gallery:
                 if gif:
                     d["thumb"] = d["large"]
                 elif mine["width"]:
+                    d.pop("crop", None), d.pop("whole", None)      # the library's thumbnail has the picture's own shape: nothing to unfold
                     d["thumb"] = "/api/thumb/%d?v=%s%s" % (mine["id"], (mine["sha256"] or "")[:12], "&s=960" if sharp else "")
         return d
 
@@ -757,10 +770,9 @@ def picture(gallery_id, number, size):
     s, m = g.items[number]
     thumb = size == "thumb"
     whole = size == "whole"
-    if whole:
-        size = "large"
-    if m.video and not m.thumb and size != "large":
-        raise NoPicture()                            # a video the site gave no poster for: the tile keeps its placeholder, the viewer plays it
+    viewing = size == "large"                        # the file itself, for the viewer: the only size that may be a clip or a sound
+    if not viewing and (_no_still(m) or (whole and (_plays(m) or kinds.is_file(m.mime)))):
+        raise NoPicture("no picture for this post")
     animate = getattr(s.site, "animation", None)
     if size == "large" and animate and number not in _no_animation.get(gallery_id, ()):
         # a site's animation (pixiv's ugoira) plays in the large view. It answers None for a work that is no ugoira, and an
@@ -785,13 +797,12 @@ def picture(gallery_id, number, size):
 
     def get(address):
         # No retries for an answer (a refusal, a pause), but a dropped connection or a timeout is
-        # asked once more: one hiccup must not leave a hole in the grid.
+        # asked once more: one hiccup must not leave a hole in the grid. A clip is refused before its body is read unless it is the viewer's.
         try:
-            return net.fetch_picture(address, headers=m.preview_headers or None, first=size == "large")
+            return net.fetch_picture(address, headers=m.preview_headers or None, first=viewing, allow_video=viewing)
         except (requests.ConnectionError, requests.Timeout):
             time.sleep(0.8)
-            return net.fetch_picture(address, headers=m.preview_headers or None, first=size == "large")
-        # (a video is fetched the same way: net.fetch_picture allows it up to video_limit)
+            return net.fetch_picture(address, headers=m.preview_headers or None, first=viewing, allow_video=viewing)
 
     def fetch(address, check=None):
         def make():
@@ -801,6 +812,20 @@ def picture(gallery_id, number, size):
             return data
         return _once(gallery_id, (gallery_id, number, address, ""), make)
 
+    if whole:
+        def shrunk():
+            with _lock:
+                data = _cache.get((gallery_id, number, url, ""))      # (the viewer's fetch, when it was made already)
+            if not data:
+                data = get(url)                                       # (not kept: only the small copy below is)
+            if check:
+                check(data[1])
+            if not data[0].startswith("image/"):
+                raise NoPicture("no picture for this post")
+            if imaging.animated(data[1]):
+                return data                                           # it moves: the grid shows it as it is
+            return "image/jpeg", imaging.preview(io.BytesIO(data[1]), WHOLE)
+        return _once(gallery_id, (gallery_id, number, url, "whole"), shrunk)
     try:
         data = fetch(url, check)
     except Exception:
@@ -809,8 +834,8 @@ def picture(gallery_id, number, size):
         if not thumb or not m.thumb or not fallback or fallback == url:
             raise
         data = fetch(fallback, fallback_check)
-    if data[0].startswith("video/") and not m.video:
-        m.video = True                               # the file said what the listing did not: the viewer plays it from now on (item() tells the page again)
+    if not viewing and data[0].startswith(("video/", "audio/")):
+        raise NoPicture("no picture for this post")  # (a clip the viewer fetched first sits in the cache under this address)
     if thumb and not m.thumb and data[0].startswith("image/") and not _gif(m):
         # A forum gives no small picture: one is made here, in memory, from the original the viewer will want too -- unless the file moves
         # (an animated WebP or APNG: the listing cannot say, the file does), which the grid then shows as it is.
@@ -905,7 +930,7 @@ def overview(artist_ids):
                 snap = snapshots.load(r["id"]) if site else None
                 if not snap or time.time() - snap.tail > (SEED_AGE if site.KIND == "patreon" else OFFLINE_AGE):
                     continue
-                found += [(_when(m.posted), r["id"], m) for m in snap.items if m.thumb or m.large or m.url]
+                found += [(_when(m.posted), r["id"], m) for m in snap.items if (m.thumb or m.large or m.url) and not _no_still(m)]
             found.sort(key=lambda t: t[0] if t[0] is not None else float("-inf"), reverse=True)
             top, seen = [], set()
             for when, sid, m in found:
@@ -960,16 +985,18 @@ def snapshot_picture(source_id, key):
         m = next((x for x in snap.items if x.remote_key == key), None) if snap else None
         if m is None:
             raise KeyError(key)
+        if _no_still(m):
+            raise NoPicture("no picture for this post")      # (a clip: the Artists view never downloads one to look for a still)
         url, check = m.thumb or m.large or m.url, None
         if not m.thumb:
             with db.connect() as con:
                 row = con.execute("SELECT url FROM sources WHERE id = ?", (source_id,)).fetchone()
             url, check = _file_of(sources.site_for(row["url"]) if row else None, m, url)
         try:
-            ctype, data = net.fetch_picture(url, headers=m.preview_headers or None)
+            ctype, data = net.fetch_picture(url, headers=m.preview_headers or None, allow_video=False)
         except (requests.ConnectionError, requests.Timeout):
             time.sleep(0.8)
-            ctype, data = net.fetch_picture(url, headers=m.preview_headers or None)
+            ctype, data = net.fetch_picture(url, headers=m.preview_headers or None, allow_video=False)
         if check:
             check(data)
         if ctype.startswith("image/") and (not m.thumb or _gif(m)):

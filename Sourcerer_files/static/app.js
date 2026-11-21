@@ -1458,7 +1458,7 @@ function viewItem(i) {
   var img = $("gal-stage").querySelector("img:last-child");
   if (img) {
     // What to try next when one will not load: Sourcerer's own fetch, then the small one.
-    var next = [proxyOf(it, "large"), small ? "" : it.thumb].filter(function (u) { return u && u !== img.getAttribute("src"); });
+    var next = [proxyOf(it, "large")].filter(function (u) { return u && u !== img.getAttribute("src"); });
     img.onload = function () {
       if (!img.isConnected) return;                // the view moved on: not this item's stand-in any more
       var ph = $("gal-stage").querySelector(".gal-ph"); if (ph) ph.remove(); img.classList.remove("gal-big");
@@ -1470,15 +1470,27 @@ function viewItem(i) {
       if (!img.isConnected) return;
       if (next.length) return void (img.src = next.shift());
       img.onerror = null;
-      // Nothing left that shows as a picture: a file the listing did not know for a video (no extension, no type) plays as one, else it is said.
-      if (!it.video && it.large && !small) {
+      // Nothing left that shows as a picture. A file the listing did not know for a clip (a forum's title is no file name) plays as one -- also
+      // where the grid's picture is there: a forum's clip always has its small copy, which says nothing of what the file is.
+      if (!it.video && it.large) {
         var v = document.createElement("video");
         v.controls = v.autoplay = v.loop = true; v.playsInline = true; v.src = it.large;
-        if (it.thumb) v.poster = it.thumb;
-        v.onerror = function () { galUnplayable(it); };
+        if (small) v.className = "gal-big";                   // hidden until it plays: the stand-in stays meanwhile
+        else if (it.thumb) v.poster = it.thumb;
+        v.onloadedmetadata = function () {
+          if (!v.isConnected) return;
+          var ph = $("gal-stage").querySelector(".gal-ph"); if (ph) ph.remove();
+          v.classList.remove("gal-big");
+          galMarkVideo(i, it);
+        };
+        v.onerror = function () {
+          if (!v.isConnected) return;
+          galUnplayable(it);
+          // The small picture stands in for what cannot be played (the stand-in that was laid under the large one is still there).
+          if (it.thumb && !small) { var t = document.createElement("img"); t.alt = ""; t.referrerPolicy = "no-referrer"; t.src = it.thumb; v.replaceWith(t); }
+        };
         img.replaceWith(v);
-      } else if (small) img.remove();
-      else galUnplayable(it);
+      } else galUnplayable(it);
     };
   }
   var vid = $("gal-stage").querySelector("video");
@@ -1493,6 +1505,15 @@ function viewItem(i) {
   $("gal-view").classList.remove("hidden");
   // Near the end of what is listed: the next page, before it is needed.
   if (i > G.items.length - 8) moreGallery();
+}
+
+// The file turned out to be a clip (the listing did not say): the item and its tile say so from now on.
+function galMarkVideo(i, it) {
+  if (it.video) return;
+  it.video = true; it.crop = false;
+  var tile = $("gal-grid").querySelector('.gal-tile[data-i="' + i + '"]');
+  if (tile && it.thumb && !tile.querySelector(".gal-play") && tile.firstElementChild)
+    tile.firstElementChild.insertAdjacentHTML("afterend", '<span class="gal-play">' + icon("play") + "</span>");
 }
 
 // A file this window cannot show or play (a codec the web view lacks, a forum that refused it): said once, with the way out -- the post itself.
