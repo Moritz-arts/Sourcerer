@@ -711,13 +711,12 @@ def start_sync():
     only = [int(i) for i in body.get("sources") or []] if ids else None
     mode = body.get("mode") if body.get("mode") in ("download", "refresh", "order") else None
     order = [i for i in body.get("order") or [] if isinstance(i, int)] if ids is None else None
-    # No artist: Refresh all -- every card, in the order the list shows them (sync.enqueue).
-    # (a download asked for without an artist is the cards that download, as ever: only a plain Refresh all reaches the rest)
+    # No artist: Refresh all -- the accounts every login follows, for new ones (the cheap lists at once; X's, Fanbox's and Fantia's keep their
+    # minimum between two looks: a whole list read on every press would be an account's day), and the cards with auto-download, in the order the
+    # list shows them, each held for sync.COOL_HOURS after its last read. The other cards are not scanned: an artist is read when it is opened, and by its own Refresh.
     if ids is None and mode is None:
-        # ... and the accounts every login follows are looked at too, for new ones (the cheap lists at once; X's, Fanbox's and Fantia's keep their
-        # minimum between two looks: a whole list read on every press would be an account's day). One card's Refresh reads that card and its sources only.
         follows.look_async()
-    return jsonify(added=sync.enqueue(ids, only=only, mode=mode, everyone=ids is None and mode is None, order=order))
+    return jsonify(added=sync.enqueue(ids, only=only, mode=mode, order=order))
 
 
 @app.post("/api/artists/<int:artist_id>/auto-download")

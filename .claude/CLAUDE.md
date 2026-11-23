@@ -460,15 +460,15 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   the first version of this change did, and 291 new X cards would have spent X's whole day on the import. **"All artists" (`gallery._Gallery`)
   takes every card, listed ones too** (the user: "All artists" means all, and Patreon's five creators were missing in v0.36); the load is
   kept down by its time window and, since v0.43, by never asking a login site's accounts at all (it shows their snapshots; see *All artists
-  never asks a login site*). Only **Refresh all** reaches them (`everyone`, only when the
-  page asked for no mode) and it only *scans* them (the newest page per source; a scan is not free: pixiv 2 requests,
-  X a page of 20 counted against `BUDGETS`), **and only while the site's day has used less than half of its budget**
-  (`net.scan_room`, `SCAN_SHARE`): the other half is for the cards that download, Browse and single pictures. Past
+  never asks a login site*). **Since v0.70 nothing reaches them but the user** (opening the artist, its Refresh, auto-download): Refresh all
+  no longer scans every card (the user's rule, 2026-11-23: "an artist is updated when I open it; Refresh all is for the follow lists"; `enqueue`'s `everyone` is gone).
+  The scan of a never-read card keeps `net.scan_room`'s half of the day (`SCAN_SHARE`: a scan is not free: pixiv 2 requests,
+  X a page of 20 counted against `BUDGETS`): the other half is for the cards that download, Browse and single pictures. Past
   that the scans of that site are left out, said once a day (`sync._scan_told`) -- not once per card. The activity bar's
   Cancel drops the whole queue (`sync.cancel_all`), or a sweep over every card could only be ended by quitting. Anything the user does with the card clears
   it (`_save` on an edit, auto-download on, `enqueue` of that card by name, a merge); a card made by
   hand for an account that is listed takes the listed card over (`server._absorb_listed`). A new place
-  that reads *every* card must say `WHERE listed = 0` (Refresh all is the one on purpose). What was added is remembered by lower-cased
+  that reads *every* card must say `WHERE listed = 0` (nothing is: Refresh all reads the follow lists and the cards with auto-download only). What was added is remembered by lower-cased
   profile URL (`followed`): a deleted or merged card does not return. A list read to its end once by
   this login (`follows_read:<key>:<list>` holds the login's `saved` stamp, so another account starts
   over) is read again only up to its first page of known accounts -- the newest follows come first. A
@@ -558,21 +558,19 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   https is asked over https; any other next link raises (the list must not look complete when it is not). `follows._prime` resolves a page's hosts
   *before* `_adding`, `combine()` runs under `_adding`, and `_add` drops a twin that was merged away meanwhile.
 - **All artists never asks a login site** (v0.43; `gallery._Source.seed`, `offline`): the accounts of a cookie login (X, pixiv, Patreon, Fanbox,
-  Fantia, forums: `accounts.careful`) are shown from the snapshots the looks saved (a sync, Refresh all, an artist opened on its own) and never
+  Fantia, forums: `accounts.careful`) are shown from the snapshots the looks saved (a sync, an artist opened on its own or its Refresh) and never
   asked there -- v0.38-v0.41 read every one live on each opening, 291 X follows spent X's whole day (the v0.42 gate that kept it to half was
   only a patch: what a site can bear is unknown and the account is what gets locked). A snapshot of such a source is shown up to 30 days old
   (`OFFLINE_AGE`; Patreon's thumbnail links expire: 7 days), a source without one shows nothing and its chip says "N accounts not looked at yet";
-  the chip is hollow with the tooltip "from the last look ... Refresh all (F5) reads it". **Refresh all is what asks the sites** (mode `scan`,
-  half of the day: `net.scan_room`), and a finished sync opens the gallery again from the fresh snapshots. An artist opened on its own is read live -- unless its snapshot is fresh
-  (see *Browse opens from snapshots*). The better design for X (its Following timeline as one feed, `HomeLatestTimeline`, mapped to the cards by author) is not built.
-- **A sweep leaves a source alone for a while after it was read** (v0.45, `sync._cooling`, `sources.looked_at`): the user's idea -- an artist rarely
-  posts every few hours, so a source read lately is not read again by a *sweep* (the automatic sync, the scan at start, **Refresh all** -- until v0.44
-  only the automatic ones kept `MIN_HOURS`, and F5 read all 291 X cards every time). The gap grows with how long the artist has been quiet
-  (`sources.latest`: active = a post in the last 7 days, normal = 60, dormant): a cookie login's site (`MIN_HOURS`: X 12 h, pixiv / Patreon / Fanbox /
-  Fantia 6 h, forums 12 h) 12 / 24 / 72 h (the shortest is `MIN_HOURS` itself, the others `max(24, 2 x it)` and 72 h), a site with published limits
-  (token or none) 1 / 6 / 24 h (`COOL_OPEN`); a source that never showed a post date is a normal one. **Never held back:** a card somebody asked
-  for by name (Refresh or Download on a card, a gallery opened: `enqueue([ids])` is not a sweep, `_auto` marks the sweep's cards), a source never read, and
-  the shortest gap only for a source with a backlog to download (a card with auto-download whose source is not `complete`). **`looked_at` is set only by a
+  the chip is hollow with the tooltip "from the last look ... Open the artist (or its Refresh) to read it". **What asks the sites is an artist opened on its own, its Refresh and the
+  syncs of auto-download cards** (Refresh all no longer scans every card, v0.70), and a finished sync opens the gallery again from the fresh snapshots. An artist opened on its own is read live -- unless its snapshot is fresh
+  (see *Browse opens from snapshots*: twelve hours). The better design for X (its Following timeline as one feed, `HomeLatestTimeline`, mapped to the cards by author) is not built.
+- **A sweep leaves a source alone for twelve hours after it was read** (v0.45, flat since v0.70: `sync._cooling`, `COOL_HOURS`, `sources.looked_at`): the user's rule
+  (2026-11-23) -- an artist rarely posts every few hours, so a source read less than 12 h ago is not read again by a *sweep* (the automatic sync, the scan at start,
+  **Refresh all**'s auto-download cards), on every site, whatever the artist's activity and whatever a backlog (v0.45-v0.69 graded the gap by `sources.latest`:
+  12 / 24 / 72 h on a login site, 1 / 6 / 24 h on the others, the shortest for a backlog -- dropped: one rule the user can say in a sentence; a stopped download
+  is carried on by the next sweep *after* the twelve hours, or at once by Refresh / Download on the card). **Never held back:** a card somebody asked
+  for by name (Refresh or Download on a card: `enqueue([ids])` is not a sweep, `_auto` marks the sweep's cards) and a source never read. **`looked_at` is set only by a
   read that worked** (`look()` without an error, and `snapshots.save`, so Browse's first page counts too): a look that failed, or met a resting site, is
   no reason to wait; `db.init` fills it once from `last_checked` for looks without an error (`looked_at_v1`). A sweep says once, when it is done,
   "N sources were left alone, read lately (X 120, Pixiv 40, ...)" (`_cooled`) -- "I pressed Refresh all and nothing happened" must be answerable
@@ -1006,16 +1004,16 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   for the others, and never a choice of the number); the switch *Auto-download* beside the head's
   Download button (`#br-auto`) and the artist's right-click menu (edit, auto-download, refresh,
   download, open folder, put files in upload order, merge, delete -- the keys `Enter A U D O M Del`, the order has none) turn it on and off.
-  **There is no "Download all"**, and **"Refresh all" (F5, Ctrl+R) looks at every artist, one after the other down the list as it
-  is shown** (the page sends the ids in that order: `S.brOrderIds`; `enqueue(None, everyone=True, order=...)`, listed cards
-  included -- somebody asked for it, and a look does not un-list them): a card with auto-download is looked at *and* downloaded as
-  before, **every other card is only scanned** (mode `scan`, `_peek`/`_peeked`: the newest page of each source, one page,
-  kept as its snapshot -- so "Latest activity" and Browse's first screen are fresh -- and the log says "N new posts online since
+  **There is no "Download all"**, and **"Refresh all" (F5, Ctrl+R) is the follow lists and the auto-download cards** (v0.70, the user's rule: an artist is read when
+  it is opened, so Refresh all need not scan every card): `follows.look_async()` (new followed accounts; X, Fanbox and Fantia keep their `FOLLOWS_HOURS`) and
+  `enqueue(None, order=...)` -- the cards with auto-download, down the list as it is shown (the page sends the ids in that order: `S.brOrderIds`), looked at *and* downloaded,
+  each held 12 h after its last read (`_cooling`), plus a listed card never read at all, scanned once (mode `scan`, `_peek`/`_peeked`: the newest page of each source, one page,
+  kept as its snapshot; the log says "N new posts online since
   the last look" only when there are some, comparing with the *previous snapshot*, never with the library; no snapshot yet, nothing
-  is claimed; no "Checking" line and no profile request per card, a card nothing was asked of -- a site rests, its scans had their share -- says nothing and is not stamped `last_sync`; a sweep over hundreds must not bury the log; and a plain Refresh of a card whose scan waits makes it a look of its own). Comparing a card's
+  is claimed; no "Checking" line and no profile request per card, a card nothing was asked of -- a site rests, its scans had their share -- says nothing and is not stamped `last_sync`; a plain Refresh of a card whose scan waits makes it a look of its own). Comparing a card's
   posts with its library is what costs the time (a card never downloaded reads `REFRESH_PAGES` pages every time, its first page
   never being in the library): so **Automatic sync and the scan at every start still look at the cards with auto-download only**
-  (`sync.enqueue(None)` without `everyone`: `WHERE listed = 0 AND auto_download = 1`) -- nothing downloads every artist on one click. **Favorites** (`artists.favorite`, `/api/artists/<id>/favorite`, menu entry and key `F`, a gold star in the list):
+  (`sync.enqueue(None)`: `WHERE listed = 0 AND auto_download = 1`) -- nothing downloads every artist on one click. **Favorites** (`artists.favorite`, `/api/artists/<id>/favorite`, menu entry and key `F`, a gold star in the list):
   only a mark, it changes nothing about syncing; the order *Favorites* puts them first under a group head, and a merge keeps
   the star. A card that syncs shows a ring in place of its number. The list is
   replaced only when its markup changed (it is redrawn on every poll while a sync runs, and
@@ -1028,8 +1026,8 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   A picture already in the library is never fetched again, whichever way. **A GIF plays** (`gallery._gif`, item `gif`): its
   grid picture and viewer picture are the file itself, not the site's still, and no `mid` / small JPEG is made of it;
   Mastodon's "gifv" is a looping video and plays in the viewer.
-- **Every start looks for new posts** (setting `scan_on_start`, default **off** since v0.49 -- the user's base settings: Refresh does it when asked; `sync.scheduler`, after the login check): the
-  same as Refresh -- cards with auto-download download what they find, listed cards are left out. Sourcerer's own updates
+- **Every start looks for new posts** (setting `scan_on_start`, default **on** again since v0.70 -- off from v0.49 to v0.69; `sync.scheduler`, 20-60 s after the start, after the login check): the
+  same as Refresh -- cards with auto-download download what they find, listed cards are left out; a source read in the last 12 h is left alone (`_cooling`), so a restart within the day asks no site. Sourcerer's own updates
   are checked at every start too (the dot on the settings button).
 - **A failed file in the activity log is a link**: `sync._fetch` and the give-up line pass `post` and `key` (the remote key)
   with the event; the page (`#log` click) opens the artist's gallery, asks for more pages until an item with that `key`
@@ -1283,8 +1281,9 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   counts `SEED_PAGES` pages and then gives up) and **never slipped into the open
   gallery** -- the pictures would jump; the page offers "N new posts - show", which
   opens the gallery again from the refreshed snapshot. The live page is saved as the
-  source's snapshot as soon as it arrives. **A fresh snapshot stands in for the live check** (v0.50, `gallery.FRESH` 5 minutes, `FRESH_LOGIN` an
-  hour on a cookie login's site; `_Source.seed` sets `fresh` and `checked`, a look of any kind -- a sync, Refresh, an earlier opening -- stamps
+  source's snapshot as soon as it arrives. **A fresh snapshot stands in for the live check** (v0.50, `gallery.FRESH` 5 minutes in All artists, `FRESH_LOGIN` an
+  hour on a cookie login's site there; **an artist opened on its own: `FRESH_ARTIST`, twelve hours on every site** since v0.70 -- the click reads it, then it is left
+  alone, the twin of `sync.COOL_HOURS`; `_Source.seed` sets `fresh` and `checked`, a look of any kind -- a sync, Refresh, an earlier opening -- stamps
   `snapshots.Snap.fetched`): opening the same artist again, or a card a sweep just read, asks no site. The live listing starts only when the posts
   of the snapshot are all shown (`_kick`; the prefetch of `more()` skips a fresh source while it has posts left, `not (s.fresh and s.buffer)`), from
   its first page as ever -- what the artist posted meanwhile is counted as new then, a few minutes later than before, and *Refresh* on the artist reads

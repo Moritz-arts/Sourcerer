@@ -67,6 +67,7 @@ SLOW_LATER = 0.8             # ... and every later page: the sources are mid-way
 FAST = 0.3                   # ... when snapshots show the first page at once
 FRESH = 5 * 60               # a snapshot younger than this stands in for a source's first live page: opening an artist again within minutes asks no site
 FRESH_LOGIN = 60 * 60        # ... an hour on a cookie login's site (X, pixiv, Patreon, Fanbox, Fantia, forums), where every request is the account's
+FRESH_ARTIST = 12 * 3600     # ... but an artist opened on its own is read by that click and then left alone this long (every site; sync.COOL_HOURS is the sweeps' twin); its Refresh reads at once
 SEED_PAGES = 3               # pages a seeded source reads looking for a post its snapshot has, before it gives up on it
 SEED_AGE = 7 * 86400         # a snapshot older than this is not shown (its links may have expired: Patreon's thumbnails)
 OFFLINE_AGE = 30 * 86400     # ... except in All artists on a login site, which is nothing BUT snapshots (see _Source.offline): its links stay good
@@ -230,7 +231,7 @@ class _Source:
         # from its first page then, and what the artist posted meanwhile is counted as new); Refresh on the artist reads it at once.
         # (A forum's snapshot made before its pictures had dates is not: the live page brings them, and sorting needs them -- unless the forum is
         # the gallery's only source: nothing is sorted against it, and every opening would otherwise ask the forum again.)
-        if not self.offline and time.time() - snap.fetched < (FRESH_LOGIN if self.login else FRESH) \
+        if not self.offline and time.time() - snap.fetched < (FRESH_ARTIST if not self.spaced else FRESH_LOGIN if self.login else FRESH) \
                 and not (self.kind == "xenforo" and not self.alone and any(not m.posted for m in snap.items)):
             self.fresh = self.checked = True
 

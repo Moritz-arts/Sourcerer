@@ -40,7 +40,7 @@ drops every new file, de-duplicated across sources, into a [TrackImage](https://
 - **Refresh and Download are separate.** Refresh looks (and keeps the newest posts as snapshots), Download fetches.
   Each artist has an Auto-download switch.
 - **Browse opens from snapshots** and checks the site meanwhile. *All artists* never asks a login site: it shows the snapshots,
-  and *Refresh all* reads the sites.
+  and an artist is read when it is opened (then left alone for 12 h), and by its own Refresh.
 - **Followed accounts become cards** (only *listed*, in no sweep until you touch them). The same artist on several sites is combined
   by evidence — what profiles name, then the account name, then the display name — and every suggestion says why; "Not the same" is kept.
 - **Originals, under the site's own file names.** The same picture from two sites is found by a difference hash; each artist
@@ -97,4 +97,4 @@ in-app update for the Python version and the installed Windows copy; *Actions �
 9. **Updater:** first real run on Windows and macOS.
 10. **TrackImage hand-over:** where files are passed on and how duplicates are matched.
 11. **X:** resume a long first sync where it stopped. **Quiet hours** for logged-in sites. **Gallery:** a filter by date.
-12. **A background refresh** of the snapshots of cards nobody opened, so *All artists* is complete without *Refresh all*.
+12. **A background refresh** of the snapshots of cards nobody opened, so *All artists* is complete without opening each artist.
