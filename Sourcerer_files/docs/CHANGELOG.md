@@ -3,6 +3,10 @@
 Newest first. Each entry is made from the commit subjects when a version is made, so a subject is one short,
 plain sentence.
 
+## v0.70 — 2026-11-23
+
+- An opened artist is read once and left alone for 12 hours; Refresh all no longer scans every card
+
 ## v0.69 — 2026-11-21
 
 - Forums: clips and animated WebPs play, and Full mode shows whole pictures instead of cropped thumbnails
