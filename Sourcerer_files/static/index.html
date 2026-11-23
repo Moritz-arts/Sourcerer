@@ -80,7 +80,7 @@
       <button type="button" role="tab" data-view="recommended" title="Artists your sites recommend (coming)">Recommended</button>
     </div>
     <span class="grow"></span>
-    <button id="btn-sync-all" title="Refresh every artist, one after the other down the list: look for new posts online; artists with auto-download also download what they find (F5)"><svg class="ic"><use href="#i-refresh"/></svg> Refresh all</button>
+    <button id="btn-sync-all" title="Look for new followed accounts, and for new posts of the artists with auto-download (they download what they find; not those read in the last 12 hours). Other artists are read when you open them (F5)"><svg class="ic"><use href="#i-refresh"/></svg> Refresh all</button>
     <button id="btn-accounts" title="Log in to your sites and keep the logins working"><svg class="ic"><use href="#i-key"/></svg> Manage Accounts<span id="acc-count" class="count hidden"></span></button>
     <button id="btn-quit" class="icon hidden" aria-label="Quit" title="Quit Sourcerer"><svg class="ic"><use href="#i-power"/></svg></button>
     <button id="btn-settings" class="icon" aria-label="Settings" title="Settings (Ctrl+,)"><svg class="ic"><use href="#i-settings"/></svg><span id="update-dot" class="dot hidden"></span></button>
@@ -457,7 +457,7 @@
         <div class="row">
           <div><div class="row-title">Look for new posts at every start</div>
             <p class="hint">Every time Sourcerer is opened it looks at the cards with auto-download, one after the other, and
-               downloads what they find (the same as Refresh). Other cards are looked at when you open them. Sourcerer checks for its own updates at every start anyway.</p></div>
+               downloads what they find (the same as Refresh) -- except a card that was read in the last 12 hours. Other cards are read when you open them, and then left alone for 12 hours (their Refresh reads at once). Sourcerer checks for its own updates at every start anyway.</p></div>
           <label class="switch"><input type="checkbox" id="set-scanstart"><span></span></label>
         </div>
         <div class="row">
@@ -579,7 +579,7 @@
         <table class="keys">
           <tr><td><span class="kbd">Ctrl</span> <span class="kbd">N</span> &nbsp;or&nbsp; <span class="kbd">N</span></td><td>New card</td></tr>
           <tr><td><span class="kbd">Ctrl</span> <span class="kbd">F</span> &nbsp;or&nbsp; <span class="kbd">/</span></td><td>Search the artists</td></tr>
-          <tr><td><span class="kbd">F5</span> &nbsp;or&nbsp; <span class="kbd">Ctrl</span> <span class="kbd">R</span></td><td>Refresh all: look at every artist for new posts</td></tr>
+          <tr><td><span class="kbd">F5</span> &nbsp;or&nbsp; <span class="kbd">Ctrl</span> <span class="kbd">R</span></td><td>Refresh all: new followed accounts, and new posts of the artists with auto-download</td></tr>
           <tr><td><span class="kbd">Ctrl</span> <span class="kbd">,</span></td><td>Settings</td></tr>
           <tr><td><span class="kbd">Ctrl</span> <span class="kbd">L</span></td><td>Show or hide the activity log</td></tr>
           <tr><td><span class="kbd">&uarr;</span> <span class="kbd">&darr;</span> <span class="kbd">Home</span> <span class="kbd">End</span></td><td>Pick the previous or next artist</td></tr>

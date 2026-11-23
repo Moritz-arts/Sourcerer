@@ -1411,15 +1411,15 @@ function galSources(list) {
     var of = list.filter(function (s) { return s.label === label; });
     var bad = of.filter(function (s) { return s.error; }), off = !!G.hidden[label];
     var busy = of.some(function (s) { return s.loading; });
-    // All artists never asks a login site: its posts are what the last looks saved (Refresh all reads the sites).
+    // All artists never asks a login site: its posts are what the last looks saved (an artist opened, its Refresh, a sync of auto-download cards).
     var stored = of.every(function (s) { return s.offline; }), unlooked = of.filter(function (s) { return s.offline && !s.cached; }).length;
     var ready = !busy && !bad.length && !stored && of.every(function (s) { return s.checked || s.state === "done"; });
     var news = of.reduce(function (n, s) { return n + (s.new || 0); }, 0);
     var tip = bad.length ? label + ": " + bad[0].error : off ? "Show " + label
-      : stored ? label + ": from the last look, the site is not asked here. Refresh all (F5) reads it" +
+      : stored ? label + ": from the last look, the site is not asked here. Open the artist (or its Refresh) to read it" +
         (unlooked ? " · " + plural(unlooked, "account") + " not looked at yet" : "")
       : busy ? label + ": asking the site…" + (of.length > 1 ? " (" + of.filter(function (s) { return !s.loading; }).length + " of " + of.length + " accounts answered)" : "") : "Hide " + label + (G.all ? " (" + plural(of.length, "source") + ")" : "") +
-        (of.every(function (s) { return s.fresh; }) ? " · from a look a few minutes ago, asked again at the end of what is shown" : "") +
+        (of.every(function (s) { return s.fresh; }) ? " · from a recent look, asked again at the end of what is shown (the artist's Refresh reads it at once)" : "") +
         (news ? " · " + plural(news, "new post") : "");
     // A spinner while the site is asked, green when it answered, orange when it did not.
     var state = busy ? '<i class="spin"></i>' : '<i class="dot ' + (bad.length ? "warn" : ready ? "ok" : "blank") + '"></i>';
@@ -3387,7 +3387,7 @@ function avFill(card, items) {
   for (var i = 0; i < AV_PICS; i++) {
     var it = items[i];
     tiles += it ? '<span class="av-pic" title="' + esc(it.date ? it.date.slice(0, 10) : "") + '"><img alt="" referrerpolicy="no-referrer" data-lazy="' + esc(it.thumb) + '"></span>'
-      : '<span class="av-pic none">' + (!i ? "Nothing looked at yet: Refresh all (F5)" : "") + "</span>";
+      : '<span class="av-pic none">' + (!i ? "Nothing looked at yet: open the artist" : "") + "</span>";
   }
   box.innerHTML = tiles;
   box.querySelectorAll("img[data-lazy]").forEach(function (img) { avQueue.push(img); });

@@ -21,6 +21,8 @@ Run by .github/workflows/checks.yml on every pull request, and by hand before pu
   a file, a cut-off file is no file, leftover .part files are cleaned; the automatic sync queues the cards with auto-download and is due after Sourcerer was closed
   for days (sync.py: _sync_artist, _fetch, _auto_due, enqueue);
 * Refresh all also looks at the accounts every login follows (server.py: start_sync -> follows.look_async), one card's Refresh and a download do not;
+* a sweep leaves a source read less than 12 hours ago alone, on every site, a card asked for by name never (sync.py: _cooling), the scan at start is on by default,
+  and an artist opened on its own is shown from a snapshot of the last twelve hours (gallery.py: FRESH_ARTIST);
 * gallery.picture for a site with no resolver (the booru-like case the forum fix must not change).
 * a forum's videos, animated WebPs and crops (xenforo._media, net.fetch_picture / sniff, gallery.picture, server.py): the type comes from the extension and
   from the file's first bytes when the server says only octet-stream, a clip is held to a larger limit than a picture and kept apart in memory, a video with
@@ -1105,8 +1107,23 @@ def refresh_checks():
     check(download == (200, ["enqueue"]), "a download of the cards that download reads no follow list", download)
 
 
+def cooling_checks():
+    import datetime
+    from sourcerer import config, gallery, sync
+    def ago(hours):
+        return (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
+    for url in ("https://www.pixiv.net/users/1", "https://bsky.app/profile/a.bsky.social"):          # a cookie login's site and an open one: the same rule
+        check(sync._cooling({"looked_at": ago(11), "url": url, "latest": ago(24 * 400)}, True),
+              "a sweep leaves a source read 11 hours ago alone (%s)" % url.split("/")[2])
+        check(not sync._cooling({"looked_at": ago(13), "url": url, "latest": ago(1)}, True), "... and reads it again after twelve hours (%s)" % url.split("/")[2])
+    check(not sync._cooling({"looked_at": ago(1), "url": "https://x.com/a", "latest": None}, False), "a card asked for by name is never held back")
+    check(not sync._cooling({"looked_at": None, "url": "https://x.com/a", "latest": None}, True), "a source never read has no gap")
+    check(sync.COOL_HOURS * 3600 == gallery.FRESH_ARTIST, "an artist opened on its own is left alone as long as a sweep leaves it", (sync.COOL_HOURS, gallery.FRESH_ARTIST))
+    check(config.DEFAULTS["scan_on_start"] == "1", "the scan at every start is on by default")
+
+
 def main():
-    for group in (forum_checks, tile_checks, speed_checks, refusal_checks, tune_checks, settings_checks, gallery_checks, media_checks, resume_checks, library_checks, refresh_checks):
+    for group in (forum_checks, tile_checks, speed_checks, refusal_checks, tune_checks, settings_checks, gallery_checks, media_checks, resume_checks, library_checks, cooling_checks, refresh_checks):
         print("--", group.__name__, flush=True)
         try:
             group()

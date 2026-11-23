@@ -6,7 +6,7 @@ pixiv list that (`following(key)` in their modules, yielding (list name, pages o
 needs no pasted link. Such a card is only *listed* (`artists.listed`): nothing reads its sites in
 the background and nothing downloads until the user does something with it, because hundreds of
 cards looked at by every sweep (the automatic sync) would be hundreds of requests nobody asked for.
-(Refresh all only scans them -- the newest page -- and stops at half a day's requests. All artists
+(A card is read when the user opens it, and by its own Refresh; Refresh all reads none of them. All artists
 shows them, from the snapshots those looks saved; it never asks a login site, gallery._Source.seed.)
 
 What is added is remembered (`followed`, by lower-cased profile URL), so a card the user deleted

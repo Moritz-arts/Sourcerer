@@ -54,14 +54,11 @@ AVATAR_RETRY_HOURS = 6       # ... and how soon when a card has none: the reason
                              # change within a day
 ACCOUNT_HOURS = (5, 9)       # how often the saved logins are checked, drawn anew each time
 CHECKED_HOURS = 12           # a login checked this recently is not asked again at a start
-# A sweep (the automatic sync, the scan at start, Refresh all) comes no closer than this to a site where an account can be
-# locked -- the shortest gap between two reads of one source; a card somebody asks for by name is not held back (_cooling).
-MIN_HOURS = {"x": 12, "pixiv": 6, "patreon": 6, "xenforo": 12, "fanbox": 6, "fantia": 6}
-# ... and the longer the artist has been quiet, the longer the gap: an artist rarely posts every few hours, and every read is a request a site
-# can count against the account. Hours for an active source (a post in the last COOL_DAYS[0] days), a normal one (COOL_DAYS[1]) and a dormant
-# one: a cookie login's site starts from MIN_HOURS, a site with published limits (a token, no login) from COOL_OPEN.
-COOL_DAYS = (7, 60)
-COOL_OPEN = (1, 6, 24)
+# A sweep (the automatic sync, the scan at start, Refresh all) reads a source at most once in this many hours, on every site: an artist
+# rarely posts every few hours, and every read is a request a site can count against the account. A card somebody asks for by name
+# (Refresh or Download on it) is not held back (_cooling), and an artist opened in Browse is shown from its last look for as long
+# (gallery.FRESH_ARTIST: the same twelve hours).
+COOL_HOURS = 12
 # Seconds before the next card asks a site where a cookie login can get banned (pixiv, X, Patreon, a forum) the last one
 # used -- Settings > Speed & safety decides how careful (net.PROFILES). Token logins (Mastodon, Bluesky) are not spaced: the lane paces them.
 FOCUS_GAP = (4, 10)          # ... for the card somebody has opened in Browse: they are waiting
@@ -183,11 +180,11 @@ def next_card():
     return net.profile()["gap"]
 
 
-def enqueue(artist_ids=None, auto=False, only=None, mode=None, everyone=False, order=None):
-    """Queue artists. None: a sweep -- the cards with auto-download (Automatic sync, the scan at start: comparing what a
-    card finds with its library is what costs the time, so only those do), or with everyone every card, listed ones
-    too (Refresh all, which somebody asked for): the cards with auto-download as they are, every other one only has
-    its newest page looked at for posts it did not have at the last look (mode "scan": no comparison with the
+def enqueue(artist_ids=None, auto=False, only=None, mode=None, order=None):
+    """Queue artists. None: a sweep -- the cards with auto-download (Automatic sync, the scan at start, Refresh all: comparing
+    what a card finds with its library is what costs the time, so only those do), each held for COOL_HOURS after its last read
+    (_cooling); no other card is in a sweep -- an artist is read when it is opened and by its own Refresh. A listed card never
+    read at all is scanned once (mode "scan": its newest page, no comparison with the
     library). order: ids in the order the list shows them, which a sweep follows. Returns
     how many were added. only: the ids of the
     sources to ask -- the rest of the card is left alone this time (Browse: download what
@@ -205,11 +202,11 @@ def enqueue(artist_ids=None, auto=False, only=None, mode=None, everyone=False, o
         # page of each source, within the site's share of the day) -- afterwards the old rule holds over it again.
         rows = con.execute(
             "SELECT id, auto_download, listed FROM artists" +
-            ("" if artist_ids is not None or everyone else
+            ("" if artist_ids is not None else
              " WHERE (listed = 0 AND auto_download = 1) OR (listed = 1 AND last_sync IS NULL)") +
             " ORDER BY COALESCE(last_sync, ''), RANDOM()").fetchall()
-        ids, downloads = [r[0] for r in rows], {r[0] for r in rows if r[1]}
-        unread = {r[0] for r in rows if r[2]} if artist_ids is None and not everyone else set()   # (listed and never read: a sweep only scans it)
+        ids = [r[0] for r in rows]
+        unread = {r[0] for r in rows if r[2]} if artist_ids is None else set()   # (listed and never read: a sweep only scans it)
         if artist_ids is not None and not auto:
             con.executemany("UPDATE artists SET listed = 0 WHERE id = ?", [(i,) for i in artist_ids])
     if artist_ids is not None:
@@ -233,7 +230,7 @@ def enqueue(artist_ids=None, auto=False, only=None, mode=None, everyone=False, o
                 _only.pop(i, None)
             if mode:
                 _modes[i] = mode
-            elif (everyone and artist_ids is None and i not in downloads) or i in unread:
+            elif i in unread:
                 _modes[i] = "scan"                 # a card that does not download is only looked at
             else:
                 _modes.pop(i, None)
@@ -808,21 +805,12 @@ accounts.CHANGED.append(_login_made)
 
 # ---- one artist ---------------------------------------------------------------
 
-def _cooling(src, site, sweep, backlog=False):
-    """Whether a sweep leaves this source alone: it was read lately, by the gap its activity earns (MIN_HOURS / COOL_OPEN, longer the
-    longer the artist has been quiet: sources.latest). A card somebody asked for by name -- a click on Refresh or Download, a gallery
-    opened -- is never held back; a source with a backlog to download keeps the shortest gap; one never read (or whose last look failed)
-    has no gap at all."""
+def _cooling(src, sweep):
+    """Whether a sweep leaves this source alone: it was read less than COOL_HOURS ago, whatever the site or the artist's activity. A card
+    somebody asked for by name -- a click on Refresh or Download -- is never held back; one never read (or whose last look failed) has no gap."""
     if not sweep or not src["looked_at"]:
         return False
-    base = MIN_HOURS.get(net.site_of(src["url"])) or MIN_HOURS.get(site.KIND)
-    gaps = (base, max(24, base * 2), 72) if base else COOL_OPEN
-    if backlog or not src["latest"]:
-        hours = gaps[0] if backlog else gaps[1]                    # (a source that never showed a post date is a normal one)
-    else:
-        quiet = _hours_since(src["latest"].replace(" ", "T") + "+00:00") / 24
-        hours = gaps[0] if quiet <= COOL_DAYS[0] else gaps[1] if quiet <= COOL_DAYS[1] else gaps[2]
-    return _hours_since(src["looked_at"].replace(" ", "T") + "+00:00") < hours
+    return _hours_since(src["looked_at"].replace(" ", "T") + "+00:00") < COOL_HOURS
 
 
 def _space_out(where, artist_id, focused=False):
@@ -942,7 +930,7 @@ def _sync_artist(artist_id, auto=False, only=None, mode=None):
         if rest:                                  # not even one request: the site said stop
             error, level = "%s rests until %s: %s" % (site.LABEL, time.strftime(
                 "%H:%M", time.localtime(rest[0])), rest[1]), "warn"
-        elif _cooling(src, site, auto, download and not src["complete"]):
+        elif _cooling(src, auto):
             with _lock:
                 _cooled[where] += 1
             return None

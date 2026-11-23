@@ -132,8 +132,8 @@ COLUMNS = {
         "pending": "INTEGER NOT NULL DEFAULT 0",   # new posts the last look found that are not downloaded
         # 1: made from a login's follows and not touched since -- it is only in the list. No look in the
         # background (the automatic sync, the scan at start) and not in "All artists" until the user does
-        # something with the card (edits it, syncs it, turns auto-download on, merges it); Refresh all
-        # scans it (the newest page, mode "scan") without clearing this.
+        # something with the card (edits it, syncs it, turns auto-download on, merges it); opening it in Browse
+        # reads it without clearing this.
         "listed": "INTEGER NOT NULL DEFAULT 0",
         "favorite": "INTEGER NOT NULL DEFAULT 0",   # 1: starred by the user (the list can put these first)
     },
