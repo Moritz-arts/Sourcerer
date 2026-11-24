@@ -3,6 +3,10 @@
 Newest first. Each entry is made from the commit subjects when a version is made, so a subject is one short,
 plain sentence.
 
+## v0.71 — 2026-11-24
+
+- Forum downloads are several times faster: four files at once on Normal, and one page read per post for its attachments
+
 ## v0.70 — 2026-11-23
 
 - An opened artist is read once and left alone for 12 hours; Refresh all no longer scans every card
