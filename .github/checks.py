@@ -92,7 +92,7 @@ STRANGERS = {101: jpeg((230, 230, 20), (640, 480)), 102: jpeg((20, 230, 230), (6
 MD5 = {a: hashlib.md5(v[2]).hexdigest() for a, v in ORIG.items()}
 THUMBS = {v[0]: jpeg(c, (64, 48)) for v, c in zip(ORIG.values(), [(220, 30, 30), (30, 200, 30), (30, 30, 220)])}
 POST_OF = {9001: 501, 9002: 501, 9003: 502}
-MODE = {"anchors": True, "same_ids": False, "hits": []}
+MODE = {"anchors": True, "same_ids": False, "inline501": False, "hits": []}
 
 
 def small(att):
@@ -110,7 +110,8 @@ def thread_page():
             out += ('<div class="bbImageWrapper js-lbImage" data-src="/attachments/%s.%d/"><img src="/attachments/%s.%d/" alt="%s" class="bbImage"></div>'
                     % (ORIG[a][1].replace(".", "-"), a, ORIG[a][1].replace(".", "-"), a, ORIG[a][1]))
         return out + "</article>"
-    return "<html><body>" + post(501, [9001, 9002]) + post(502, [], inline=[9003]) + "</body></html>"
+    first = post(501, [], inline=[9001, 9002]) if MODE["inline501"] else post(501, [9001, 9002])      # (inline: no tile names the data, only the picture's name does)
+    return "<html><body>" + first + post(502, [], inline=[9003]) + "</body></html>"
 
 
 class Forum(http.server.BaseHTTPRequestHandler):
@@ -163,6 +164,7 @@ def forum_checks():
     def forget():
         xenforo._attachments.clear()
         xenforo._unsettled.clear()
+        xenforo._read_posts.clear()
         gallery._cache.clear()
         MODE["hits"].clear()
 
@@ -181,6 +183,37 @@ def forum_checks():
     check(net.fetch_picture(a.url)[1] != ORIG[9001][2], "the old address served another member's file (the bug)")
     check(xenforo.resolve(by_data["102"])[0].endswith("/attachments/b-jpg.9002/") and len([h for h in MODE["hits"] if h.startswith("/threads/")]) == 1,
           "the post's other attachment comes from the same page")
+
+    forget()                                                       # a sync resolves many files at once: one read of a post's page answers them all
+    answers = []
+    start = threading.Barrier(len(items))
+
+    def ask(m):
+        start.wait()
+        answers.append(xenforo.resolve(m)[0])
+    workers = [threading.Thread(target=ask, args=(m,)) for m in items]
+    [w.start() for w in workers]
+    [w.join() for w in workers]
+    pages = [h for h in MODE["hits"] if h.startswith(("/threads/", "/posts/"))]
+    check(len(answers) == 3 and 1 <= len([h for h in pages if h.startswith("/threads/")]) <= 2,
+          "files asked for at once cost a read of a page for all of them (three files, two posts), not one each", pages)
+    forget()
+    MODE["inline501"] = True                                       # two pictures shown inline in one post: the one read names both (by their names), the second is no guess
+    got = [xenforo.resolve(by_data[k])[0] for k in ("101", "102")]
+    MODE["inline501"] = False
+    check(got[0].endswith("/attachments/a-jpg.9001/") and got[1].endswith("/attachments/b-jpg.9002/")
+          and len([h for h in MODE["hits"] if h.startswith("/threads/")]) == 1, "two inline pictures of a post are both named by one read of its page", got)
+    forget()
+    MODE["anchors"] = False                                        # a page that does not name them: the post is read once, not once per attachment
+    for m in (by_data["101"], by_data["102"]):
+        try:
+            xenforo.resolve(m)
+        except Exception:
+            pass
+    check(len([h for h in MODE["hits"] if h.startswith("/threads/")]) == 1, "a post whose page names nothing is not read again for its next attachment",
+          [h for h in MODE["hits"] if h.startswith("/threads/")])
+    MODE["anchors"] = True
+    forget()
 
     order = {m.remote_key.rpartition(":a")[2]: i for i, m in enumerate(items)}       # the gallery's large view, mid and grid picture
     gallery._galleries["forum"] = types.SimpleNamespace(items=[(types.SimpleNamespace(site=xenforo), m) for m in items], seen=0)
@@ -294,7 +327,7 @@ def speed_checks():
     check(net._rhythm(site_url, True)[0] == 2.0, "careful files: LOGIN_PACE")
     net.configure(speed="normal")
     got = net._rhythm(site_url, True)
-    check(got[0] == 0.6 and got[1] == (40, 80) and got[2] == (6, 20), "normal files: a new one every 0.6 s, a rest of 6-20 s every 40-80", got)
+    check(got[0] == 0.2 and got[1] == (150, 300) and got[2] == (6, 20), "normal files: a new one every 0.2 s, a rest of 6-20 s every 150-300", got)
     check(net._rhythm(site_url, False)[0] == 2.0, "a page keeps LOGIN_PACE whatever is chosen")
     net.configure(speed="fast")
     got = net._rhythm(site_url, True)
@@ -351,12 +384,22 @@ def speed_checks():
         net.HOSTS["downloads.fanbox.cc"] = (2, 0.05)
         fresh("fast")
         check(lane("https://downloads.fanbox.cc/images/a.jpg", 6, 0.4, browse=True)[1] == 2, "fast: Fanbox's file host keeps its own two at once")
-        for name, at_once, apart in (("careful", 1, 0.2), ("normal", 2, 0.06), ("fast", 6, 0.01)):
+        for name, at_once, apart in (("careful", 1, 0.2), ("normal", 4, 0.02), ("fast", 6, 0.01)):
             fresh(name)
             starts, peak = lane(site_url, 8, 0.15, bulk=True)
             gaps = [b - a for a, b in zip(starts, starts[1:])]
             check(peak == at_once and all(g >= apart - 0.01 for g in gaps),
                   "%s: files with a login %d at once, a new one at least %.2f s after the last START" % (name, at_once, apart), (peak, gaps))
+        net.HOSTS["slow.example"] = (2, 0.06)                           # a host that keeps a pace three times the level's (0.02 s shrunk): its rests come after a third of the files
+        fresh("normal")
+        lane("https://slow.example/a.jpg", 1, 0.01, bulk=True)
+        lane(site_url, 1, 0.01, bulk=True)
+        own, quick = [e["break"] for k, e in net._hosts.items() if k[0] == "slow.example" and k[-1]], [e["break"] for k, e in net._hosts.items() if k[0] == "forum.example" and k[-1]]
+        check(own and 50 <= own[0] <= 100 and quick and 150 <= quick[0] <= 300, "normal: a host with a slower pace of its own rests after fewer files, a free one after 150-300", (own, quick))
+        fresh("normal")                                                  # v0.69 made files "several at once" and measured it on fast only: normal stayed at a file a second
+        starts, peak = lane(site_url, 24, 0.02, bulk=True)
+        mean = (starts[-1] - starts[0]) / (len(starts) - 1)
+        check(mean <= 0.033, "normal: files with a login are not held to less than three a second (seconds shrunk tenfold)", (mean, peak))
         fresh("careful")
         starts, peak = lane(site_url, 4, 0.05, bulk=True)
         gaps = [b - a for a, b in zip(starts, starts[1:])]

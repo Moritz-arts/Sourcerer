@@ -104,7 +104,9 @@ FORUM_READ_BREAK = (6, 20)
 #   pause     seconds between two requests to one site (times JITTER)
 #   gap       seconds between two artists on a site where a login can get banned (sync.next_card)
 #   pace      seconds between two pages, lists or API calls of such a site (times JITTER; a site that said a word: never less than LOGIN_PACE)
-#   files     seconds between two files of such a site (times JITTER), a rest of `rest` seconds every `every` files (None: no rest)
+#   files     seconds between two STARTS of a file of such a site (times JITTER), `login_files` of them at once, a rest of `rest` seconds every
+#             `every` files (None: no rest). The start gap is the speed: 'normal' was 0.6 s (a file a second, ~330 KB/s of ordinary pictures) with two
+#             at once until v0.70 -- the second slot never helped, the gap did not allow a file to wait for it
 #   look      seconds between two requests of such a site while somebody waits for the page (a gallery opened, a click): at most this, at least half
 #   preview   (at once, seconds apart) of the pictures somebody looks at, from a host that carries no login: a browser opens six connections to a CDN to
 #             show a page of them and asks for them all at once, so 'normal' does -- at one picture per HOSTS' pace a page of sixty took half a minute
@@ -116,7 +118,7 @@ FORUM_READ_BREAK = (6, 20)
 PROFILES = {
     "careful": {"parallel": 8, "per_host": 4, "pause": 0.25, "gap": (15, 60), "pace": LOGIN_PACE, "files": 2.0, "login_files": 1, "every": (20, 40),
                 "rest": (15, 60), "look": 1.0, "preview": (4, 0.08), "browse": (3, 0.3)},
-    "normal": {"parallel": 24, "per_host": 32, "pause": 0.1, "gap": (3, 15), "pace": LOGIN_PACE, "files": 0.6, "login_files": 2, "every": (40, 80),
+    "normal": {"parallel": 24, "per_host": 32, "pause": 0.1, "gap": (3, 15), "pace": LOGIN_PACE, "files": 0.2, "login_files": 4, "every": (150, 300),
                "rest": (6, 20), "look": 0.5, "preview": (6, 0.0), "browse": (6, 0.0)},
     "fast": {"parallel": 48, "per_host": 32, "pause": 0.0, "gap": (1, 6), "pace": LOGIN_PACE, "files": 0.1, "login_files": 6, "every": None, "rest": None,
              "look": 0.25, "preview": (6, 0.0), "browse": (6, 0.0)},
@@ -151,9 +153,9 @@ KNOBS = [
     _knob("per_host", "downloads", "Connections per site", "", 1, 32, 1, "high", 32, 32, False, "A touchy site keeps its own lower limit."),
     _knob("pause", "downloads", "Pause between two requests to a site", "s", 0, 2, 0.05, "low", 0.1, -1, False, "Sites without a login."),
     _knob("pace", "login", "Between two pages or lists", "s", 0.5, 10, 0.1, "low", LOGIN_PACE, 1.0, True, "Pages, lists and API calls with your login."),
-    _knob("login_files", "login", "Files at once", "", 1, 8, 1, "high", 2, 6, True, "Files with your login; a touchy site keeps its own lower limit."),
-    _knob("files", "login", "A new file starts every", "s", 0, 5, 0.05, "low", 0.6, 0.1, True, "Files with your login: the gap between two starts."),
-    _knob("every", "login", "Reading break after", "files", 0, 120, 5, "high", 40, 1000, True, "0: no breaks.", zero=1),
+    _knob("login_files", "login", "Files at once", "", 1, 8, 1, "high", 4, 6, True, "Files with your login; a touchy site keeps its own lower limit."),
+    _knob("files", "login", "A new file starts every", "s", 0, 5, 0.05, "low", 0.2, 0.1, True, "Files with your login: the gap between two starts."),
+    _knob("every", "login", "Reading break after", "files", 0, 600, 5, "high", 150, 1000, True, "0: no breaks.", zero=1),
     _knob("rest", "login", "A reading break lasts", "s", 0, 120, 1, "low", 6, 1, True, "", zero=1),
     _knob("gap_min", "login", "Between two artists, at least", "s", 0, 120, 1, "low", 3, 1, True, "Sourcerer draws a gap between the two."),
     _knob("gap_max", "login", "Between two artists, at most", "s", 0, 180, 1, "low", 15, 6, True),
@@ -877,6 +879,10 @@ class _Polite:
             elif self.login:                     # Settings can make this gentler, never faster
                 base, every, rest = _rhythm(self.url, self.bulk)
                 limit, pace = 1, max(pace, base)
+                if self.bulk and every and pace > base:
+                    # A host that keeps a slower pace of its own (Fanbox's, Fantia's file hosts) rests after as many files as take the same TIME: the
+                    # level's count is for the pace the level goes at, and at 0.6 s a start 150-300 files would be minutes without a rest.
+                    every = (max(1, round(every[0] * base / pace)), max(1, round(every[1] * base / pace)))
                 if self.bulk and _calm(self.url):
                     # A file is a file, not a page or a list (what an account is flagged for): several at once, a new one started every `pace`
                     # seconds, the way a browser opens its connections to a site. A touchy host keeps its own limit; a site that said a
@@ -893,7 +899,7 @@ class _Polite:
             if entry is None or entry["limit"] != limit:
                 entry = _hosts[lane] = {
                     "sem": threading.BoundedSemaphore(limit), "limit": limit, "start": 0.0, "end": 0.0,
-                    "count": 0, "break": random.randint(*READ_EVERY), "first": 0}
+                    "count": 0, "break": random.randint(*(every or READ_EVERY)), "first": 0}
             self.entry = entry
             if self.first:
                 entry["first"] += 1

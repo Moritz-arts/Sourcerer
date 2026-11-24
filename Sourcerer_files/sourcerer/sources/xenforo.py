@@ -16,6 +16,7 @@ Many forums sit behind a bot check that lets only browsers through. The
 login window is one: its cookies -- Cloudflare's pass among them -- and its
 User-Agent go along with every request to the forum (accounts.py).
 """
+import contextlib
 import datetime
 import hashlib
 import html
@@ -657,32 +658,68 @@ def _post_attachments(text, page, post_id):
 
 _attachments, _att_lock = {}, threading.Lock()       # (host, data id) -> the address its post's page gave the attachment
 _unsettled = {}                                      # (host, data id) -> when the page of its post did not say, or its data id was another file: not asked again soon
-MAX_ATTACHMENTS = 20000
+_read_posts = {}                                     # post address -> (until, what its page named by data id, by file name): the page read lately, kept whole
+_page_locks = {}                                     # forum -> the lock of its page reads: a sync's reads of the pages that name attachments go one at a time
+MAX_ATTACHMENTS, MAX_READ_POSTS = 20000, 2000
 RETRY_AFTER = 300                                    # seconds: a viewer that is opened again must not fetch a page, or a wrong original, every time
+
+
+def _known(host, data_id):
+    """(settled?, address) from what pages were read already."""
+    with _att_lock:
+        if (host, data_id) in _attachments:
+            return True, _attachments[(host, data_id)]
+        return (True, "") if _unsettled.get((host, data_id), 0) > time.time() else (False, "")
+
+
+def _named(by_data, by_name, data_id, alt):
+    """What a page read says of one attachment: its link by data id, else the one picture of its post that has its file name."""
+    same = by_name.get(alt) or ()
+    return by_data.get(data_id) or (next(iter(same)) if len(same) == 1 else "")
+
+
+def _settle(host, data_id, found):
+    """What a page said of one attachment, kept ("" too: not asked again soon). Called under _att_lock."""
+    if found:
+        _attachments[(host, data_id)] = found
+    else:
+        _unsettled[(host, data_id)] = time.time() + RETRY_AFTER
 
 
 def _attachment_address(root, data_id, alt, post_url):
     """The address of the attachment whose data has this id, from the page of its post ("" when the page does not say). One request per page
-    of a thread: every attachment on it is remembered, so the files of a thread's other posts cost nothing."""
+    of a thread: every attachment on it is remembered, so the files of a thread's other posts cost nothing.
+
+    A sync asks for twenty files at once, and most of them share a post or a page of a thread: each of them used to read that page for itself
+    (a post with six pictures was six requests, each waiting its turn in the forum's lane -- one page every two to three seconds, which was the
+    whole speed of a forum's downloads). They now take turns and look again before they read: the page the one before them read has usually
+    named theirs. Somebody who waits for the picture (the viewer) is not put behind them: the lane lets him go first."""
     host = _host(root)
-    with _att_lock:
-        if (host, data_id) in _attachments:
-            return _attachments[(host, data_id)]
-        if _unsettled.get((host, data_id), 0) > time.time():
-            return ""
-    text, page = _get(post_url)
-    by_data, by_name = _post_attachments(text, page, _POST_ID.search(post_url).group(1))
-    del text
-    named = by_name.get(alt) or ()
-    found = by_data.get(data_id) or (next(iter(named)) if len(named) == 1 else "")
-    with _att_lock:
-        if len(_attachments) > MAX_ATTACHMENTS:
-            _attachments.clear()
-        _attachments.update({(host, data): url for data, url in by_data.items()})
-        if found:
-            _attachments[(host, data_id)] = found
-        else:
-            _unsettled[(host, data_id)] = time.time() + RETRY_AFTER
+    done, found = _known(host, data_id)
+    if done:
+        return found
+    with contextlib.nullcontext() if net.waiting() else (_page_locks.get(host) or _page_locks.setdefault(host, threading.Lock())):
+        done, found = _known(host, data_id)
+        if done:
+            return found
+        with _att_lock:
+            lately = _read_posts.get(post_url)
+            if lately and lately[0] > time.time():    # this post's page was read lately: it said what it says, for its other pictures too
+                found = _named(lately[1], lately[2], data_id, alt)
+                _settle(host, data_id, found)
+                return found
+        text, page = _get(post_url)
+        by_data, by_name = _post_attachments(text, page, _POST_ID.search(post_url).group(1))
+        del text
+        found = _named(by_data, by_name, data_id, alt)
+        with _att_lock:
+            if len(_attachments) > MAX_ATTACHMENTS:
+                _attachments.clear()
+            if len(_read_posts) > MAX_READ_POSTS:
+                _read_posts.clear()
+            _attachments.update({(host, data): url for data, url in by_data.items()})
+            _read_posts[post_url] = (time.time() + RETRY_AFTER, by_data, by_name)
+            _settle(host, data_id, found)
     return found
 
 
