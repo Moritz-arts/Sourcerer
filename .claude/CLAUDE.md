@@ -820,6 +820,15 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   again fetches neither the page nor the wrong original again) and otherwise raises: the viewer keeps the small copy and a sync fails the file. Checked by `.github/checks.py`
   against a made-up forum whose numbers differ; **not seen on a real forum** (the data-id naming is from XenForo's source, not from the user's forum).
   A thread's attachments still go through gallery-dl.
+  **A sync's page reads for resolving attachments take turns** (v0.71, `_attachment_address`, `_page_locks`, `_read_posts`): twenty files of a post or of a thread's page each read that
+  page for themselves (24 workers, and the forum's lane lets one page through every 1.0-3.2 s), so a post with six pictures was six page reads and a forum's whole speed was a page
+  every two to three seconds -- 83 KB/s on a made-up forum with five pictures a post and a thread each (`measure_speed.py forum normal 8 5`), 40 page reads for 40 files, **the same 85 KB/s with Normal's new numbers**: the
+  page lane, not the file lane, was the limit there; a forum with ONE picture per thread stays page-bound (143 KB/s: a page read is 0.4 s and the lane's 1.0-1.6 s after it). Now one read at a
+  time per forum, each looking again at what the reads before it taught (`_known`) before it asks: 8 page reads, 811 KB/s. **A post's page is kept whole for `RETRY_AFTER`** (`_read_posts`: what it
+  named by data id AND by file name): the first version kept only "read lately" and answered "does not say" for the second picture a post shows inline (found by its name, never by a tile) -- the
+  guessed data id then fetched another member's file, which the md5 refused and the sync counted as a failure (the review of v0.71 found it; `forum_checks` has a post with two inline pictures).
+  Somebody waiting (`net.waiting()`: the viewer's large picture -- `gallery.picture` reads inside `net.interactive()` when `viewing` -- and a
+  download in the gallery) does not take the turn: the lane lets him go first. Checked by `.github/checks.py` (`forum_checks`, threads at a barrier).
 - **Clips, sounds, animated WebPs, plain attachments and cropped thumbnails** (v0.69; `sources/kinds.py`, `xenforo._media`, `Media.crop`, `net.fetch_picture` /
   `net.sniff` / `net.NoPicture`, `gallery.picture` "whole", `gallery._no_still`, `server.gallery_picture`, `galWhole` / `galShape` / `galMarkVideo` in app.js):
   "some WebP/video from the forums work, some do not; thumbnails are zoomed in" was several causes, and the review of "all formats shown right" found the same
@@ -1175,11 +1184,20 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   Firefox would be faster" was measured, not guessed -- a made-up CDN on loopback, the real `sync._fetch` and lanes: **a host with no login 28 files/s (54 MB/s), a host
   with a login 1.5 files/s (3 MB/s)** -- the login lane let one file at a time through, a gap (`files`) after the END of each, so the gap was the whole speed: 0.65 s
   per file = ~500 KB/s for 330 KB pictures (forums, Fanbox, Fantia; pixiv / X / Patreon files come from hosts with no login and were never held by it). A file is a file,
-  not a page or a list (what an account is flagged for), so the bulk lane (its own `_hosts` key element) now takes `login_files` at once -- careful 1, **normal 2**, **fast 6**
-  (a browser opens six) -- a new one *started* `files` seconds after the last START (careful 2.0, normal 0.6, fast 0.1; the end-based gap stays where the lane is one at
+  not a page or a list (what an account is flagged for), so the bulk lane (its own `_hosts` key element) now takes `login_files` at once -- careful 1, **normal 4**
+  (2 until v0.70), **fast 6** (a browser opens six) -- a new one *started* `files` seconds after the last START (careful 2.0, **normal 0.2** (0.6 until v0.70), fast 0.1; the end-based gap stays where the lane is one at
   a time: pages, lists, careful). Unchanged: `HOSTS` (a touchy host keeps its own lower limit), a site that said a word (`_calm`: one file at a time, `LOGIN_PACE`), the
   daily `BUDGETS` (they count these requests too, so a fast level reaches a forum's 3000 sooner), pages / lists / API calls. Two sliders under Speed & safety ("Files at once",
   "A new file starts every"); on Fast the loopback run went from 1.5 to 7.6 files/s. Checked by `.github/checks.py` (`speed_checks`); the real sites' answer is not known.
+  **v0.69 fixed Fast and left Normal where it was** (the user, 2026-11-24: "XenForo downloads are still slow, 200-500 KB/s"): it was measured on Fast only, and on Normal
+  the start gap of 0.6 s (times `JITTER`, mean 0.78 s) allows 1.3 files a second whatever is at once -- the second slot never had a file to take. **Measured again** (loopback forum,
+  330 KB files, the real lanes, `.github/measure_speed.py files normal`: `net.download` in 24 workers, real seconds): Normal **1.0 files/s = 334 KB/s whether the forum answers after
+  0.15 s or 0.6 s** (the gap is the speed, not the forum), Fast 7.5 files/s. The rule for any number in this table: **measure the level that is the default** (`python3 .github/measure_speed.py files normal`, and `forum normal` for an attachment browser), with the real lanes, before
+  saying it is faster. v0.71: Normal 4 at once and a start every 0.2 s = 3.85 files/s = 1270 KB/s (2 MB files: 7.5 MB/s), reading breaks every 150-300 files (a 6-20 s rest every 40-80 files
+  at 4 files a second was a rest every 15 s and a quarter of the speed), and a lane's first rest is drawn from the level's own `every` (it came after 20-40 files whatever the level said).
+  The sliders' `safe` / `danger` marks follow the table (`KNOBS`). Fanbox's and Fantia's file hosts keep their own two at once and 0.6 s (`HOSTS`) **and rest after as many files as take
+  the same time** (`_Polite.__enter__` scales `every` by the level's pace over the host's: 50-100 files, as 40-80 were at 1.3 files a second), a site that said a word is still
+  read one file at a time (`_calm`). The daily `BUDGETS` count files too, so a forum's 3000 are reached in minutes at this speed instead of an hour: the day's *number* of files is the same, the cap is not new.
 - **A stopped sync is carried on by the next one** (v0.69; `sync._sync_artist`, `_fetch`, `net.clean_parts`, `_auto_due`): the user asked whether closing the window or losing the
   connection mid-download is picked up again. Files are saved one by one (a `.part` file renamed when whole, its row written after), so what was saved stays; what
   was not is found by the next sync -- **unless the source was `complete`**, whose early stop at the first page with a known post skips older posts that were never

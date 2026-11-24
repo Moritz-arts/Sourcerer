@@ -116,6 +116,8 @@ Only in the repository, never in the ZIP (`export-ignore` in `.gitattributes`):
 │   ├─ workflows/checks.yml       on pull requests: the static checks and checks.py on Linux
 │   ├─ checks.py                  the program's own checks against made-up sites (a forum whose attachment numbers differ,
 │   │                               media tiles, the speed choice and its migration, what a refused file does to a site, gallery.picture)
+│   ├─ measure_speed.py           what a speed level really reaches (a forum's files, an attachment browser's page reads + files),
+│   │                               real lanes and real seconds: run it for the DEFAULT level before claiming a change is faster
 │   ├─ exe/build.py               the PyInstaller build and packaging; exe/smoke.py starts each
 │   │                               result like a user; exe/Sourcerer.iss is the Windows installer;
 │   │                               exe/Sourcerer.ico / .icns / .png are the logo as icons

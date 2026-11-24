@@ -34,6 +34,7 @@ duplicate rules, the card's folder.
 """
 import collections
 import concurrent.futures
+import contextlib
 import dataclasses
 import datetime
 import hashlib
@@ -794,7 +795,8 @@ def picture(gallery_id, number, size):
     # can be done, so the viewer keeps the grid's picture instead of showing another member's file.
     check = None
     if not (thumb and m.thumb) and not _gif(m):
-        url, check = _file_of(s.site, m, url)
+        with net.interactive() if viewing else contextlib.nullcontext():     # (the viewer's picture is waited for: its page read goes ahead of a sync's)
+            url, check = _file_of(s.site, m, url)
 
     def get(address):
         # No retries for an answer (a refusal, a pause), but a dropped connection or a timeout is
