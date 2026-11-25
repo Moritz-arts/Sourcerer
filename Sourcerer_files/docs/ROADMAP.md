@@ -13,11 +13,12 @@ drops every new file, de-duplicated across sources, into a [TrackImage](https://
 | Site | Status | Notes |
 |---|---|---|
 | Bluesky | works | public posts, original files incl. video; login: app password |
-| Mastodon and the fediverse | works | originals; login (OAuth, read-only) for members-only servers |
+| Mastodon and the fediverse | works | originals; login (OAuth, read-only) for members-only servers; Pawoo is a Mastodon server and needs nothing of its own |
 | Misskey | works | notes with files; login (MiAuth) per server |
 | Pixiv | works | R-18 with a login; ugoira plays as an animated WebP |
 | Patreon | works | originals; patron posts with a login |
 | Fanbox, Fantia | works | cookie login |
+| PoiPiku | works as a visitor, login not tried | listed by gallery-dl; a visitor gets 640 px copies, the original needs the cookie login (not tried against a real account) |
 | X | works with a login | listed by gallery-dl, originals |
 | XenForo forums | works | media gallery or attachment browser, albums, threads; login per forum; forums behind a guard or in a folder work; clips, sounds, animated WebPs and whole (uncropped) pictures in Full mode |
 | Boorus | works | Danbooru, e621, Gelbooru, Rule 34, yande.re, Konachan and more: an artist's tag search |
@@ -32,7 +33,7 @@ drops every new file, de-duplicated across sources, into a [TrackImage](https://
   the changelog from the commit subjects. A release is made on command (*Actions › Publish*).
 - **Stable is the latest release, Beta is `main`.** No prereleases.
 - **English everywhere,** the interface included.
-- **gallery-dl runs as a separate process** for X, forums, Fanbox and Fantia (its licence stays apart from Sourcerer's; it can be
+- **gallery-dl runs as a separate process** for X, forums, Fanbox, Fantia and PoiPiku (its licence stays apart from Sourcerer's; it can be
   upgraded between releases). Pixiv, Patreon, Mastodon, Misskey, Bluesky and the boorus use Sourcerer's own code on the sites' JSON.
 - **Gentle with sites, always:** an honest User-Agent, few parallel requests, logins in their own slow lane with random gaps,
   daily budgets, a site that objects rests for hours. Protecting accounts comes before speed.

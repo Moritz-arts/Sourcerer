@@ -1464,7 +1464,7 @@ def info():
 
 # Sites where a login shows posts a visitor never sees: R-18 works, a patron's
 # posts, a forum's members-only media, followers-only posts, a booru's hidden files.
-REVEALS = ("pixiv", "patreon", "fanbox", "fantia", "xenforo:", "mastodon:", "misskey:", "booru:")
+REVEALS = ("pixiv", "patreon", "fanbox", "fantia", "poipiku", "xenforo:", "mastodon:", "misskey:", "booru:")
 
 
 def _login_changed(key, how="new"):

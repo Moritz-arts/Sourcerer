@@ -54,7 +54,7 @@ sys.path.insert(0, str(WORK / "Sourcerer_files"))
 from PIL import Image                                                        # noqa: E402
 
 from sourcerer import db, gallery, gdl_run, net, server                      # noqa: E402
-from sourcerer.sources import Media, kinds, mastodon, xenforo                                 # noqa: E402
+from sourcerer.sources import Media, kinds, mastodon, poipiku, xenforo                                 # noqa: E402
 
 FAILS = []
 
@@ -518,7 +518,7 @@ def tune_checks():
     state = client.get("/api/state").get_json()["speed"]
     names = {k["key"] for k in state["knobs"]}
     want = {"parallel", "per_host", "login_files", "pause", "pace", "files", "every", "rest", "gap_min", "gap_max", "look", "preview_n", "browse_n",
-            "limit_pixiv", "limit_patreon", "limit_x", "limit_fanbox", "limit_fantia", "limit_other"}
+            "limit_pixiv", "limit_patreon", "limit_x", "limit_fanbox", "limit_fantia", "limit_poipiku", "limit_other"}
     check(names == want, "every important value has a slider, and every daily limit", sorted(names ^ want))
     check(state["level"] == "normal" and not state["tuned"] and state["values"]["parallel"] == 24 and state["values"]["limit_x"] == 600,
           "the sliders start at the level's own values and the default limits", state["values"])
@@ -847,6 +847,28 @@ def imaging_animated(data):
     return imaging.animated(data)
 
 
+# ---- PoiPiku: a visitor's 640 px copy, a member's original ------------------------------------------------------------------------------------
+
+def poipiku_checks():
+    from sourcerer import accounts, sources
+    for url in ("https://poipiku.com/2/", "https://poipiku.com/2/13202427.html", "http://www.poipiku.com/2", "https://poipiku.com/IllustListPcV.jsp?PG=1&ID=2&KWD="):
+        check(sources.kind_of(url) == "poipiku" and poipiku.normalize(url) == "https://poipiku.com/2/", "a PoiPiku link is the artist's page: " + url)
+    for url in ("https://poipiku.com/", "https://poipiku.com/MyHomePcV.jsp?ID=-1", "https://poipiku.com/IllustListPcV.jsp?PG=0&ID=-1", "https://poipiku.com.evil.example/2/"):
+        check(sources.kind_of(url) != "poipiku", "...but not " + url)
+    check(sources.account_key("https://poipiku.com/2/") == "poipiku" and accounts.key_for("https://cdn.poipiku.com/x") == "poipiku", "the login's cookies go to the picture host too")
+    check(accounts.SITES["poipiku"][3]({"POIPIKU_LK": ""}) is False and accounts.SITES["poipiku"][3]({"POIPIKU_LK": "abc"}) is True,
+          "a visitor's empty POIPIKU_LK is no login")
+    guest = poipiku._media({"url": "https://cdn.poipiku.com/000000002/013202411_YJMjMxhKf.png_640.jpg", "post": "13202427", "num": 1, "user": "2"})
+    check(guest.remote_key == "poipiku:13202427:1" and guest.filename == "013202411_YJMjMxhKf_640.jpg" and guest.mime == "image/jpeg"
+          and guest.thumb == "https://cdn.poipiku.com/000000002/013202411_YJMjMxhKf.png_360.jpg" and guest.post_url == "https://poipiku.com/2/13202427.html",
+          "a visitor's copy is named for what it is and gets the site's small rendition", guest)
+    member = poipiku._media({"url": "https://cdn.poipiku.com/000000002/013202411_YJMjMxhKf.png", "post": "13202427", "num": 1, "user": "2"})
+    check(member.remote_key == guest.remote_key and member.filename == "013202411_YJMjMxhKf.png" and member.mime == "image/png"
+          and member.thumb == guest.thumb and member.large == member.url, "a member's original has the same key, its own name and the same small rendition", member)
+    for icon in ("https://cdn.poipiku.com/img/publish_pass.png", "https://cdn.poipiku.com/assets/img/x.png", "https://evil.example/000000002/a.png", ""):
+        check(poipiku._media({"url": icon, "post": "1", "num": 1, "user": "2"}) is None, "an icon or a foreign address is no file of the artist: " + icon)
+
+
 def resume_checks():
     import os
     from sourcerer import sources, sync
@@ -1166,7 +1188,7 @@ def cooling_checks():
 
 
 def main():
-    for group in (forum_checks, tile_checks, speed_checks, refusal_checks, tune_checks, settings_checks, gallery_checks, media_checks, resume_checks, library_checks, cooling_checks, refresh_checks):
+    for group in (forum_checks, tile_checks, speed_checks, refusal_checks, tune_checks, settings_checks, gallery_checks, media_checks, poipiku_checks, resume_checks, library_checks, cooling_checks, refresh_checks):
         print("--", group.__name__, flush=True)
         try:
             group()

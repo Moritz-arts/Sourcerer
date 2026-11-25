@@ -665,8 +665,8 @@ $("merge-go").addEventListener("click", function () {
 // site (two pixiv accounts are more likely two people, whatever their names say) are offered too, with that said, because a main and
 // a second account of one artist look exactly so. *Open* shows an artist in Sourcerer to compare with your own eyes (the dialog waits
 // behind a button), *Not the same* is kept for good.
-var ONE_PER_SITE = ["bluesky", "x", "pixiv", "patreon", "fanbox", "fantia"];
-var KIND_NAMES = { bluesky: "Bluesky", x: "X", pixiv: "pixiv", patreon: "Patreon", fanbox: "Fanbox", fantia: "Fantia" };
+var ONE_PER_SITE = ["bluesky", "x", "pixiv", "patreon", "fanbox", "fantia", "poipiku"];
+var KIND_NAMES = { bluesky: "Bluesky", x: "X", pixiv: "pixiv", patreon: "Patreon", fanbox: "Fanbox", fantia: "Fantia", poipiku: "PoiPiku" };
 var MAX_SHARERS = 8;
 var C = { groups: [], parked: false };
 function oneKinds(a) { return a.sources.map(function (s) { return s.kind; }).filter(function (k) { return ONE_PER_SITE.indexOf(k) >= 0; }); }
@@ -1357,8 +1357,8 @@ function proxyOf(it, size) {
 }
 
 // A site's mark instead of its name; "" for a site without one (the caller writes the name then).
-var SITE_LOGOS = { Bluesky: "bluesky", Mastodon: "mastodon", Misskey: "misskey", Pixiv: "pixiv", Patreon: "patreon", X: "x", Fanbox: "fanbox", Fantia: "fantia", XenForo: "xenforo", Booru: "booru" };
-var MARKS = { bluesky: 1, mastodon: 1, misskey: 1, pixiv: 1, patreon: 1, x: 1, fanbox: 1, fantia: 1, xenforo: 1, booru: 1 };
+var SITE_LOGOS = { Bluesky: "bluesky", Mastodon: "mastodon", Misskey: "misskey", Pixiv: "pixiv", Patreon: "patreon", X: "x", Fanbox: "fanbox", Fantia: "fantia", PoiPiku: "poipiku", XenForo: "xenforo", Booru: "booru" };
+var MARKS = { bluesky: 1, mastodon: 1, misskey: 1, pixiv: 1, patreon: 1, x: 1, fanbox: 1, fantia: 1, poipiku: 1, xenforo: 1, booru: 1 };
 var MANY_KINDS = { mastodon: 1, misskey: 1, xenforo: 1, booru: 1 };      // software many sites run: each wears its own icon (sources.MANY)
 var ICON_FAILED = {};                                                     // hosts whose site gave no icon: the software's mark stands in
 // label: the site's name (a server or forum is told by its own), kind and host say which software and where its icon is.
@@ -2404,7 +2404,7 @@ function speedSays(p) {
   var s = function (a) { return n(a[0]) + "-" + n(a[1]) + " s"; }, n = function (x) { return String(Math.round(x * 100) / 100); };
   return [
     "Downloads: up to " + p.parallel + " files at once, " + p.per_host + " per site" + (p.pause ? ", at least " + n(p.pause) + " s between two requests to one site." : "."),
-    "Sites with your login (pixiv, X, Patreon, Fanbox, Fantia, forums): a page or list every " + n(p.pace) + "-" + n(p.pace * 1.6) + " s, " + s(p.gap) + " between two artists, a new file about every " +
+    "Sites with your login (pixiv, X, Patreon, Fanbox, Fantia, PoiPiku, forums): a page or list every " + n(p.pace) + "-" + n(p.pace * 1.6) + " s, " + s(p.gap) + " between two artists, a new file about every " +
       n(p.files * 1.3) + " s (" + ((p.login_files || 1) > 1 ? "up to " + p.login_files + " at once" : "one at a time") + ")" + (p.every ? ", a rest of " + s(p.rest) + " every " + p.every[0] + "-" + p.every[1] + " files." : ", no rest."),
     "Browse: a page of such a site every " + n(p.look) + "-" + n(p.look * 1.6) + " s; pictures " + p.preview[0] + " at a time" +
       (p.preview[1] ? ", " + n(p.preview[1]) + " s apart" : ", all at once, like a browser") + "."
@@ -2673,7 +2673,7 @@ var ACC_DOT = { ok: "Works", warn: "Works, but needs attention", error: "Ran out
 
 // A login's site mark with its status dot in the corner (the same as Browse's chips); the bare dot for a
 // type without a mark. The account types are the sites' own names.
-var ACC_LOGOS = { bluesky: "bluesky", mastodon: "mastodon", misskey: "misskey", pixiv: "pixiv", fanbox: "fanbox", fantia: "fantia", patreon: "patreon", x: "x", xenforo: "xenforo", booru: "booru" };
+var ACC_LOGOS = { bluesky: "bluesky", mastodon: "mastodon", misskey: "misskey", pixiv: "pixiv", fanbox: "fanbox", fantia: "fantia", poipiku: "poipiku", patreon: "patreon", x: "x", xenforo: "xenforo", booru: "booru" };
 function accMark(type, dot) {
   var d = '<i class="dot ' + dot + '" title="' + ACC_DOT[dot] + '"></i>';
   return ACC_LOGOS[type] ? '<span class="mark"><svg class="ic logo" aria-hidden="true"><use href="#l-' + ACC_LOGOS[type] + '"/></svg>' + d + "</span>" : d;
