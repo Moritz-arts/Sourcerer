@@ -5,7 +5,7 @@ Four ways in, whichever the site offers:
   window    the site's own login page in a window of Sourcerer's (pywebview);
             once the site has set the cookie that proves a login, its cookies
             are kept and the window closes by itself. X, Patreon, Pixiv, Fanbox,
-            Fantia and XenForo forums ("xenforo:<host>"). Without a window (browser
+            Fantia, PoiPiku and XenForo forums ("xenforo:<host>"). Without a window (browser
             mode) a cookies.txt, exported from the browser, does the same.
   oauth     Mastodon ("mastodon:<server>"): the server's own "Authorize
             Sourcerer" page in that window; it hands out a read-only token.
@@ -59,12 +59,14 @@ SITES = {
     "fanbox": ("Fanbox", "https://www.fanbox.cc/login", ("fanbox.cc",), lambda c: bool(c.get("FANBOXSESSID"))),
     # Fantia hands a visitor a session cookie too: only the page says who is in (_PAGE_SAYS).
     "fantia": ("Fantia", "https://fantia.jp/sessions/signin", ("fantia.jp",), lambda c: False),
+    # PoiPiku sets POIPIKU_LK for a visitor too, with no value; a member's has one. The page offers e-mail, Twitter and Facebook.
+    "poipiku": ("PoiPiku", "https://poipiku.com/LoginFormEmailPcV.jsp", ("poipiku.com",), lambda c: bool(c.get("POIPIKU_LK"))),
 }
 # What "Add account" offers, in the order the rows are shown: (type, label, how it logs in).
 # Bluesky, Pixiv, X and Patreon are one login each; a Mastodon server, a forum or a booru is
 # as many as the user has. A site is listed here when Sourcerer can download from it.
 TYPES = [("bluesky", "Bluesky", "password"), ("mastodon", "Mastodon", "oauth"), ("misskey", "Misskey", "oauth"),
-         ("pixiv", "Pixiv", "window"), ("fanbox", "Fanbox", "window"), ("fantia", "Fantia", "window"),
+         ("pixiv", "Pixiv", "window"), ("fanbox", "Fanbox", "window"), ("fantia", "Fantia", "window"), ("poipiku", "PoiPiku", "window"),
          ("x", "X (Twitter)", "window"), ("patreon", "Patreon", "window"),
          ("xenforo", "XenForo forum", "window"), ("booru", "Booru", "api_key")]
 ORDER = [t[0] for t in TYPES]

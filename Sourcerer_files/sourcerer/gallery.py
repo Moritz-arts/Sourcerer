@@ -67,14 +67,14 @@ SLOW = 2.5                   # seconds the first page waits for a source that is
 SLOW_LATER = 0.8             # ... and every later page: the sources are mid-way, a slow one must not hold the rest up
 FAST = 0.3                   # ... when snapshots show the first page at once
 FRESH = 5 * 60               # a snapshot younger than this stands in for a source's first live page: opening an artist again within minutes asks no site
-FRESH_LOGIN = 60 * 60        # ... an hour on a cookie login's site (X, pixiv, Patreon, Fanbox, Fantia, forums), where every request is the account's
+FRESH_LOGIN = 60 * 60        # ... an hour on a cookie login's site (X, pixiv, Patreon, Fanbox, Fantia, PoiPiku, forums), where every request is the account's
 FRESH_ARTIST = 12 * 3600     # ... but an artist opened on its own is read by that click and then left alone this long (every site; sync.COOL_HOURS is the sweeps' twin); its Refresh reads at once
 SEED_PAGES = 3               # pages a seeded source reads looking for a post its snapshot has, before it gives up on it
 SEED_AGE = 7 * 86400         # a snapshot older than this is not shown (its links may have expired: Patreon's thumbnails)
 OFFLINE_AGE = 30 * 86400     # ... except in All artists on a login site, which is nothing BUT snapshots (see _Source.offline): its links stay good
 AHEAD = 24                   # a source with fewer pictures waiting than this is asked for its next page already
 POOL = 6                     # listings running at once, all galleries together
-SERIAL = ("x", "xenforo", "fanbox", "fantia")    # sites gallery-dl reads: one source at a time (_gdl._busy would turn the rest away)
+SERIAL = ("x", "xenforo", "fanbox", "fantia", "poipiku")    # sites gallery-dl reads: one source at a time (_gdl._busy would turn the rest away)
 
 _lock = threading.Lock()
 _galleries = {}

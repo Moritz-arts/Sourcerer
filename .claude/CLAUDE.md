@@ -881,6 +881,16 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   thumbnail is kept (`fid` "thumb": artists upload it as a picture), its text and the `album_image` redirects' names are not
   used. Both are paced like X (gallery-dl `sleep-request`, `ratelimit: abort`, a daily `BUDGETS` count) and read one source at
   a time (`gallery.SERIAL`). Their marks are drawn (Tabler "package" / "heart" on a coloured square: no logo is copied).
+- **PoiPiku is a gallery-dl listing, a visitor sees 640 px copies** (v0.72, `sources/poipiku.py`; **Pawoo needs nothing of its own**: it is a Mastodon server, checked live,
+  and `mastodon.py` reads any server): a visitor's post page shows `<name>.<ext>_640.jpg` (the original `<name>.<ext>` answers 403 from the CDN), so a card read
+  without a login downloads those -- named `<name>_640.jpg`, key `poipiku:<post>:<n>` as the original's (remote_key is forever: **log in BEFORE the first
+  download**, a copy saved as a visitor is never replaced) -- and the login (`POIPIKU_LK`: a visitor gets the cookie with an EMPTY value, so the test is its value;
+  the window opens `LoginFormEmailPcV.jsp`, which offers e-mail, Twitter and Facebook) makes gallery-dl ask `ShowIllustDetailF.jsp` for the originals.
+  **The login is not tried against a real account** (no way to here): nothing says how an expired one looks, so there is no `still_logged_in`. The grid's small
+  picture is the site's `_360.jpg` rendition of the file (seen on its list pages, no Referer needed), never the original. `robots.txt` asks `Crawl-delay: 5`: a
+  sync spaces gallery-dl's pages 5-7 s (`OPTIONS`), a gallery somebody waits for 2.5-4 s (`OPEN_SLEEP`; one post is one page, 5-7 s made a first screen two
+  minutes), `HOSTS` keeps Sourcerer's own page requests at 5 s. A post has no date on its page: `posted` stays empty. Only files under `<host>/<nine digits>/` are
+  taken (`_FILE`): the lock, warning and password icons of a post are on `/img/` and `/assets/`. No follow list.
 - **pywebview 6 turned `FOLDER_DIALOG` into a deprecated function.** Passing it
   as the dialog type opens nothing; use `FileDialog.FOLDER` (with a fallback
   for 5.x), as `server.pick_folder` does.

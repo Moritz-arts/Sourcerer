@@ -73,9 +73,10 @@ Full list: *Settings › Keyboard & mouse*.
 | Site | Login |
 |---|---|
 | **Bluesky** | app password (not your real password) |
-| **Mastodon**, **Misskey** (fediverse) | only for members-only servers |
+| **Mastodon** (also Pawoo), **Misskey** (fediverse) | only for members-only servers |
 | **Pixiv** | for R-18 works |
 | **Patreon**, **Fanbox**, **Fantia** | yes |
+| **PoiPiku** | for the original pictures (without it 640 px copies) |
 | **X** | yes |
 | **XenForo** forums (media gallery, attachment browser, albums, threads) | usually yes |
 | **Boorus** – Danbooru, e621, Gelbooru, Rule 34, yande.re, Konachan … (an artist's tag search) | API key for some |
@@ -102,7 +103,7 @@ Sourcerer says who it is (`Sourcerer/<version>` in every request) and keeps its 
 a few requests at a time with pauses; logged-in accounts get one request at a time with random gaps, reading
 breaks and a daily budget; a site that objects (too many requests, bot check, locked account) rests for hours;
 after the first sync only the newest posts are read. This does not make scraping something every site's terms
-allow — it keeps accounts out of trouble in practice. X, forums, Fanbox and Fantia are read with
+allow — it keeps accounts out of trouble in practice. X, forums, Fanbox, Fantia and PoiPiku are read with
 [gallery-dl](https://codeberg.org/mikf/gallery-dl), which Sourcerer updates weekly.
 
 ## For developers

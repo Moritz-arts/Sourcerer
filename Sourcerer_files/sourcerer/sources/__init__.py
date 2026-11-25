@@ -23,11 +23,11 @@ import time
 import urllib.parse
 from dataclasses import dataclass
 
-from . import bluesky, booru, fanbox, fantia, mastodon, misskey, patreon, pixiv, x, xenforo
+from . import bluesky, booru, fanbox, fantia, mastodon, misskey, patreon, pixiv, poipiku, x, xenforo
 
 # booru before mastodon: a booru's /users/ pages look like the fediverse's. misskey too: its profile
 # links are Mastodon's, told apart by the server (known or learned).
-SITES = [bluesky, pixiv, x, patreon, fanbox, fantia, xenforo, booru, misskey, mastodon]
+SITES = [bluesky, pixiv, x, patreon, fanbox, fantia, poipiku, xenforo, booru, misskey, mastodon]
 log = logging.getLogger(__name__)
 
 
@@ -98,7 +98,7 @@ def kind_of(url):
 # Any other link -- a second account, another site -- goes into a row below.
 FIELDS = [("Bluesky", "bsky.app/profile/name"), ("Mastodon", "mastodon.social/@name"), ("Misskey", "misskey.io/@name"),
           ("XenForo", "forum.example/media/users/name.123"), ("Patreon", "patreon.com/name"),
-          ("X", "x.com/name"), ("Pixiv", "pixiv.net/users/12345"), ("Fanbox", "name.fanbox.cc"), ("Fantia", "fantia.jp/fanclubs/12345"),
+          ("X", "x.com/name"), ("Pixiv", "pixiv.net/users/12345"), ("Fanbox", "name.fanbox.cc"), ("Fantia", "fantia.jp/fanclubs/12345"), ("PoiPiku", "poipiku.com/12345"),
           ("Booru", "danbooru.donmai.us/posts?tags=artist_name")]
 
 
@@ -220,7 +220,7 @@ def profile_links(*things):
 _TAG = re.compile(r"<[^>]*>")
 _HREF = re.compile(r"""href=["']([^"']+)["']""", re.I)
 # A bio writes "x.com/name" without the scheme and "@name@server" for the fediverse; both name an account all the same.
-_BARE = re.compile(r"(?<![\w@./:-])((?:www\.)?(?:x\.com|twitter\.com|bsky\.app|pixiv\.net|fantia\.jp|patreon\.com)/[^\s\"'<>)\]]+"
+_BARE = re.compile(r"(?<![\w@./:-])((?:www\.)?(?:x\.com|twitter\.com|bsky\.app|pixiv\.net|fantia\.jp|poipiku\.com|patreon\.com)/[^\s\"'<>)\]]+"
                    r"|[\w-]+\.fanbox\.cc\b/?)", re.I)
 _FEDI = re.compile(r"(?<![\w@.])@([\w.-]{2,30})@((?:[\w-]+\.)+[a-z]{2,})\b", re.I)
 

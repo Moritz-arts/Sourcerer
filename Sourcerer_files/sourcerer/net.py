@@ -75,8 +75,10 @@ HOSTS = {"www.pixiv.net": (1, 1.5), "i.pximg.net": (2, 0.4), "www.patreon.com": 
          "konachan.net": (1, 1.0), "www.sakugabooru.com": (1, 1.0), "aibooru.online": (1, 1.0),
          "xbooru.com": (1, 1.0), "tbib.org": (1, 1.0), "hypnohub.net": (1, 1.0),
          "misskey.io": (2, 0.5),
-         # Fanbox and Fantia read with a login: one request at a time, the login lane spaces them further.
-         "downloads.fanbox.cc": (2, 0.6), "api.fanbox.cc": (1, 1.5), "fantia.jp": (1, 1.5), "c.fantia.jp": (2, 0.6)}
+         # Fanbox, Fantia and PoiPiku read with a login: one request at a time, the login lane spaces them further.
+         "downloads.fanbox.cc": (2, 0.6), "api.fanbox.cc": (1, 1.5), "fantia.jp": (1, 1.5), "c.fantia.jp": (2, 0.6),
+         # PoiPiku's robots.txt asks for a crawl delay of 5 s on its pages; its picture hosts are files.
+         "poipiku.com": (1, 5.0), "cdn.poipiku.com": (2, 0.6), "img.poipiku.com": (2, 0.6)}
 # Not retried on a 429 or a bot check. pixiv's terms forbid "large numbers of
 # actions within a short period"; tools that kept retrying there had accounts restricted.
 STOP_HOSTS = {"www.pixiv.net"}
@@ -144,7 +146,7 @@ def _knob(key, group, label, unit, low, high, step, risk, safe, danger, account,
 
 GROUPS = [
     {"key": "downloads", "title": "Downloads", "hint": "Sites without a login, and how much comes down at once."},
-    {"key": "login", "title": "Sites with your login", "hint": "pixiv, X, Patreon, Fanbox, Fantia and forums: what an account is flagged for."},
+    {"key": "login", "title": "Sites with your login", "hint": "pixiv, X, Patreon, Fanbox, Fantia, PoiPiku and forums: what an account is flagged for."},
     {"key": "browse", "title": "Browse", "hint": "The pictures you look at."},
     {"key": "limits", "title": "Daily limits", "hint": "Requests made with your login, per site and day. A site that reaches its limit rests until tomorrow."},
 ]
@@ -164,7 +166,7 @@ KNOBS = [
     _knob("browse_n", "browse", "Pictures at once, sites with your login", "", 1, 12, 1, "high", 6, 10, True),
 ] + [_knob("limit_" + key, "limits", label, "requests", low, high, 50, "high", default, default * 2, True, default=default)
      for key, label, default, low, high in (("pixiv", "pixiv", 1500, 200, 6000), ("patreon", "Patreon", 1500, 200, 6000), ("x", "X", 600, 100, 3000),
-                                            ("fanbox", "Fanbox", 300, 50, 1500), ("fantia", "Fantia", 300, 50, 1500),
+                                            ("fanbox", "Fanbox", 300, 50, 1500), ("fantia", "Fantia", 300, 50, 1500), ("poipiku", "PoiPiku", 1000, 100, 4000),
                                             ("other", "Forums and other sites with a login", 3000, 200, 10000))]
 _BY_KEY = {k["key"]: k for k in KNOBS}
 _SPEED_KEYS = {k["key"] for k in KNOBS if k["group"] != "limits"}
@@ -255,7 +257,7 @@ def day_limit(site):
 # these web endpoints: the figures are guesses (the research of 2026-10-21 put X at 300-500 and the feeds' sites far lower),
 # kept where users were not locked so far, and tuned by what the tally says (note(), the log's "requests today" lines).
 # pixiv's terms name no number; Pikura's users saw 24-72 h suspensions after long batch runs.
-BUDGETS = {"pixiv": 1500, "patreon": 1500, "x": 600, "fanbox": 300, "fantia": 300}
+BUDGETS = {"pixiv": 1500, "patreon": 1500, "x": 600, "fanbox": 300, "fantia": 300, "poipiku": 1000}
 BUDGET = 3000
 BOT_REST = (12, 24)         # hours a site rests after it answered with a block page (not a challenge that passes)
 FILE_REFUSALS = 8           # different files in a row a site may refuse before it rests (a page, a list or an API call: three)
@@ -265,9 +267,10 @@ FILE_REFUSALS = 8           # different files in a row a site may refuse before 
 _SITES = {"pixiv.net": "pixiv", "pximg.net": "pixiv", "patreon.com": "patreon",
           "patreonusercontent.com": "patreon", "x.com": "x", "twitter.com": "x", "twimg.com": "x",
           "bsky.app": "bluesky", "bsky.network": "bluesky", "bsky.social": "bluesky",
-          "misskey.io": "misskey", "misskeyusercontent.jp": "misskey", "fanbox.cc": "fanbox", "fantia.jp": "fantia"}
+          "misskey.io": "misskey", "misskeyusercontent.jp": "misskey", "fanbox.cc": "fanbox", "fantia.jp": "fantia",
+          "poipiku.com": "poipiku"}
 NAMES = {"pixiv": "Pixiv", "patreon": "Patreon", "x": "X", "bluesky": "Bluesky", "misskey": "Misskey.io",
-         "fanbox": "Fanbox", "fantia": "Fantia"}
+         "fanbox": "Fanbox", "fantia": "Fantia", "poipiku": "PoiPiku"}
 PAUSED = []                 # callbacks(site, until, why), for the activity log
 
 
