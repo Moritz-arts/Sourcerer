@@ -3,6 +3,12 @@
 Newest first. Each entry is made from the commit subjects when a version is made, so a subject is one short,
 plain sentence.
 
+## v0.77 — 2026-11-28
+
+- Daily limits: a site that rested for the day's budget is asked again as soon as the raised limit has room
+- PoiPiku: posts an artist closed with a password are said once, and the password can be saved on the card
+- Merge sources: an orange dot in the box's corner says when cards that look like one artist were found
+
 ## v0.76 — 2026-11-28
 
 - PoiPiku: the Following feed is read in its list layout, so the accounts a login follows are found
