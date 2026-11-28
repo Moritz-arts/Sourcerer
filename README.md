@@ -7,7 +7,7 @@
   </a>
 </p>
 
-# Sourcerer v0.74
+# Sourcerer v0.75
 
 [What changed](Sourcerer_files/docs/CHANGELOG.md) · [Roadmap](Sourcerer_files/docs/ROADMAP.md) · [Releases](https://github.com/Moritz-arts/Sourcerer/releases)
 

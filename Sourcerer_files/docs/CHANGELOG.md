@@ -3,6 +3,10 @@
 Newest first. Each entry is made from the commit subjects when a version is made, so a subject is one short,
 plain sentence.
 
+## v0.75 — 2026-11-28
+
+- PoiPiku: a newly followed artist is found on the next look, wherever its posts are in the feed
+
 ## v0.74 — 2026-11-28
 
 - PoiPiku: the accounts a login follows join the list, read from its Following feed
