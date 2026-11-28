@@ -3,6 +3,11 @@
 Newest first. Each entry is made from the commit subjects when a version is made, so a subject is one short,
 plain sentence.
 
+## v0.78 — 2026-11-28
+
+- Manage Accounts: every login that is counted shows a bar of today's requests against its daily limit
+- Gallery: older posts of a complete download are listed from the library, the site is asked only for what is new
+
 ## v0.77 — 2026-11-28
 
 - Daily limits: a site that rested for the day's budget is asked again as soon as the raised limit has room
