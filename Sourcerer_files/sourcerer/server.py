@@ -58,6 +58,7 @@ def _status(s):
 
 def _artists():
     lib = sync.library()                                  # once: it is a query, and there can be thousands of cards
+    protections = sources.poipiku.protections()           # (once, too: the artist's password and the posts a listing could not open)
     with db.connect() as con:
         artists = [dict(r) for r in con.execute(
             "SELECT a.*, (SELECT COUNT(*) FROM files f WHERE f.artist_id = a.id "
@@ -79,6 +80,8 @@ def _artists():
                 # Recognised afresh on every read, so better detection reaches
                 # sources saved before it (a pixiv link once stored as Mastodon).
                 s.update(sources.describe(s["url"]), master=s["id"] == a["master_source_id"])
+                if s["kind"] == "poipiku":
+                    s.update({k: v for k, v in protections(s["url"]).items() if v})      # {"password", "locked"}: only what there is
                 s["status"] = _status(s)
                 a["sources"].append(s)
             a["path"] = str(sync.artist_folder(a, lib))
@@ -153,6 +156,22 @@ def _clean(body):
             "layout": body.get("layout") if body.get("layout") in LAYOUTS else "together",
             "dedupe": body.get("dedupe") if body.get("dedupe") in DEDUPES else "best",
             "auto_download": 1 if body.get("auto_download") else 0}, None
+
+
+def _keep_passwords(body, urls):
+    """The passwords the card dialog sent for its PoiPiku links ({link: password}) are kept per account. One that changed makes the account's next look walk
+    everything again (a source that went to its end stops at the first known page, and the posts a password opens were never listed) and drops its snapshots,
+    which lack those posts: a gallery opened from a fresh one would not show them."""
+    changed = []
+    for raw, password in (body.get("passwords") or {}).items():
+        url = sources.normalize(raw) if isinstance(raw, str) else ""
+        if url in urls and sources.kind_of(url) == "poipiku" and isinstance(password, str) and sources.poipiku.set_password(url, password):
+            changed.append(url)
+    if changed:
+        with db.connect() as con:
+            for url in changed:
+                con.execute("UPDATE sources SET complete = 0 WHERE url = ?", (url,))
+                con.execute("DELETE FROM snapshots WHERE source_id IN (SELECT id FROM sources WHERE url = ?)", (url,))
 
 
 def _save(con, artist_id, data):
@@ -506,6 +525,7 @@ def create_artist():
     with db.connect() as con:
         artist_id = con.execute("INSERT INTO artists (name) VALUES (?)", (data["name"],)).lastrowid
         _save(con, artist_id, data)
+    _keep_passwords(body, data["urls"])
     _absorb_listed(artist_id, data["urls"])
     _background(sync.check_card, artist_id)
     if body.get("download_now"):
@@ -526,6 +546,7 @@ def update_artist(artist_id):
         _move_folder(con, artist_id, sync.artist_folder(row),
                      sync.artist_folder(dict(row, name=data["name"], folder=data["folder"])))
         _save(con, artist_id, data)
+    _keep_passwords(body, data["urls"])
     _absorb_listed(artist_id, data["urls"])
     _background(sync.check_card, artist_id)
     if body.get("download_now"):

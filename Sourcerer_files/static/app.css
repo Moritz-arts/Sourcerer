@@ -491,6 +491,7 @@ p.error:empty { display: none; }   /* p only: a status dot is .dot.error, and em
 .srcnote span { flex: 1; min-width: 0; }
 .srcnote .ic { flex: none; }
 .srcnote.soft { background: none; color: var(--text-muted); padding-top: 0; margin-top: -4px; }
+.srcnote .srcpass { flex: none; width: 150px; height: 26px; font: 12px var(--font-mono); padding: 2px 8px; }
 .srcnote + .srcrow { border-top: .5px solid var(--border); }
 .addrow { display: flex; gap: 8px; margin-top: 8px; }
 .addrow.tight { margin-top: 0; }
