@@ -401,7 +401,7 @@ def _look(key):
                     made, joined, all_known = _add(page, site.KIND, public, twins, stats)
                 total += len(made)
                 asked += made + joined
-                if all_known and db.get_setting(done, "") == stamp:
+                if all_known and not getattr(site, "WHOLE_FEED", False) and db.get_setting(done, "") == stamp:   # (a feed is ordered by time, not by when one followed: a new follow is on any page)
                     early = True
                     break                    # read to its end before: the rest is known
             else:

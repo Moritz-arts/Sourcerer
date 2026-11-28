@@ -63,7 +63,10 @@ def profile(url):
 # pages use (<a class="IllustUser" href="/<id>/"><img class="IllustUserThumb" ...><h2 class="IllustUserName">), paged by PG (0-based, a PageBar with a link to the
 # next one). So the follows are the authors found in it: whoever posted lately -- an account that follows and has not posted for longer than the feed reaches is
 # missing until it posts. Written from the public feeds' markup (NewArrivalPcV.jsp), not seen with a real login.
-FOLLOWS_HOURS = 11              # every page is a request 5 s after the last (robots.txt): a look is minutes, so once or twice a day
+# A feed is ordered by when the authors POSTED, not by when one followed them: a new follow's last post can be on any page, so the walk never stops at a page of known
+# accounts (follows._look: WHOLE_FEED) and there is no minimum between two looks (no FOLLOWS_HOURS: "Refresh all" right after following somebody must find them). A look is
+# up to MAX_FEED_PAGES requests, 5 s apart (robots.txt): minutes, in the background, inside the day's budget.
+WHOLE_FEED = True
 MAX_FEED_PAGES = 40
 _USER = re.compile(r'<a class="IllustUser" href="/(\d+)/">(.*?)</a>', re.S)
 _NAME = re.compile(r'class="IllustUserName">([^<]*)<')
@@ -95,8 +98,11 @@ def following(key):
             net._stopped(HOME)
             text, _final = net.get_text(HOME + "/MyHomePcV.jsp", params={"PG": page})
             fresh = [a for a in _authors(text) if a["url"] not in seen]
-            if not _USER.search(text) and page == 0 and ("LoginButton" in text or "LoginFormEmailPcV" in text):
-                raise RuntimeError("PoiPiku showed its login page: log in again in Manage Accounts")
+            if not _USER.search(text) and page == 0:
+                if "LoginButton" in text or "LoginFormEmailPcV" in text:
+                    raise RuntimeError("PoiPiku showed its login page: log in again in Manage Accounts")
+                log.warning("PoiPiku: the Following feed shows no post card (%d bytes; IllustThumb x%d, IllustUser x%d, PageBar x%d) -- the markup may differ from the public pages'",
+                            len(text), text.count("IllustThumb"), text.count("IllustUser"), text.count("PageBar"))
             seen.update(a["url"] for a in fresh)
             last = page
             if fresh:

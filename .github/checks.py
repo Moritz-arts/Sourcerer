@@ -911,6 +911,29 @@ def poipiku_checks():
     finally:
         net.get_text = real
 
+    # a follow made after the first look: its last post can be on any page of a feed ordered by time, so the next look walks the whole feed (never stops at a page of
+    # known accounts) and Refresh all right after the first look still reads it (no minimum between looks)
+    from sourcerer import follows, sync
+    first = {0: feed(0, [card("2", "Artist A"), card("3", "Artist B")], [0, 1]), 1: feed(1, [card("4", "Artist C")], [0, 1])}
+    second = {0: first[0], 1: feed(1, [card("4", "Artist C"), card("9", "Artist N")], [0, 1])}
+    pages_of, saved = first, (follows.keys, accounts.label, accounts.saved, sync.enqueue, net.public_https, net.get_text)
+    follows.keys, accounts.label, accounts.saved, sync.enqueue = (lambda: ["poipiku"]), (lambda k: "PoiPiku"), (lambda k: "t1"), (lambda *a, **k: 0)
+    net.public_https = lambda url: True
+    net.get_text = lambda url, params=None, headers=None: (pages_of.get((params or {}).get("PG"), ""), url)
+    try:
+        db.set_setting("import_follows", "1")
+
+        def cards_of(url):
+            with db.connect() as con:
+                return con.execute("SELECT COUNT(*) FROM sources WHERE url = ?", (url,)).fetchone()[0]
+        follows.look()
+        check(all(cards_of("https://poipiku.com/%s/" % n) == 1 for n in (2, 3, 4)) and cards_of("https://poipiku.com/9/") == 0, "the first look makes a card of every author of the feed")
+        pages_of = second
+        follows.look()
+        check(cards_of("https://poipiku.com/9/") == 1, "a follow whose post is on the second page of the feed is found by the next look, not skipped as 'known'")
+    finally:
+        follows.keys, accounts.label, accounts.saved, sync.enqueue, net.public_https, net.get_text = saved
+
 
 def resume_checks():
     import os
