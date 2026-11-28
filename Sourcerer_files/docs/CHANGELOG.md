@@ -3,6 +3,10 @@
 Newest first. Each entry is made from the commit subjects when a version is made, so a subject is one short,
 plain sentence.
 
+## v0.74 — 2026-11-28
+
+- PoiPiku: the accounts a login follows join the list, read from its Following feed
+
 ## v0.73 — 2026-11-28
 
 - PoiPiku: a logged-in card lists the original pictures again (signed links were dropped)
