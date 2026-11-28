@@ -3,6 +3,10 @@
 Newest first. Each entry is made from the commit subjects when a version is made, so a subject is one short,
 plain sentence.
 
+## v0.73 — 2026-11-28
+
+- PoiPiku: a logged-in card lists the original pictures again (signed links were dropped)
+
 ## v0.72 — 2026-11-25
 
 - PoiPiku: artists can be added as a source (640 px copies as a visitor, originals with a login)
