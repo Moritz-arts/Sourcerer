@@ -962,6 +962,84 @@ def poipiku_checks():
     finally:
         net.get_text = real
 
+    # a post its artist closed with a password: gallery-dl says "Password is incorrect." for each, also when none was given. The password is kept per account and goes into the
+    # listing; what stays closed is counted and said once, and the card dialog gets both
+    from sourcerer import sync as _sync
+    page_url = "https://poipiku.com/2/"
+    shut = ("[poipiku][warning] 13698066: 'Password is incorrect.'", "[poipiku][warning] 13692369: 'Password is incorrect.'", "[poipiku][warning] no 'POIPIKU_LK' cookie set")
+    given = {}
+    closed = list(shut)
+
+    def listing(url, section, options, fields, **kw):
+        given["options"] = options
+        given["taken"] = [kw["warn"](line) for line in closed]
+        yield [{"url": "https://cdn.poipiku.com/000000002/013202411_YJMjMxhKf.png_640.jpg", "post": "13202427", "num": 1, "user": "2"}]
+    real_items = poipiku._gdl.items
+    poipiku._gdl.items = listing
+    try:
+        _sync._log.clear()
+        batches = list(poipiku.pages(page_url))
+        said = [e["text"] for e in _sync._log]
+        check(len(batches) == 1 and "passwords" not in given["options"] and given["taken"] == [True, True, False],
+              "a listing without a password gives gallery-dl none, and takes over the warnings about closed posts (not the others)", (given, said))
+        check(len(said) == 1 and "2 posts are protected by a password and skipped (13698066, 13692369)" in said[0] and "Enter the artist's password on the card" in said[0],
+              "the posts a password closes are said once, with what to do", said)
+        check(poipiku.protections()(page_url) == {"password": "", "locked": 2}, "...and counted for the card dialog", poipiku.protections()(page_url))
+        list(poipiku.pages(page_url))
+        check(len(_sync._log) == 1, "a look that finds the same posts closed does not say it again", [e["text"] for e in _sync._log])
+
+        check(poipiku.set_password(page_url, " hunter2 ") is True and poipiku.password_of(page_url) == "hunter2" and poipiku.set_password(page_url, "hunter2") is False,
+              "the artist's password is kept per account (trimmed); the same one again is no change")
+        check(poipiku.protections()(page_url)["locked"] == 0, "a new password forgets what was counted: it is unknown until the next look")
+        list(poipiku.pages(page_url))
+        said = [e["text"] for e in _sync._log]
+        check(given["options"].get("passwords") == "hunter2" and len(said) == 2 and "The password saved on the card does not open them." in said[1],
+              "the password goes to gallery-dl as its own option, and a password that opens nothing is said so", (given["options"], said))
+
+        closed.clear()
+        list(poipiku.pages(page_url))
+        check(poipiku.protections()(page_url) == {"password": "hunter2", "locked": 0} and len(_sync._log) == 2, "a password that opens everything leaves nothing counted and nothing said")
+        check(poipiku.set_password(page_url, "") is True and poipiku.password_of(page_url) == "", "an empty one forgets it")
+    finally:
+        poipiku._gdl.items = real_items
+    try:
+        import inspect
+        from gallery_dl.extractor import poipiku as gdl_poipiku
+        check('"passwords"' in inspect.getsource(gdl_poipiku.PoipikuExtractor._init), "gallery-dl still reads the option `passwords` (the name this version of Sourcerer hands the password over by)")
+    except ImportError:
+        pass
+
+    # ... and the card: its save carries the passwords of its PoiPiku links, the state gives them back, a changed one makes the account walk everything again
+    real_background = server._background
+    server._background = lambda fn, *a, **k: None
+    try:
+        client = server.app.test_client()
+        link = "https://poipiku.com/77/"
+        aid = client.post("/api/artists", json={"name": "Artist PW", "sources": ["poipiku.com/77", "https://x.com/someone"], "passwords": {"poipiku.com/77": " pw77 ", "https://x.com/someone": "no"}}).get_json()["id"]
+
+        def source():
+            return next(s for a in client.get("/api/state").get_json()["artists"] if a["id"] == aid for s in a["sources"] if s["url"] == link)
+        check(source().get("password") == "pw77" and poipiku.password_of(link) == "pw77", "the card's save keeps the artist's password for its PoiPiku link, and the state gives it back", source())
+        check(poipiku.password_of("https://poipiku.com/78/") == "" and not any(v == "no" for v in poipiku._setting(poipiku.PASSWORDS).values()),
+              "...another account's is not touched, and a link of another site keeps none")
+        with db.connect() as con:
+            sid = con.execute("SELECT id FROM sources WHERE artist_id = ? AND url = ?", (aid, link)).fetchone()[0]
+            con.execute("UPDATE sources SET complete = 1 WHERE id = ?", (sid,))
+            con.execute("INSERT INTO snapshots (source_id, fetched, data) VALUES (?, '2026-01-01 00:00:00', x'00')", (sid,))
+        client.put("/api/artists/%d" % aid, json={"name": "Artist PW", "sources": [link, "https://x.com/someone"], "passwords": {link: "pw77"}})
+        with db.connect() as con:
+            same = (con.execute("SELECT complete FROM sources WHERE id = ?", (sid,)).fetchone()[0], con.execute("SELECT COUNT(*) FROM snapshots WHERE source_id = ?", (sid,)).fetchone()[0])
+        check(same == (1, 1), "the same password sent again changes nothing: the source stays complete, its snapshot stays", same)
+        client.put("/api/artists/%d" % aid, json={"name": "Artist PW", "sources": [link, "https://x.com/someone"], "passwords": {link: "other"}})
+        with db.connect() as con:
+            changed = (con.execute("SELECT complete FROM sources WHERE id = ?", (sid,)).fetchone()[0], con.execute("SELECT COUNT(*) FROM snapshots WHERE source_id = ?", (sid,)).fetchone()[0])
+        check(source().get("password") == "other" and changed == (0, 0),
+              "a changed password makes the next look walk everything (the source is no longer complete) and drops its snapshot, which lacks the posts it opens", (source(), changed))
+        client.put("/api/artists/%d" % aid, json={"name": "Artist PW", "sources": [link], "passwords": {link: ""}})
+        check("password" not in source(), "an empty password in the dialog forgets it", source())
+    finally:
+        server._background = real_background
+
     # a follow made after the first look: its last post can be on any page of a feed ordered by time, so the next look walks the whole feed (never stops at a page of
     # known accounts) and Refresh all right after the first look still reads it (no minimum between looks)
     from sourcerer import follows, sync

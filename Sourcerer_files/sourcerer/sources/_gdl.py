@@ -147,7 +147,7 @@ def _failure(code, errors, lines=()):
     return Failed(text, auth=auth, slow=slow)
 
 
-def items(url, section, options, fields, lock=None, site=None, only=None, trace=False):
+def items(url, section, options, fields, lock=None, site=None, only=None, trace=False, warn=None):
     """Yield pages (lists) of dicts, one per file, newest first.
 
     fields: {name: gallery-dl format expression}, e.g. {"url": "{_url!j}"}.
@@ -156,12 +156,14 @@ def items(url, section, options, fields, lock=None, site=None, only=None, trace=
     site: a URL of the site whose day's budget this read counts against. gallery-dl runs with -v then and every request it makes is
     counted (_Watch) -- the files of a page said nothing about what the site was asked. only: a regex the path of a request must
     match to count (X: its API, not the scripts it loads for the request signature). trace: a mode of gdl_run.py ("xenforo").
+    warn: a function that is given every warning line of gallery-dl and returns True for one it has taken over (PoiPiku counts the posts a password
+    closes and says them once, instead of one line each); any other is logged as ever.
     Stopping early -- closing this generator -- ends the gallery-dl process.
     """
     fmt = "prepare:{{" + ",".join('"%s":%s' % (k, v) for k, v in fields.items()) + "}}"
     lock = _site_lock(lock or section)
     watch = _Watch(site, only) if site else None
-    listing = _items(url, section, options, fmt, watch, trace)
+    listing = _items(url, section, options, fmt, watch, trace, warn)
     try:
         while True:
             if not lock.acquire(timeout=WAIT_INFO):
@@ -214,7 +216,7 @@ class _Watch:
             log.exception("counting gallery-dl's requests")
 
 
-def _items(url, section, options, fmt, watch=None, trace=False):
+def _items(url, section, options, fmt, watch=None, trace=False, warn=None):
     conf = _config(section, options)
     trace = "limits" if watch else trace
     proc = _start(_command(conf, ["-N", fmt] + (["-v"] if watch else []), url, trace), trace)
@@ -229,7 +231,13 @@ def _items(url, section, options, fmt, watch=None, trace=False):
             if "][error]" in line:
                 errors.append(line)
             elif "][warning]" in line:
-                log.info("gallery-dl: %s", line)
+                try:
+                    taken = bool(warn and warn(line))
+                except Exception:
+                    log.exception("reading gallery-dl's warning")
+                    taken = False
+                if not taken:
+                    log.info("gallery-dl: %s", line)
     reader = threading.Thread(target=read_errors, daemon=True)
     reader.start()
     try:

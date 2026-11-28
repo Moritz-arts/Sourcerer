@@ -6,11 +6,16 @@ gallery-dl (_gdl.py); the files are downloaded by Sourcerer itself through net.p
 
 The site's robots.txt asks for a crawl delay of 5 seconds: a sync spaces gallery-dl's pages by it (a gallery somebody waits for goes faster). A post has no date on
 its page, so `posted` stays empty and the order of the listing (newest first) dates the saved files.
+
+An artist can close a post with a password they hand out themselves (a key on the site): gallery-dl opens it only with that password, which Sourcerer keeps per PoiPiku
+account (set_password) and gives to every listing of it; what stays closed is counted and said once (_Skips).
 """
 import html
+import json
 import logging
 import random
 import re
+import threading
 import urllib.parse
 
 from . import _gdl, kinds
@@ -150,19 +155,151 @@ def _media(f):
                  thumb=base + "_360.jpg", large=url, preview_headers={"Referer": HOME + "/"}, **kinds.typed(name))
 
 
+# ---- posts a password closes -------------------------------------------------------------------------------------------------------------
+# Without the password gallery-dl lists nothing of such a post and says "13705027: 'Password is incorrect.'" -- also when none was given at all, which read like a
+# wrong login. The artist's password is kept per PoiPiku ACCOUNT, not per card (the setting poipiku_passwords, {id: password}; outside config.DEFAULTS, so
+# /api/settings never shows it; the card dialog sends it with the card) and goes into every listing of that account, a sync's and a gallery's. What a listing could not open
+# is counted (poipiku_locked: the card dialog says it) and said once, instead of once a post.
+PASSWORDS, LOCKED = "poipiku_passwords", "poipiku_locked"
+_SKIPPED = re.compile(r"\[poipiku\]\[warning\] (\d+): '(.*)'\s*$")
+_told = {}                                     # account -> what the log said of it last: a look says it again only when it changed
+_keep = threading.Lock()
+
+
+def _setting(key):
+    from .. import db
+    try:
+        data = json.loads(db.get_setting(key) or "{}")
+    except ValueError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _put(key, data):
+    from .. import db
+    db.set_setting(key, json.dumps(data))
+
+
+def password_of(url):
+    return str(_setting(PASSWORDS).get(_id(url), ""))
+
+
+def protections():
+    """Reads both settings once and gives a function that says, for a link, what the card dialog shows: {"password", "locked"} (the state is built for a thousand cards)."""
+    passwords, locked = _setting(PASSWORDS), _setting(LOCKED)
+
+    def of(url):
+        uid = _id(url)
+        return {"password": str(passwords.get(uid, "")), "locked": int(locked.get(uid) or 0)}
+    return of
+
+
+def set_password(url, password):
+    """Keeps the artist's password for this account (empty: forgets it). True when it changed: what the last looks could not open is unknown until the next one."""
+    uid, password = _id(url), (password or "").strip()[:100]
+    with _keep:
+        data = _setting(PASSWORDS)
+        if data.get(uid, "") == password:
+            return False
+        if password:
+            data[uid] = password
+        else:
+            data.pop(uid, None)
+        _put(PASSWORDS, data)
+        locked = _setting(LOCKED)
+        if locked.pop(uid, None) is not None:
+            _put(LOCKED, locked)
+        _told.pop(uid, None)
+    return True
+
+
+class _Skips:
+    """The posts gallery-dl could not open in one listing, taken from its warnings (_gdl.items(warn=)): counted, and said once (report)."""
+    def __init__(self):
+        self.posts = {}                        # post id -> what gallery-dl said ("Password is incorrect.")
+
+    def line(self, text):
+        hit = _SKIPPED.search(text)
+        if hit:
+            self.posts[hit.group(1)] = hit.group(2)
+        return bool(hit)
+
+    def report(self, url, had_password, full):
+        """After a listing: how many posts stayed closed is kept for the card dialog (a listing that went to its end -- full -- is exact, an early stop can only add)
+        and the activity log says it once for as long as it does not change."""
+        try:
+            uid, n = _id(url), len(self.posts)
+            with _keep:
+                locked = _setting(LOCKED)
+                old = int(locked.get(uid) or 0)
+                new = n if full else max(old, n)
+                if new != old:
+                    locked[uid] = new
+                    if not new:
+                        del locked[uid]
+                    _put(LOCKED, locked)
+                key = (tuple(sorted(self.posts)), had_password)
+                if not n:
+                    _told.pop(uid, None)
+                    return
+                if _told.get(uid) == key:
+                    return
+                _told[uid] = key
+            _say(url, self._text(had_password))
+        except Exception:
+            log.exception("PoiPiku: counting the posts a password closes")
+
+    def _text(self, had_password):
+        shut = sorted((p for p, why in self.posts.items() if "assword" in why), key=int, reverse=True)
+        other = {}
+        for post, why in self.posts.items():
+            if "assword" not in why:
+                other.setdefault(why.rstrip(". "), []).append(post)
+        out = []
+        if shut:
+            out.append("%d post%s protected by a password and skipped (%s%s). %s" % (
+                len(shut), " is" if len(shut) == 1 else "s are", ", ".join(shut[:4]), ", ..." if len(shut) > 4 else "",
+                "The password saved on the card does not open %s." % ("it" if len(shut) == 1 else "them") if had_password
+                else "Enter the artist's password on the card, under its PoiPiku link."))
+        for why, posts in sorted(other.items()):
+            out.append("%d post%s could not be opened: %s (%s%s)." % (len(posts), "" if len(posts) == 1 else "s", why, ", ".join(sorted(posts, key=int, reverse=True)[:4]), ", ..." if len(posts) > 4 else ""))
+        return " ".join(out)
+
+
+def _say(url, text):
+    """One line in the activity log, under the card's name where the link belongs to a card."""
+    from .. import db, sync
+    artist = None
+    try:
+        with db.connect() as con:
+            row = con.execute("SELECT a.id, a.name FROM sources s JOIN artists a ON a.id = s.artist_id WHERE s.url = ? LIMIT 1", (normalize(url),)).fetchone()
+        artist = {"id": row["id"], "name": row["name"]} if row else None
+    except Exception:
+        log.exception("PoiPiku: the card of a link")
+    sync.event("info", text, artist)
+
+
 def pages(url):
     if not _gdl.available():
         raise RuntimeError("PoiPiku needs gallery-dl, which did not install: Settings > Repair")
     net._stopped(HOME)
     options = dict(OPTIONS, cookies=accounts.jar("poipiku", fresh=True))
+    password = password_of(url)
+    if password:
+        options["passwords"] = password        # gallery-dl's own option: one password for every post of the run (it reaches gallery-dl through the run's config file, never the command line)
     if net.waiting():
         options["sleep-request"] = OPEN_SLEEP
-    # A logged-in read counts its requests against the day's budget (gallery-dl's log, _gdl.items(site=)); a visitor's is nobody's.
-    listing = _gdl.items(normalize(url), "poipiku", options, FIELDS, site=HOME if accounts.logged_in("poipiku") else None)
-    while True:
-        net._stopped(HOME)
-        try:
-            batch = _run(next, listing)
-        except StopIteration:
-            return
-        yield [m for m in map(_media, batch) if m]
+    skips, done = _Skips(), False
+    try:
+        # A logged-in read counts its requests against the day's budget (gallery-dl's log, _gdl.items(site=)); a visitor's is nobody's.
+        listing = _gdl.items(normalize(url), "poipiku", options, FIELDS, site=HOME if accounts.logged_in("poipiku") else None, warn=skips.line)
+        while True:
+            net._stopped(HOME)
+            try:
+                batch = _run(next, listing)
+            except StopIteration:
+                done = True
+                return
+            yield [m for m in map(_media, batch) if m]
+    finally:
+        skips.report(url, bool(password), done)

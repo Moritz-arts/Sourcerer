@@ -904,6 +904,15 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   sync spaces gallery-dl's pages 5-7 s (`OPTIONS`), a gallery somebody waits for 2.5-4 s (`OPEN_SLEEP`; one post is one page, 5-7 s made a first screen two
   minutes), `HOSTS` keeps Sourcerer's own page requests at 5 s. A post has no date on its page: `posted` stays empty. Only files under `<host>/<nine digits>/` are
   taken (`_FILE`): the lock, warning and password icons of a post are on `/img/` and `/assets/`.
+  **A post can be closed with a password its artist hands out** (a key on the site; v0.77): gallery-dl lists nothing of it and says `13705027: 'Password is incorrect.'` for each such post --
+  also when none was given, which read like a wrong login (the user's log). The password is kept **per PoiPiku account** (setting `poipiku_passwords` {id: password}, outside `config.DEFAULTS`;
+  `poipiku.set_password`), sent with the card (`passwords` {link: password} in the body of POST / PUT `/api/artists`, `server._keep_passwords`) and handed to gallery-dl as its option `passwords`
+  (one string for the run, through the run's config file, never the command line) by every `pages()`, a sync's and a gallery's alike; `checks.py` fails when gallery-dl stops reading that
+  option's name. A changed password sets the account's sources `complete = 0` (a complete source stops at the first known page, and the posts a password opens were never listed) and
+  deletes their snapshots (a fresh one would keep those posts out of the gallery for twelve hours). `_gdl.items(warn=)` lets a source take over gallery-dl's warning lines: `_Skips` counts
+  the closed posts of a listing, keeps the number (`poipiku_locked`: exact after a listing that went to its end, only ever more after an early stop, cleared by a new password) for the card
+  dialog -- under the PoiPiku link "3 posts protected by a password are skipped. The artist's password: [ ]" (`passNote` in app.js; the password lives in `F.pass`, keyed by link) -- and says it
+  once in the activity log (`sync.event`, under the card's name) for as long as it does not change.
 - **pywebview 6 turned `FOLDER_DIALOG` into a deprecated function.** Passing it
   as the dialog type opens nothing; use `FileDialog.FOLDER` (with a fallback
   for 5.x), as `server.pick_folder` does.

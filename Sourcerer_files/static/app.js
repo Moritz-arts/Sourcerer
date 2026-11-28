@@ -2160,13 +2160,15 @@ function openCard(a) {
     layout: a ? a.layout : "together",
     dedupe: a ? a.dedupe : "best",
     auto: a ? !!a.auto_download : false,
-    master: a ? (a.sources.filter(function (s) { return s.master; })[0] || {}).url || "" : ""
+    master: a ? (a.sources.filter(function (s) { return s.master; })[0] || {}).url || "" : "",
+    pass: {}                                                      // link -> the artist's password (PoiPiku: kept per account, sent with the card)
   };
   (a ? a.sources : []).forEach(function (s) {
     var slot = F.rows.filter(function (r) { return r.field === s.label && !r.url; })[0] || blankRow(null);
     if (F.rows.indexOf(slot) < 0) F.rows.push(slot);
     Object.assign(slot, { url: s.url, label: s.label, supported: s.supported, status: s.status,
-                          error: s.last_error || "", checked: s.url });
+                          error: s.last_error || "", checked: s.url, locked: s.locked || 0, lockedFor: s.url });
+    if (s.password) F.pass[s.url] = s.password;
   });
   var f = $("form-card");
   f.name.value = a ? a.name : "";
@@ -2228,6 +2230,7 @@ function renderSources() {
   // Re-drawn while somebody types in another field: keep the cursor where it was.
   var el = document.activeElement, at = el && el.dataset ? el.dataset.row : null;
   var pos = at != null ? el.selectionStart : 0;
+  var pw = el && el.dataset && el.dataset.pass != null ? el.dataset.pass : null, pwPos = pw != null ? el.selectionStart : 0;
   var master = F.dedupe === "master" ? F.master : "";
   // A site is listed once there is a login for it, or a link already on the card:
   // saving must never drop a source because its login is gone.
@@ -2252,7 +2255,7 @@ function renderSources() {
       '<input type="text" class="srcinput" data-row="' + i + '" value="' + esc(r.url) + '" autocomplete="off" spellcheck="false" placeholder="' +
       esc(field ? field.example : "Link") + '">' + state +
       (r.field ? "" : '<button type="button" data-src="remove" data-i="' + i + '" title="Remove">' + icon("x") + "</button>") + "</div>" +
-      (filled ? loginNote(r, i) : "");
+      (filled ? loginNote(r, i) + passNote(r, i) : "");
   }).join("");
   $("src-list").innerHTML = html || '<div class="srcempty">You are not logged in to any site yet. ' +
     '<button type="button" class="mini primary" data-act="accounts">Manage Accounts</button></div>';
@@ -2260,7 +2263,22 @@ function renderSources() {
     var again = document.querySelector('.srcinput[data-row="' + at + '"]');
     if (again) { again.focus(); try { again.setSelectionRange(pos, pos); } catch (e) {} }
   }
+  if (pw != null) {
+    var typing = document.querySelector('.srcpass[data-pass="' + pw + '"]');
+    if (typing) { typing.focus(); try { typing.setSelectionRange(pwPos, pwPos); } catch (e) {} }
+  }
   renderForm();
+}
+
+// Under a PoiPiku link: a post its artist closed with a password is skipped until the card has the password. It is kept per account (the server), sent with the card.
+function passNote(r, i) {
+  if (r.label !== "PoiPiku" || !r.supported || r.status === "checking") return "";
+  var n = r.lockedFor === r.url ? r.locked || 0 : 0, saved = !!(F.pass[r.url] || "").trim();   // (what a link had closed says nothing of another one typed over it)
+  var text = n && saved ? plural(n, "post") + (n === 1 ? " stays" : " stay") + " closed: the saved password does not open " + (n === 1 ? "it." : "them.")
+    : n ? plural(n, "post") + " protected by a password " + (n === 1 ? "is" : "are") + " skipped."
+    : "Posts protected by a password are skipped.";
+  return '<div class="srcnote soft">' + icon("info") + "<span>" + esc(text) + " The artist's password:</span>" +
+    '<input type="text" class="srcpass" data-pass="' + i + '" value="' + esc(F.pass[r.url] || "") + '" autocomplete="off" spellcheck="false" placeholder="optional"></div>';
 }
 
 // Under a link whose site wants a login that is missing or ran out: what
@@ -2318,6 +2336,11 @@ function takeLinks(input) {
 }
 
 $("src-list").addEventListener("input", function (e) {
+  if (e.target.classList.contains("srcpass")) {          // the artist's password: kept under the link it stands under, nothing else redraws
+    var pr = F.rows[+e.target.dataset.pass];
+    if (pr) F.pass[pr.url] = e.target.value;
+    return;
+  }
   var row = e.target.dataset && F.rows[+e.target.dataset.row];
   if (!row) return;
   row.url = e.target.value;
@@ -2369,6 +2392,7 @@ $("form-card").addEventListener("submit", function (e) {
     var body = {
       name: e.target.name.value, folder: $("card-folder").value,
       sources: filledRows().map(function (r) { return r.url.trim(); }),
+      passwords: filledRows().filter(function (r) { return r.label === "PoiPiku"; }).reduce(function (o, r) { o[r.url.trim()] = (F.pass[r.url] || "").trim(); return o; }, {}),
       layout: F.layout, dedupe: F.dedupe, master: F.dedupe === "master" ? F.master : "",
       auto_download: $("card-auto").checked, download_now: downloadNow
     };
