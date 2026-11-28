@@ -889,13 +889,16 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   **A member's originals are signed CloudFront links** (`<name>.png?Expires=...&Signature=...&Key-Pair-Id=...`, v0.73, from gallery-dl's own test results): `_FILE` allowed no `?`, so a
   logged-in card listed NO picture at all while name and avatar (read from the page) were fine -- the user's report; a visitor's 640 px copies have no query and always worked.
   `_media` names the file and makes the small rendition from the address without the query (that rendition is public and unsigned). **The login is not tried against a real account** (no way to here): nothing says how an expired one looks, so there is no `still_logged_in`.
-  **PoiPiku has no list of the accounts one follows** (v0.73 research, 2026-11-28: no page or API for it; `MyHomePcV.jsp` is the *feed* of the followed accounts' posts, tabs "quiet follow" / "following tags" =
-  `MyHomeTagPcV.jsp` / "favo" = `MyBookmarkListPcV.jsp`; the follow button is `/f/UpdateFollowUserF.jsp`): a follow import would have to read the authors out of that feed, written against the
-  logged-in markup, which nobody has seen yet. The grid's small
+  **PoiPiku has no list of the accounts one follows -- the follows are the authors of the Following feed** (v0.74, `poipiku.following`, `FOLLOWS_HOURS` 11 h; research 2026-11-28: no page or API lists them;
+  `MyHomePcV.jsp` is the *feed* of the followed accounts' posts, newest first, tabs "quiet follow" / "following tags" = `MyHomeTagPcV.jsp` / "favo" = `MyBookmarkListPcV.jsp`; the follow button is
+  `/f/UpdateFollowUserF.jsp`): the feed uses the same cards as the public pages (`<a class="IllustUser" href="/<id>/">` with `IllustUserThumb` / `IllustUserName`) and is paged by `PG` (0-based; the
+  `PageBar` links the next one -- the walk ends where it does not, never on a guess, cap `MAX_FEED_PAGES`). So an account that follows but has not posted within the feed's reach is missing until it posts;
+  a feed showing the login page raises "log in again", a feed with no post is an empty list. **Written against the public feeds' markup (`NewArrivalPcV.jsp`, parsed in `checks.py` and by hand: 40 authors from 48 real
+  cards), not seen with a real login** -- if the user's own feed differs, `_USER` / `_BAR` are what to adjust. The grid's small
   picture is the site's `_360.jpg` rendition of the file (seen on its list pages, no Referer needed), never the original. `robots.txt` asks `Crawl-delay: 5`: a
   sync spaces gallery-dl's pages 5-7 s (`OPTIONS`), a gallery somebody waits for 2.5-4 s (`OPEN_SLEEP`; one post is one page, 5-7 s made a first screen two
   minutes), `HOSTS` keeps Sourcerer's own page requests at 5 s. A post has no date on its page: `posted` stays empty. Only files under `<host>/<nine digits>/` are
-  taken (`_FILE`): the lock, warning and password icons of a post are on `/img/` and `/assets/`. No follow list.
+  taken (`_FILE`): the lock, warning and password icons of a post are on `/img/` and `/assets/`.
 - **pywebview 6 turned `FOLDER_DIALOG` into a deprecated function.** Passing it
   as the dialog type opens nothing; use `FileDialog.FOLDER` (with a fallback
   for 5.x), as `server.pick_folder` does.

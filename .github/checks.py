@@ -872,6 +872,45 @@ def poipiku_checks():
     for icon in ("https://cdn.poipiku.com/img/publish_pass.png", "https://cdn.poipiku.com/assets/img/x.png", "https://evil.example/000000002/a.png", ""):
         check(poipiku._media({"url": icon, "post": "1", "num": 1, "user": "2"}) is None, "an icon or a foreign address is no file of the artist: " + icon)
 
+    # the accounts a login follows: the authors of the Following feed (the cards of the public pages), paged by PG
+    def card(uid, name, avatar="profile_20200101000000.jpeg"):
+        return ('<div class="IllustThumb"><a class="IllustUser" href="/%s/"><img class="IllustUserThumb" src="https://cdn.poipiku.com/%09d/%s_120.jpg" alt="%s" decoding="async"/>'
+                '<h2 class="IllustUserName">%s</h2></a><a class="IllustThumbImg" href="/%s/9.html"></a></div>' % (uid, int(uid), avatar, name, name, uid))
+
+    def feed(page, cards, nxt):
+        bar = "".join('<span class="PageBarItemFrame"><a class="BtnBase PageBarItem" href="/MyHomePcV.jsp?PG=%d">x</a></span>' % n for n in nxt)
+        return "<html><body><section>%s</section><nav class=\"PageBar\">%s</nav></body></html>" % ("".join(cards), bar)
+
+    pages_of = {0: feed(0, [card("2", "Artist A"), card("2", "Artist A"), card("3", "Artist &amp; B", "default_user.jpg")], [0, 1]),
+                1: feed(1, [card("3", "Artist &amp; B", "default_user.jpg"), card("4", "Artist C")], [0, 1, 2]),
+                2: feed(2, [card("4", "Artist C")], [1, 2])}
+    asked, real = [], net.get_text
+    net.get_text = lambda url, params=None, headers=None: (asked.append(dict(params or {})), (pages_of.get((params or {}).get("PG"), ""), url))[1]
+    try:
+        (name, pages), = list(poipiku.following("poipiku"))
+        got = [a for page in pages for a in page]
+        check([a["url"] for a in got] == ["https://poipiku.com/2/", "https://poipiku.com/3/", "https://poipiku.com/4/"] and name == ""
+              and [a["name"] for a in got] == ["Artist A", "Artist & B", "Artist C"] and [p["PG"] for p in asked] == [0, 1, 2],
+              "the Following feed is read page by page to the end, an author once, names unescaped", (got, asked))
+        check(got[0]["avatar"] == "https://cdn.poipiku.com/000000002/profile_20200101000000.jpeg_120.jpg" and got[1]["avatar"] == "",
+              "an author's own picture is the avatar, the default picture is none", got)
+        pages_of.clear()
+        pages_of[0] = "<html><body><a class=\"BtnBase LoginButton\" href=\"/LoginFormEmailPcV.jsp\">Login</a></body></html>"
+        try:
+            list(list(poipiku.following("poipiku"))[0][1])
+            raised = False
+        except RuntimeError as e:
+            raised = "log in again" in str(e)
+        check(raised, "a feed that shows the login page is an expired login, said plainly")
+        pages_of[0] = feed(0, [], [])
+        check(not [a for _n, pages in poipiku.following("poipiku") for page in pages for a in page], "a login that follows nobody gives an empty list, no error")
+        pages_of[0] = feed(0, [card("5", "Artist D")], [0])
+        asked.clear()
+        check([a["url"] for _n, pages in poipiku.following("poipiku") for page in pages for a in page] == ["https://poipiku.com/5/"] and len(asked) == 1,
+              "no link to a next page: the walk ends there, it never goes on by a guess", asked)
+    finally:
+        net.get_text = real
+
 
 def resume_checks():
     import os

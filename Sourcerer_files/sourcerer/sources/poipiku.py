@@ -8,6 +8,7 @@ The site's robots.txt asks for a crawl delay of 5 seconds: a sync spaces gallery
 its page, so `posted` stays empty and the order of the listing (newest first) dates the saved files.
 """
 import html
+import logging
 import random
 import re
 import urllib.parse
@@ -15,6 +16,7 @@ import urllib.parse
 from . import _gdl, kinds
 from .. import accounts, net
 
+log = logging.getLogger(__name__)
 KIND = "poipiku"
 LABEL = "PoiPiku"
 HOME = "https://poipiku.com"
@@ -54,6 +56,56 @@ def profile(url):
     avatar = re.search(r'src="(https://cdn\.poipiku\.com/\d{9}/profile_[^"]+)"', text)
     return {"name": html.unescape(name.group(1)).strip() if name else "PoiPiku " + uid,
             "handle": "poipiku.com/" + uid, "avatar": avatar.group(1) if avatar else ""}
+
+
+# ---- the accounts a login follows ---------------------------------------------------------------------------------------------------
+# PoiPiku has no list of them: "Following" (MyHomePcV.jsp, the tab "quiet follow") is the FEED of their posts, newest first, in the same cards the public
+# pages use (<a class="IllustUser" href="/<id>/"><img class="IllustUserThumb" ...><h2 class="IllustUserName">), paged by PG (0-based, a PageBar with a link to the
+# next one). So the follows are the authors found in it: whoever posted lately -- an account that follows and has not posted for longer than the feed reaches is
+# missing until it posts. Written from the public feeds' markup (NewArrivalPcV.jsp), not seen with a real login.
+FOLLOWS_HOURS = 11              # every page is a request 5 s after the last (robots.txt): a look is minutes, so once or twice a day
+MAX_FEED_PAGES = 40
+_USER = re.compile(r'<a class="IllustUser" href="/(\d+)/">(.*?)</a>', re.S)
+_NAME = re.compile(r'class="IllustUserName">([^<]*)<')
+_ALT = re.compile(r'class="IllustUserThumb"[^>]*\balt="([^"]*)"')
+_AVATAR = re.compile(r'src="(https://cdn\.poipiku\.com/\d{9}/profile_[^"]+)"')        # (the default picture is no avatar: the initials show)
+_BAR = re.compile(r'<nav class="PageBar">(.*?)</nav>', re.S)
+
+
+def _authors(text):
+    """The accounts of one feed page, once each, in the order they come: [{"url", "name", "avatar"}]."""
+    out, seen = [], set()
+    for uid, inner in _USER.findall(text):
+        if uid in seen:
+            continue
+        seen.add(uid)
+        name = _NAME.search(inner) or _ALT.search(inner)
+        avatar = _AVATAR.search(inner)
+        out.append({"url": "%s/%s/" % (HOME, uid), "name": html.unescape(name.group(1)).strip() if name else "",
+                    "avatar": avatar.group(1) if avatar else ""})
+    return out
+
+
+def following(key):
+    """(list name, pages) of the accounts in the login's Following feed. A feed that shows the login page is an expired login (it says so);
+    one with no post at all is a login that follows nobody, or nobody who posted: an empty list, no error."""
+    def pages():
+        seen, last = set(), 0
+        for page in range(MAX_FEED_PAGES):
+            net._stopped(HOME)
+            text, _final = net.get_text(HOME + "/MyHomePcV.jsp", params={"PG": page})
+            fresh = [a for a in _authors(text) if a["url"] not in seen]
+            if not _USER.search(text) and page == 0 and ("LoginButton" in text or "LoginFormEmailPcV" in text):
+                raise RuntimeError("PoiPiku showed its login page: log in again in Manage Accounts")
+            seen.update(a["url"] for a in fresh)
+            last = page
+            if fresh:
+                yield fresh
+            bar = _BAR.search(text)
+            if not bar or not re.search(r'href="[^"]*[?&]PG=%d(?:&|")' % (page + 1), bar.group(1)):
+                break                  # no link to the next page: this was the last (a page past the end answers with the last one, so never walk on a guess)
+        log.info("PoiPiku: %d accounts in the Following feed (%d pages)", len(seen), last + 1)
+    yield "", pages()
 
 
 def _run(fn, *args):
