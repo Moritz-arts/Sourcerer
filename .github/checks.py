@@ -510,6 +510,40 @@ def refusal_checks():
 
 # ---- the sliders under the levels, and the daily limits ----------------------------------------------------------------------------------------
 
+def budget_checks():
+    """2026-11-28: the user raised the day's limit and the site still rested until tomorrow ("today's 3000 requests are done"): the rest was stored with the limit of that
+    moment, so the manage-accounts row said it and the gallery's pictures failed with it. A rest the budget began ends when the limit has room again; no other rest does."""
+    client = server.app.test_client()
+    client.put("/api/speed", json={"reset": "limits"})
+    net._state["unfriendly"], net._state["paused"], net._state["spent"] = {}, {}, {}
+    url = "https://forum.example/attachments/1/"
+    site = net.site_of(url)
+    client.put("/api/speed", json={"tune": {"limit_other": 200}})
+    net.spend(url, 200)
+    got = net.paused(url)
+    check(got is not None and "today's 200 requests are done" in got[1], "a site that spent the day's budget rests until tomorrow", got)
+    check([p["site"] for p in net.pauses()] == [site], "...and the window's list of rests says so", net.pauses())
+    client.put("/api/speed", json={"tune": {"limit_other": 400}})
+    check(net.paused(url) is None and not net.pauses(), "a raised limit ends that rest at once", (net.paused(url), net.pauses()))
+    net.spend(url, 1)
+    check(net.paused(url) is None, "...and the next request does not begin it again")
+    net.spend(url, 199)
+    got = net.paused(url)
+    check(got is not None and "today's 400 requests are done" in got[1], "...until the new limit is reached", got)
+
+    net._state["paused"].clear()
+    net.pause(url, 3600, "it refused the login three times in a row")
+    client.put("/api/speed", json={"tune": {"limit_other": 800}})
+    check(net.paused(url) is not None, "a rest of another kind (a refused login) is not ended by a limit")
+    net._state["paused"].clear()
+    net._state["spent"][site] = ["2000-01-01", 100]
+    net.pause(url, 3600, "today's 100 " + net.BUDGET_REST)
+    check(net.paused(url) is not None, "a rest that began on another day runs out by itself, as drawn (a limit says nothing of yesterday's count)")
+    net._state["paused"].clear()
+    net._state["spent"].clear()
+    client.put("/api/speed", json={"reset": "limits"})
+
+
 def tune_checks():
     client = server.app.test_client()
     client.put("/api/speed", json={"reset": "limits"})
@@ -1271,7 +1305,7 @@ def cooling_checks():
 
 
 def main():
-    for group in (forum_checks, tile_checks, speed_checks, refusal_checks, tune_checks, settings_checks, gallery_checks, media_checks, poipiku_checks, resume_checks, library_checks, cooling_checks, refresh_checks):
+    for group in (forum_checks, tile_checks, speed_checks, refusal_checks, budget_checks, tune_checks, settings_checks, gallery_checks, media_checks, poipiku_checks, resume_checks, library_checks, cooling_checks, refresh_checks):
         print("--", group.__name__, flush=True)
         try:
             group()
