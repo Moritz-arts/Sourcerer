@@ -68,24 +68,31 @@ def profile(url):
 # up to MAX_FEED_PAGES requests, 5 s apart (robots.txt): minutes, in the background, inside the day's budget.
 WHOLE_FEED = True
 MAX_FEED_PAGES = 40
-_USER = re.compile(r'<a class="IllustUser" href="/(\d+)/">(.*?)</a>', re.S)
-_NAME = re.compile(r'class="IllustUserName">([^<]*)<')
+_USER = re.compile(r'<a class="IllustUser" href="/(\d+)/">(.*?)</a>', re.S)            # the grid's card (the public pages)
+_ITEM = re.compile(r'<div class="IllustItemUser">(.*?)</h2>', re.S)                    # the list's post header (the Following feed: a post, its emoji keyboard, ...)
+_UID = re.compile(r'href="/(\d+)/"')
+_NAME = re.compile(r'class="IllustUserName">([^<]*)<|class="IllustItemUserName"><a[^>]*>([^<]*)<')
 _ALT = re.compile(r'class="IllustUserThumb"[^>]*\balt="([^"]*)"')
-_AVATAR = re.compile(r'src="(https://cdn\.poipiku\.com/\d{9}/profile_[^"]+)"')        # (the default picture is no avatar: the initials show)
+_AVATAR = re.compile(r'(?:src="|url\([\'"]?)(https://cdn\.poipiku\.com/\d{9}/profile_[^"\')]+)')    # (the default picture is no avatar: the initials show)
 _BAR = re.compile(r'<nav class="PageBar">(.*?)</nav>', re.S)
 
 
 def _authors(text):
-    """The accounts of one feed page, once each, in the order they come: [{"url", "name", "avatar"}]."""
+    """The accounts of one feed page, once each, in the order they come: [{"url", "name", "avatar"}]. Two layouts: the grid's cards and the list's post headers."""
+    found = list(_USER.findall(text))
+    for inner in _ITEM.findall(text):
+        uid = _UID.search(inner)
+        if uid:
+            found.append((uid.group(1), inner))
     out, seen = [], set()
-    for uid, inner in _USER.findall(text):
+    for uid, inner in found:
         if uid in seen:
             continue
         seen.add(uid)
-        name = _NAME.search(inner) or _ALT.search(inner)
+        name = _NAME.search(inner)
+        name = (name.group(1) or name.group(2)) if name else (_ALT.search(inner) or [None, ""])[1]
         avatar = _AVATAR.search(inner)
-        out.append({"url": "%s/%s/" % (HOME, uid), "name": html.unescape(name.group(1)).strip() if name else "",
-                    "avatar": avatar.group(1) if avatar else ""})
+        out.append({"url": "%s/%s/" % (HOME, uid), "name": html.unescape(name or "").strip(), "avatar": avatar.group(1) if avatar else ""})
     return out
 
 
@@ -98,11 +105,11 @@ def following(key):
             net._stopped(HOME)
             text, _final = net.get_text(HOME + "/MyHomePcV.jsp", params={"PG": page})
             fresh = [a for a in _authors(text) if a["url"] not in seen]
-            if not _USER.search(text) and page == 0:
+            if not fresh and page == 0:                  # (nothing is "seen" yet: no author at all)
                 if "LoginButton" in text or "LoginFormEmailPcV" in text:
                     raise RuntimeError("PoiPiku showed its login page: log in again in Manage Accounts")
-                log.warning("PoiPiku: the Following feed shows no post card (%d bytes; IllustThumb x%d, IllustUser x%d, PageBar x%d) -- the markup may differ from the public pages'",
-                            len(text), text.count("IllustThumb"), text.count("IllustUser"), text.count("PageBar"))
+                log.warning("PoiPiku: the Following feed shows no post card (%d bytes; IllustThumb x%d, IllustUser x%d, IllustItemUser x%d, PageBar x%d) -- the markup differs from what is known",
+                            len(text), text.count("IllustThumb"), text.count("IllustUser"), text.count("IllustItemUser"), text.count("PageBar"))
             seen.update(a["url"] for a in fresh)
             last = page
             if fresh:
