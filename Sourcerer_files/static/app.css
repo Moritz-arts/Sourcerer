@@ -159,9 +159,11 @@ input[type=range] { accent-color: var(--fill-accent); cursor: pointer; }
 #br-count { flex: 1; }
 .br-foot { display: flex; flex-wrap: wrap; gap: 6px; flex: none; }
 .br-foot .br-add { flex: 1 1 110px; min-width: 0; white-space: nowrap; }
-.br-add { display: flex; align-items: center; justify-content: center; gap: 6px; flex: none; padding: 7px 8px; width: 100%;
+.br-add { position: relative; display: flex; align-items: center; justify-content: center; gap: 6px; flex: none; padding: 7px 8px; width: 100%;
   border: 1.5px dashed var(--border-strong); border-radius: var(--radius); background: transparent; color: var(--text-muted); font-size: 13px; }
 .br-add:hover:not(:disabled) { border-color: var(--fill-accent); color: var(--text-accent); background: transparent; }
+/* "Merge sources" found cards that look like one artist: the status orange in the box's upper right corner, ringed in the page's colour so it reads on the dashed border. */
+.br-dot { position: absolute; top: -5px; right: -5px; width: 11px; height: 11px; border-radius: 50%; background: var(--dot-warn); box-shadow: 0 0 0 2px var(--surface-2); pointer-events: none; }
 .br-main { flex: 1; min-width: 0; display: flex; flex-direction: column; position: relative; }
 .br-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 8px; padding: 12px 16px; border-bottom: .5px solid var(--border); }
 .br-avatar { display: contents; }

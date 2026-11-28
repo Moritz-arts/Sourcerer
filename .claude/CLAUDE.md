@@ -689,6 +689,10 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   ticks and no button that merges many (v0.48-v0.50 had both), a card that syncs says so and stays. A new button in this dialog must never act on more than the one card it sits on.
   The buttons of a card sit in two columns (`.twin .merge-acts`, a grid): *Open* over *Not the same* (red: `--dot-bad`), *Stays* / *Keep this one* over *Merge into* --
   the keeper has the first row only, so its *Open* and *Stays* line up with the members' *Open* and *Keep this one*.
+  **An orange dot in the corner of the *Merge sources* box says the dialog has something** (v0.77, `#br-combine-dot`, `refreshTwinDot`): it runs `findTwins()` itself, so the dot and the dialog never
+  disagree, a moment after the page stopped reloading (`scheduleTwinDot`, 1.2 s; `load()`, `markApart` and `forgetApart` call it) and only when what the search reads changed (`twinSignature`: ids, names,
+  accounts, links, mentions and the pairs marked apart -- 2 ms for 1500 cards, the search 150 ms), never at every poll of a running sync. It counts every group the dialog lists, the "two accounts of one site"
+  ones too (*Not the same* is what clears those); the button's tooltip says how many. The colour is the status orange (`--dot-warn`), ringed in the page's colour so it reads on the dashed border.
 - **Logins are made in "Manage your accounts" (`#dlg-accounts`) and nowhere
   else**: one row per login that exists (saved, or being made in a window), one
   under the other (never side by side): dot and name, the fields in the middle,
