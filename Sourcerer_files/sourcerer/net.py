@@ -570,11 +570,12 @@ def note(url, endpoint, status=200, n=1):
 
 
 def usage(site):
-    """What the site was asked today: {"used" (counted against the budget), "budget", "kinds": [[endpoint, n, refused], ...]}."""
+    """What the site was asked today: {"used" (counted against the budget), "budget" (the limit as it is set now: Settings > Speed & safety),
+    "kinds": [[endpoint, n, refused], ...]}. Only for a site whose requests are counted at all (a cookie login, a booru's key): the caller knows."""
     day = time.strftime("%Y-%m-%d")
     with _lock:
         spent, tally = _stored("spent").get(site), _stored("tally").get(site)
-    return {"used": spent[1] if spent and spent[0] == day else 0, "budget": day_limit(site) if site in BUDGETS else None,
+    return {"used": spent[1] if spent and spent[0] == day else 0, "budget": day_limit(site),
             "kinds": [[e, r[0], r[1]] for e, r in sorted(tally[1].items(), key=lambda kv: -kv[1][0])[:8]]
             if tally and tally[0] == day else []}
 

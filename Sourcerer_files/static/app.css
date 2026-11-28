@@ -596,6 +596,15 @@ p.error:empty { display: none; }   /* p only: a status dot is .dot.error, and em
 .acc-top .small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .acc-state { margin: 2px 0 0; }
 .accbox .hint { margin: 0; }
+/* The day's requests of a login against its limit (paintUsage): the text column fills the row's left part, so every bar is as wide as the others;
+   the accent while there is room, orange from 80 %, red once the limit is reached. */
+.accbox.metered .acc-text { flex: 1 1 auto; }
+.acc-usage { margin-top: 7px; }
+.acc-meter { height: 6px; border-radius: 3px; background: var(--border-strong); overflow: hidden; }
+.acc-fill { display: block; height: 100%; width: 0; border-radius: 3px; background: var(--fill-accent); transition: width .4s, background-color .2s; }
+.acc-usage.warn .acc-fill { background: var(--dot-warn); }
+.acc-usage.bad .acc-fill { background: var(--dot-bad); }
+.accbox .acc-usage-text { margin-top: 3px; }
 .acc-fields { flex: 1 1 260px; min-width: 0; display: flex; flex-wrap: wrap; gap: 6px; }
 .acc-fields input, .acc-fields select { flex: 1 1 150px; min-width: 0; }
 .acc-fields .hint { flex: 1 1 100%; }

@@ -2649,15 +2649,47 @@ S.accFocus = ""; S.accScroll = false; S.accHtml = ""; S.accData = null; S.accWai
 S.accAdding = false; S.accType = ""; S.accBooru = ""; S.accPre = ""; S.importBody = null; S.importAdd = false;
 S.accBusy = {}; S.accError = {}; S.accChecking = {};     // per box: sending, what the site said, being asked
 
-// What the site was asked today, as Sourcerer counted it (real requests; the budget is Sourcerer's own caution, not a limit of the site's).
-function accUsage(a) { return a.usage && a.usage.budget ? " · " + a.usage.used + " of " + a.usage.budget + " requests today" : ""; }
+// What a login's site was asked today against the day's limit, as Sourcerer counts it (real requests; the limit is Sourcerer's own caution
+// against a lock on the account, not a figure of the site's, and the user's to set: Settings > Speed & safety > Daily limits). The row carries
+// only the empty bar: paintUsage() puts the numbers in place, so the poll that follows the day's count redraws no row (a redraw swallows a click).
+function accUsageBar(a) {
+  return a.logged_in && a.usage && a.usage.budget
+    ? '<div class="acc-usage" role="meter" aria-label="Requests today" aria-valuemin="0" data-key="' + esc(a.key) + '">' +
+      '<div class="acc-meter"><span class="acc-fill"></span></div><p class="hint acc-usage-text"></p></div>'
+    : "";
+}
+
+function paintUsage() {
+  var d = S.accData, by = {};
+  if (!d) return;
+  d.accounts.forEach(function (a) { by[a.key] = a; });
+  Array.prototype.forEach.call($("acc-grid").querySelectorAll(".acc-usage"), function (el) {
+    var u = (by[el.dataset.key] || {}).usage;
+    if (!u || !u.budget) return;
+    var share = u.used / u.budget, tone = share >= 1 ? "bad" : share >= 0.8 ? "warn" : "";
+    var text = u.used + " of " + u.budget + (share >= 1 ? " · limit reached" : " requests today");     // (short: the line is one column wide)
+    var kinds = (u.kinds || []).slice(0, 3).map(function (k) { return k[0] + " " + k[1]; }).join(", ");
+    var tip = "Requests Sourcerer made with this login today, against the daily limit you set (Settings > Speed & safety > Daily limits). " +
+      "At the limit the site rests until tomorrow." + (kinds ? "\nMost: " + kinds : "");
+    var fill = el.firstChild.firstChild, line = el.lastChild, cls = "acc-usage" + (tone ? " " + tone : "");
+    var width = u.used ? Math.max(2, Math.min(100, share * 100)).toFixed(1) + "%" : "0%";      // a sliver shows that something was asked
+    if (el.className !== cls) el.className = cls;
+    if (fill.style.width !== width) fill.style.width = width;
+    if (line.textContent !== text) line.textContent = text;
+    if (line.className !== "hint acc-usage-text" + (tone ? " " + tone : "")) line.className = "hint acc-usage-text" + (tone ? " " + tone : "");
+    if (el.title !== tip) el.title = tip;
+    el.setAttribute("aria-valuemax", u.budget);
+    el.setAttribute("aria-valuenow", Math.min(u.used, u.budget));
+    el.setAttribute("aria-valuetext", text);
+  });
+}
 
 function accState(a) {
   var expired = a.logged_in && a.state === "expired";
   return a.pending === "waiting" ? "Waiting for you to log in in the other window…"
     : expired ? "The login has run out" + (a.checked ? " (noticed " + ago(a.checked) + ")" : "") + " – log in again."
-    : a.logged_in && a.rest ? "Works, but the site rests until " + restUntil(a.rest.until) + ": " + a.rest.why + accUsage(a)
-    : a.logged_in ? "Logged in" + (a.user ? " as " + a.user : "") + (a.checked ? " · checked " + ago(a.checked) : "") + accUsage(a)
+    : a.logged_in && a.rest ? "Works, but the site rests until " + restUntil(a.rest.until) + ": " + a.rest.why
+    : a.logged_in ? "Logged in" + (a.user ? " as " + a.user : "") + (a.checked ? " · checked " + ago(a.checked) : "")
     : a.pending.indexOf("failed: ") === 0 ? a.pending.slice(8)
     : a.pending === "cancelled" ? "Login window closed before the login was finished."
     : "Not logged in";
@@ -2706,8 +2738,9 @@ function accBox(a, win) {
     // A forum may refuse the embedded window (403): its cookies.txt from a normal browser is the way in.
     if (a.kind === "window" && (!win || a.key.indexOf("xenforo:") === 0)) btns +='<button type="button" data-acc="import" title="Import a cookies.txt">Import&hellip;</button>';
   }
-  return '<form class="accbox' + (expired ? " expired" : "") + (a.key === S.accFocus ? " focus" : "") + '" data-key="' + key + '" data-kind="' + a.kind + '">' +
-    accId(a.key.split(":")[0], dot, a.group || a.label, a.group ? a.label : "", accState(a), dot === "warn" ? "warn" : expired ? "bad" : "") +
+  var meter = accUsageBar(a);
+  return '<form class="accbox' + (expired ? " expired" : "") + (meter ? " metered" : "") + (a.key === S.accFocus ? " focus" : "") + '" data-key="' + key + '" data-kind="' + a.kind + '">' +
+    accId(a.key.split(":")[0], dot, a.group || a.label, a.group ? a.label : "", accState(a), dot === "warn" ? "warn" : expired ? "bad" : "", meter) +
     (fields ? '<div class="acc-fields">' + fields + "</div>" : "") +
     '<div class="acc-btns">' + btns + "</div>" +
     '<p class="error">' + esc(S.accError[a.key] || "") + "</p></form>";
@@ -2724,10 +2757,10 @@ function accMark(type, dot) {
 }
 
 // The left of a row: the site's mark and status dot, the name and what is known about the login.
-function accId(type, dot, name, sub, state, tone) {
+function accId(type, dot, name, sub, state, tone, extra) {
   return '<div class="acc-id">' + accMark(type, dot) + '<div class="acc-text">' +
     '<div class="acc-top"><b>' + esc(name) + "</b>" + (sub ? '<span class="muted small">' + esc(sub) + "</span>" : "") + "</div>" +
-    '<p class="hint acc-state' + (tone ? " " + tone : "") + '">' + esc(state) + "</p></div></div>";
+    '<p class="hint acc-state' + (tone ? " " + tone : "") + '">' + esc(state) + "</p>" + (extra || "") + "</div></div>";
 }
 
 // The end of the list: the Add account button, or -- once it is pressed -- the row that adds one.
@@ -2812,6 +2845,7 @@ function drawAccounts() {
   // Asked every 1.5 s while a login window is open: redrawn only when
   // something changed, and then what is typed meanwhile stays.
   if (html !== S.accHtml) redrawAccounts(html);
+  paintUsage();
   var logged = d.accounts.filter(function (a) { return a.logged_in; });
   $("btn-acc-check").disabled = !logged.length || Object.keys(S.accChecking).length > 0;
   if (S.accFocus && S.accScroll) {
@@ -2826,6 +2860,17 @@ function drawAccounts() {
   S.accWaiting = waiting;
   clearTimeout(accTimer);
   if (waiting) accTimer = setTimeout(loadAccounts, 1500);      // also with the dialog closed: the window may finish later
+  else if ($("dlg-accounts").open) accTimer = setTimeout(accPoll, 3000);    // the syncs behind the dialog spend the day's requests meanwhile
+}
+
+// The bars follow the day's count while the dialog is open. Quiet: an answer that fails ends the asking (a click asks again), no toast every 3 s.
+function accPoll() {
+  if (!$("dlg-accounts").open) return;
+  api("GET", "/api/accounts").then(function (d) {
+    if (!$("dlg-accounts").open) return;
+    S.accData = d;
+    drawAccounts();
+  }).catch(function () {});
 }
 
 function redrawAccounts(html) {

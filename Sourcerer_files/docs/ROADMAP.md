@@ -61,7 +61,7 @@ drops every new file, de-duplicated across sources, into a [TrackImage](https://
 settings (library, file names, automatic sync, speed, theme, updates, repair, security with a master password and reset).
 
 **Sites and logins** — every site above; one login per site in *Manage Accounts* (cookies, OAuth, app password, API key),
-checked at every start; a login that ran out is flagged.
+checked at every start; a login that ran out is flagged; each login that is counted shows a bar of today's requests against its daily limit.
 
 **Follows** — the accounts a login follows become cards (Bluesky, Mastodon, Misskey, pixiv, Fanbox, Fantia, X, Patreon, XenForo);
 the same artist on several sites is combined; merge dialogs with reasons, *Merge sources*, favorites; cards are named by the artist's @name.
