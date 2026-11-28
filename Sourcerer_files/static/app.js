@@ -346,6 +346,7 @@ function load() {
     }
     if (G && G.artist) { G.artist = artistById(G.artist.id) || G.artist; $("gal-title").textContent = G.artist.name; }
     renderAll();
+    scheduleTwinDot();
     if (!G && S.view === "gallery") browseOpen(S.brArtist);      // (the other views open it when they are asked to)
     showUpdate();
     showAccounts();
@@ -537,10 +538,10 @@ function evidence(p, q) {
 function apartSet(list) { return new Set((list || []).map(function (p) { return p[0] + "," + p[1]; })); }
 function isApart(x, y) { return !!S.apart && S.apart.has(Math.min(x, y) + "," + Math.max(x, y)); }
 function markApart(pairs) {
-  return api("POST", "/api/apart", { pairs: pairs, apart: true }).then(function (d) { S.apart = apartSet(d.apart); });
+  return api("POST", "/api/apart", { pairs: pairs, apart: true }).then(function (d) { S.apart = apartSet(d.apart); scheduleTwinDot(); });
 }
 function forgetApart() {
-  return api("POST", "/api/apart", { clear: true }).then(function (d) { S.apart = apartSet(d.apart); });
+  return api("POST", "/api/apart", { clear: true }).then(function (d) { S.apart = apartSet(d.apart); scheduleTwinDot(); });
 }
 function apartNote(id) {
   var n = S.apart ? S.apart.size : 0;
@@ -742,6 +743,25 @@ function findTwins() {
     return { keep: keep.id, members: members, best: members.reduce(function (m, x) { return Math.max(m, x.warn ? 1 : x.s); }, 0) };
   }).sort(function (x, y) { return y.best - x.best || artistById(x.keep).name.localeCompare(artistById(y.keep).name); });
 }
+// The orange dot on "Merge sources": the same search as the dialog's (findTwins), so the two never disagree, found some. It runs a moment after the page stopped reloading and
+// only when what the search reads changed -- the cards' names, accounts and links, and the pairs marked "not the same" -- not at every poll of a running sync.
+var TD = { key: "", timer: 0 };
+function twinSignature() {
+  return S.artists.map(function (a) {
+    return a.id + "\u0001" + a.name + "\u0001" + a.sources.map(function (s) { return [s.url, s.kind, s.alias, s.links, s.mentions].join("\u0002"); }).join("\u0003");
+  }).join("\n") + "\n#" + (S.apart ? Array.from(S.apart).sort().join(",") : "");
+}
+function refreshTwinDot() {
+  if (!S.artists) return;
+  var key = twinSignature();
+  if (key === TD.key) return;
+  TD.key = key;
+  var n = 0;
+  try { n = findTwins().length; } catch (e) { console.error("merge suggestions:", e); }
+  $("br-combine-dot").classList.toggle("hidden", !n);
+  $("br-combine").title = n ? plural(n, "group") + " of cards look like one artist: open to compare and merge" : "Find cards that are the same artist and merge them";
+}
+function scheduleTwinDot() { clearTimeout(TD.timer); TD.timer = setTimeout(refreshTwinDot, 1200); }
 function openTwins() {
   if (C.parked) return resumeTwins();
   C = { groups: findTwins(), parked: false };
