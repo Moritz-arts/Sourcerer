@@ -865,6 +865,10 @@ def poipiku_checks():
     member = poipiku._media({"url": "https://cdn.poipiku.com/000000002/013202411_YJMjMxhKf.png", "post": "13202427", "num": 1, "user": "2"})
     check(member.remote_key == guest.remote_key and member.filename == "013202411_YJMjMxhKf.png" and member.mime == "image/png"
           and member.thumb == guest.thumb and member.large == member.url, "a member's original has the same key, its own name and the same small rendition", member)
+    signed = "https://cdn.poipiku.com/000000002/013202411_YJMjMxhKf.png?Expires=1893456000&Signature=aB-c~d_e&Key-Pair-Id=K2ABC"
+    mine = poipiku._media({"url": signed, "post": "13202427", "num": 1, "user": "2"})
+    check(mine is not None and mine.url == signed and mine.large == signed and mine.remote_key == guest.remote_key and mine.filename == "013202411_YJMjMxhKf.png"
+          and mine.mime == "image/png" and mine.thumb == guest.thumb, "a member's signed original (a query on the address) is kept, named without the signature, its small rendition is unsigned", mine)
     for icon in ("https://cdn.poipiku.com/img/publish_pass.png", "https://cdn.poipiku.com/assets/img/x.png", "https://evil.example/000000002/a.png", ""):
         check(poipiku._media({"url": icon, "post": "1", "num": 1, "user": "2"}) is None, "an icon or a foreign address is no file of the artist: " + icon)
 

@@ -886,7 +886,12 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   without a login downloads those -- named `<name>_640.jpg`, key `poipiku:<post>:<n>` as the original's (remote_key is forever: **log in BEFORE the first
   download**, a copy saved as a visitor is never replaced) -- and the login (`POIPIKU_LK`: a visitor gets the cookie with an EMPTY value, so the test is its value;
   the window opens `LoginFormEmailPcV.jsp`, which offers e-mail, Twitter and Facebook) makes gallery-dl ask `ShowIllustDetailF.jsp` for the originals.
-  **The login is not tried against a real account** (no way to here): nothing says how an expired one looks, so there is no `still_logged_in`. The grid's small
+  **A member's originals are signed CloudFront links** (`<name>.png?Expires=...&Signature=...&Key-Pair-Id=...`, v0.73, from gallery-dl's own test results): `_FILE` allowed no `?`, so a
+  logged-in card listed NO picture at all while name and avatar (read from the page) were fine -- the user's report; a visitor's 640 px copies have no query and always worked.
+  `_media` names the file and makes the small rendition from the address without the query (that rendition is public and unsigned). **The login is not tried against a real account** (no way to here): nothing says how an expired one looks, so there is no `still_logged_in`.
+  **PoiPiku has no list of the accounts one follows** (v0.73 research, 2026-11-28: no page or API for it; `MyHomePcV.jsp` is the *feed* of the followed accounts' posts, tabs "quiet follow" / "following tags" =
+  `MyHomeTagPcV.jsp` / "favo" = `MyBookmarkListPcV.jsp`; the follow button is `/f/UpdateFollowUserF.jsp`): a follow import would have to read the authors out of that feed, written against the
+  logged-in markup, which nobody has seen yet. The grid's small
   picture is the site's `_360.jpg` rendition of the file (seen on its list pages, no Referer needed), never the original. `robots.txt` asks `Crawl-delay: 5`: a
   sync spaces gallery-dl's pages 5-7 s (`OPTIONS`), a gallery somebody waits for 2.5-4 s (`OPEN_SLEEP`; one post is one page, 5-7 s made a first screen two
   minutes), `HOSTS` keeps Sourcerer's own page requests at 5 s. A post has no date on its page: `posted` stays empty. Only files under `<host>/<nine digits>/` are
