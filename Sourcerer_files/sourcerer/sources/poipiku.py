@@ -25,7 +25,8 @@ OPTIONS = {"sleep-request": "5.0-7.0", "ratelimit": "abort"}        # robots.txt
 OPEN_SLEEP = "2.5-4.0"      # ... while somebody waits for the page (an artist's gallery): a person clicking through posts. One post is one page: 5-7 s made the first screen two minutes
 FIELDS = {"url": "{_url!j}", "post": "{post_id!j}", "num": "{num!j}", "user": "{user_id!j}", "key": "{filename!j}", "ext": "{extension!j}"}
 # Only a file on the site's own picture hosts: <host>/<user, nine digits>/<name> (the post's lock and warning icons are on /img/ and /assets/).
-_FILE = re.compile(r"^https://(?:cdn|img)\.poipiku\.com/(?:user_img\d+/)?\d{9}/[^/?#]+$")
+# A member's original is a signed CloudFront link (<name>?Expires=...&Signature=...&Key-Pair-Id=...): without the query every logged-in file was dropped.
+_FILE = re.compile(r"^https://(?:cdn|img)\.poipiku\.com/(?:user_img\d+/)?\d{9}/[^/?#]+(?:\?[^#\s]*)?$")
 _COPY = re.compile(r"^(.+?)\.(\w+)_(?:120|360|640)\.jpg$")            # a rendition: <name>.<ext>_640.jpg, the original is <name>.<ext>
 
 
@@ -71,10 +72,11 @@ def _media(f):
     url = f.get("url") or ""
     if not _FILE.match(url) or f.get("num") is None:
         return None
-    base, name = url, urllib.parse.unquote(url.rsplit("/", 1)[-1])
+    base = url.partition("?")[0]             # the small rendition is public and unsigned, so it is made from the address without the signature
+    name = urllib.parse.unquote(base.rsplit("/", 1)[-1])
     m = _COPY.match(name)
     if m:                                    # a visitor's 640 px copy: the picture is under its own name, without the rendition's
-        base = url[:url.rfind("/") + 1] + "%s.%s" % (m.group(1), m.group(2))
+        base = base[:base.rfind("/") + 1] + "%s.%s" % (m.group(1), m.group(2))
         name = "%s_640.jpg" % m.group(1)
     post = f.get("post")
     return Media(remote_key="poipiku:%s:%s" % (post, f["num"]), url=url,
