@@ -76,6 +76,7 @@ DEFAULTS = {
     "grid_quality": "fast",     # 'fast': the sites' small pictures in the grid (a wide tile is sharpened); 'best': the largest rendition below the original, always
     "tile_logo": "1",           # '0': no site mark on the pictures of the gallery
     "browse_window": "7",       # All artists reaches back this many days first ('0': everything); "Load older" goes on (gallery.py)
+    "browse_library": "1",      # '1': the older posts of a source whose download is complete are listed from the library, not the site (gallery.py)
     "scan_on_start": "1",       # '1': every start looks for new posts of the cards with auto-download (not those read in the last 12 h), as Refresh does
     "auto_sync": "0",           # '1': sync every card on its own
     "auto_hours": "6",          # how often, in hours

@@ -23,6 +23,11 @@ page shows it again as it was, and its pictures are still in memory. The listing
 cards run on a few threads (POOL), and a site that gallery-dl reads (X, forums) is asked for
 one source at a time.
 
+The library as the rest of the history: a source whose download went all the way (sources.complete) has every older post in the
+library already, so once its newest page has been looked at (the snapshot, or one live page: that is the scan for what is new) the
+posts beyond it are listed from the files table -- no site is asked for them, no request is spent, and a login site that All artists
+never asks goes on past its snapshot. Settings > Appearance > Older posts from your library turns it off.
+
 Pictures: most sites' preview hosts are plain CDNs the page loads itself
 (Media.thumb / large, sent with no referrer). Those that want a Referer or a
 login (pixiv, Gelbooru, forums: Media.preview_headers) are fetched by
@@ -75,6 +80,11 @@ OFFLINE_AGE = 30 * 86400     # ... except in All artists on a login site, which 
 AHEAD = 24                   # a source with fewer pictures waiting than this is asked for its next page already
 POOL = 6                     # listings running at once, all galleries together
 SERIAL = ("x", "xenforo", "fanbox", "fantia", "poipiku")    # sites gallery-dl reads: one source at a time (_gdl._busy would turn the rest away)
+LIBRARY_ROWS = 120           # posts one read of the library hands out: one artist's gallery ...
+LIBRARY_ROWS_ALL = 60        # ... and All artists', which reads many sources at once (and only needs what its window holds)
+# The time a files row sorts by: the time its saved file was given (files.stamp: the post's date, or its place in the listing), else the post's own
+# date, else when it was saved -- a file from before the stamps. SQLite reads the zone of an ISO date ("+09:00", "Z"); a form it does not read falls to the next.
+_SORT = "COALESCE(stamp, CAST(strftime('%s', NULLIF(posted, '')) AS REAL), CAST(strftime('%s', created) AS REAL))"
 
 _lock = threading.Lock()
 _galleries = {}
@@ -160,6 +170,11 @@ def _maybe_animated(m):
 NoPicture = net.NoPicture                    # nothing to hand out for this size: the tile keeps its placeholder, nothing is logged
 
 
+class _Local(sources.Media):
+    """A post made from the library's files row, not from the site: it has no address, so nothing here may ask a site for it (info, download,
+    a picture). No field of its own: a Media with one more would change snapshots.SHAPE and throw every snapshot away."""
+
+
 class _Source:
     def __init__(self, row, artist):
         self.row, self.site, self.artist = row, sources.site_for(row["url"]), artist
@@ -193,6 +208,9 @@ class _Source:
         self.since = None                     # All artists with a time window: nothing older is handed out (see _Gallery.since)
         self.offline = False                  # All artists on a login site: shown from the snapshot, never asked (see seed)
         self.alone = False                    # the gallery's only source: its posts are never ordered against another's (net.sole)
+        self.local = False                    # its download is complete: the posts past the newest page come from the library, not the site (see fill)
+        self.cursor = None                    # (sort time, files id) of the last library row handed out
+        self.seen = set()                     # every post that went into the buffer, whichever way it came
 
     def beyond(self):
         """The next post waiting is older than the window: this source has nothing more to show inside it."""
@@ -218,7 +236,8 @@ class _Source:
         is what gets locked. The posts come from what the looks saved (a sync, Refresh all, an artist opened on its own); Refresh all (F5)
         is what asks the sites, within its share of the day (net.scan_room), and the gallery opens again from the new snapshots."""
         if self.spaced and self.login and self.site:
-            self.offline = self.done = self.checked = True
+            self.offline = self.checked = True
+            self.done = not self.local            # nothing but snapshots -- and, where the download is complete, the library behind them
         snap = snapshots.load(self.row["id"]) if self.site else None
         if not snap or time.time() - snap.tail > (OFFLINE_AGE if self.offline and self.kind != "patreon" else SEED_AGE):
             return
@@ -227,6 +246,7 @@ class _Source:
             self.last = when if when is not None else self.last
             self.buffer.append((self.last, m))
         self.known = {m.remote_key for m in snap.items}
+        self.seen |= self.known
         self.seeded = True
         # A look of minutes ago is as good as asking again. The site is asked only when the posts of the snapshot run out (fill starts
         # from its first page then, and what the artist posted meanwhile is counted as new); Refresh on the artist reads it at once.
@@ -242,7 +262,7 @@ class _Source:
         with self.lock:
             if self.done or self.closed or self.running():
                 return
-            if self.serial:
+            if self.serial and not self.reads_library():       # (a read of the library asks no site: it waits for nobody's turn)
                 with _lock:
                     if self.where in _serial:
                         return
@@ -255,6 +275,7 @@ class _Source:
             self.future = _pool.submit(self._run, 1 if self.spaced else 0)
 
     def _run(self):
+        library = self.reads_library()
         try:
             if self.closed:                       # queued behind others while the page moved on
                 return
@@ -266,19 +287,73 @@ class _Source:
                 with net.interactive(alone=self.alone):
                     self.fill()
         finally:
-            if self.serial and self.login and self.spaced:
-                with _lock:
-                    _spaced[self.where] = (self.artist["id"], time.monotonic() + random.uniform(*CARD_GAP))
-            if self.serial:
+            if self.serial and not library:
+                if self.login and self.spaced:
+                    with _lock:
+                        _spaced[self.where] = (self.artist["id"], time.monotonic() + random.uniform(*CARD_GAP))
                 with _lock:
                     _serial.discard(self.where)
 
+    def reads_library(self):
+        """The next read is a read of the library: the download is complete and the site has had its look (the snapshot is fresh, or its first live page came --
+        that is the scan for what is new), so what lies beyond is in the files table already."""
+        return self.local and self.checked
+
+    def _from_library(self):
+        """One more chunk of the library's posts of this source: its saved files, newest first, older than what was handed out so far -- no request. The library
+        stands in for the site only while it is there: when the newest files of the source are gone (a folder deleted, a drive unplugged, the library moved), it is
+        not a stand-in for anything and the site is asked as before (False)."""
+        rows_wanted = LIBRARY_ROWS_ALL if self.spaced else LIBRARY_ROWS
+        if self.cursor is not None:
+            where, args = " AND (%s < ? OR (%s = ? AND id < ?))" % (_SORT, _SORT), [self.cursor[0], self.cursor[0], self.cursor[1]]
+        elif self.last is not None:                        # the first read: from where the buffer ends (a second of slack: files of one post are milliseconds apart)
+            where, args = " AND %s <= ?" % _SORT, [self.last + 1]
+        else:
+            where, args = "", []
+        with db.connect() as con:
+            rows = con.execute("SELECT id, remote_key, path, post_url, posted, width, height, stamp, %s AS k FROM files WHERE source_id = ? AND path IS NOT NULL%s "
+                               "ORDER BY k DESC, id DESC LIMIT ?" % (_SORT, where), [self.row["id"], *args, rows_wanted]).fetchall()
+        if self.cursor is None and (not rows and self.last is None or rows and not any(os.path.isfile(r["path"]) for r in rows[:5])):
+            self.local = False
+            log.info("gallery: the library has none of the newest files of %s: asking the site", self.row["url"])
+            return False
+        for r in rows:
+            if r["remote_key"] in self.seen:
+                continue
+            name = os.path.basename(r["path"])
+            m = _Local(remote_key=r["remote_key"], url="", post_url=r["post_url"] or "", posted=r["posted"] or "", name=os.path.splitext(name)[0], filename=name,
+                       width=r["width"] or 0, height=r["height"] or 0, **kinds.typed(name))
+            m.path = r["path"]                             # (checked when the post is handed out: only what is shown costs a look at the disk)
+            when = _when(m.posted)
+            if when is None:
+                when = r["stamp"]                          # a post with no date (a forum's) has the place the listing gave its file
+            self.last = when if when is not None else self.last
+            self.seen.add(m.remote_key)
+            self.buffer.append((self.last, m))
+        if rows:
+            self.cursor = (rows[-1]["k"], rows[-1]["id"])
+        if len(rows) < rows_wanted:
+            self.done = True
+        return True
+
     def fill(self):
-        """One more page from the site -- one request, or none while it rests."""
+        """One more page from the site -- one request, or none while it rests -- or, past the newest page of a complete download, from the library."""
+        if self.reads_library():
+            if self._from_library():
+                return
+            if self.serial and not self.offline:
+                return                             # the library failed as a stand-in, and this read took no turn at the site's lane: the next one does
+        if self.offline:                           # All artists never asks a login site, library or not
+            self.done = True
+            return
         self.fresh = False
         rest = net.paused(self.row["url"])
         if rest:
-            self.done, self.error = True, "rests until %s" % time.strftime("%H:%M", time.localtime(rest[0]))
+            self.error = "rests until %s" % time.strftime("%H:%M", time.localtime(rest[0]))
+            if self.local:
+                self.checked = True            # the site is not asked, the library goes on (the day's limit spent is when it is wanted most)
+            else:
+                self.done = True
             return
         try:
             if self.listing is None:
@@ -291,7 +366,8 @@ class _Source:
             self.done, self.checked = True, True
             return
         except Exception as e:
-            self.done, self.error, self.checked = True, net.reason(e), True
+            self.error, self.checked = net.reason(e), True
+            self.done = not self.local             # (a failed look does not take the library away: its posts need no site)
             log.info("gallery: %s stopped: %s", self.row["url"], self.error)
             return
         finally:
@@ -325,8 +401,14 @@ class _Source:
         for m in page:
             when = _when(m.posted)
             self.last = when if when is not None else self.last
+            self.seen.add(m.remote_key)
             self.buffer.append((self.last, m))         # None: this source has no dates at all
-        if self.spaced and self.kind in SERIAL and self.enough() and not self.closed:
+        if self.local and not self.closed:
+            # The rest comes from the library: the listing is let go (a gallery-dl process left suspended is 40 MB and still asking the site). Should the
+            # library fail as a stand-in (_from_library), the site goes on from here, passing the page it gave.
+            self._end()
+            self.listing, self.skip = None, self.pages
+        elif self.spaced and self.kind in SERIAL and self.enough() and not self.closed:
             # A gallery-dl process suspended between pages stays alive (about 40 MB each, still asking the site) -- a few
             # hundred follows left that many behind. The window is reached: park it; "Load older" reopens and passes these pages.
             self._end()
@@ -393,10 +475,12 @@ class _Gallery:
         self.name = "All artists" if self.all else self.artist["name"]
         self.sources = [_Source(r, artists[r["artist_id"]]) for r in rows
                         if r["artist_id"] in artists and sources.site_for(r["url"])]
+        library = db.get_setting("browse_library") != "0"         # Settings > Appearance: older posts of a complete download come from the library
         for s in self.sources:
             s.spaced = self.all
             s.alone = len(self.sources) == 1
             s.since = self.since
+            s.local = library and bool(s.row["complete"])
             s.seed()
 
     def older(self):
@@ -438,7 +522,7 @@ class _Gallery:
     def state(self):
         return [{"id": s.row["id"], "label": s.label, "kind": s.kind, "host": s.host, "url": s.row["url"],
                  "artist_id": s.artist["id"], "artist": s.artist["name"],
-                 "loading": s.loading(), "checked": s.checked, "cached": s.seeded, "offline": s.offline, "fresh": s.fresh, "new": s.new,
+                 "loading": s.loading(), "checked": s.checked, "cached": s.seeded, "offline": s.offline, "fresh": s.fresh, "new": s.new, "library": s.local,
                  # Items still waiting are more to show, whatever a later page did (a prefetch that failed).
                  "state": "more" if s.buffer else "error" if s.error else "done" if s.done else "more",
                  "error": s.error} for s in self.sources]
@@ -479,6 +563,8 @@ class _Gallery:
             s.turn = self.spoken
             _when_, m = s.buffer.popleft()
             m = s.live.get(m.remote_key, m)
+            if isinstance(m, _Local) and not os.path.isfile(m.path):
+                continue                            # deleted since: the library has nothing to show of it, and the site is not asked for it here
             key = (s.artist["id"], m.remote_key)
             if key in self.keys:                    # a post two sources share by id (mirrors)
                 continue
@@ -509,7 +595,8 @@ class _Gallery:
 
     def item(self, number):
         s, m = self.items[number]
-        d = {"id": number, "source": s.label, "kind": s.kind, "host": s.host, "src": s.row["id"], "info": bool(getattr(s.site, "info", None)), "posted": m.posted, "w": m.width,
+        local = isinstance(m, _Local)
+        d = {"id": number, "source": s.label, "kind": s.kind, "host": s.host, "src": s.row["id"], "info": bool(getattr(s.site, "info", None)) and not local, "posted": m.posted, "w": m.width,
              "h": m.height, "video": _plays(m), "post": m.post_url, "saved": False, "fname": _fname(m),
              "key": m.remote_key,
              "artist": s.artist["name"], "artist_id": s.artist["id"]}
@@ -546,7 +633,7 @@ class _Gallery:
                 d["large"] = "/api/gallery/file/%d" % mine["id"]
                 if gif:
                     d["thumb"] = d["large"]
-                elif mine["width"]:
+                elif mine["width"] or (local and not _no_still(m)):      # (a library post has no small picture of the site's to fall back on: the file makes one)
                     d.pop("crop", None), d.pop("whole", None)      # the library's thumbnail has the picture's own shape: nothing to unfold
                     d["thumb"] = "/api/thumb/%d?v=%s%s" % (mine["id"], (mine["sha256"] or "")[:12], "&s=960" if sharp else "")
         return d
@@ -644,7 +731,7 @@ def info(gallery_id, number):
     g = _get(gallery_id)
     s, m = g.items[number]
     ask = getattr(s.site, "info", None)
-    if not ask:
+    if not ask or isinstance(m, _Local):
         return {}
 
     def get():
@@ -770,6 +857,8 @@ def picture(gallery_id, number, size):
     grid picture is the viewer's picture (a booru's sample) is asked once."""
     g = _get(gallery_id)
     s, m = g.items[number]
+    if isinstance(m, _Local):
+        raise NoPicture("a post of the library is shown from its file")
     thumb = size == "thumb"
     whole = size == "whole"
     viewing = size == "large"                        # the file itself, for the viewer: the only size that may be a clip or a sound
@@ -853,6 +942,11 @@ def download(gallery_id, number):
     """The item's original into its card's folder, the way a sync would save it."""
     g = _get(gallery_id)
     s, m = g.items[number]
+    if isinstance(m, _Local):
+        if os.path.isfile(m.path):
+            return g.item(number), False                 # (already saved: the page does not offer it)
+        raise RuntimeError("this file is gone from the library, and the list came from the library, not the site -- reopen the artist after turning off "
+                           "Settings > Appearance > Older posts from your library to see the post from the site again")
     artist = s.artist
     cur = {"artist_id": artist["id"], "new": 0, "duplicates": 0, "failed": 0, "existing": 0,
            "file": "", "size": 0}
