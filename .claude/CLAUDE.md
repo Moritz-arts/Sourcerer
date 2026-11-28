@@ -889,11 +889,14 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   **A member's originals are signed CloudFront links** (`<name>.png?Expires=...&Signature=...&Key-Pair-Id=...`, v0.73, from gallery-dl's own test results): `_FILE` allowed no `?`, so a
   logged-in card listed NO picture at all while name and avatar (read from the page) were fine -- the user's report; a visitor's 640 px copies have no query and always worked.
   `_media` names the file and makes the small rendition from the address without the query (that rendition is public and unsigned). **The login is not tried against a real account** (no way to here): nothing says how an expired one looks, so there is no `still_logged_in`.
-  **PoiPiku has no list of the accounts one follows -- the follows are the authors of the Following feed** (v0.74, `poipiku.following`, `FOLLOWS_HOURS` 11 h; research 2026-11-28: no page or API lists them;
+  **PoiPiku has no list of the accounts one follows -- the follows are the authors of the Following feed** (v0.74, `poipiku.following`; research 2026-11-28: no page or API lists them;
   `MyHomePcV.jsp` is the *feed* of the followed accounts' posts, newest first, tabs "quiet follow" / "following tags" = `MyHomeTagPcV.jsp` / "favo" = `MyBookmarkListPcV.jsp`; the follow button is
   `/f/UpdateFollowUserF.jsp`): the feed uses the same cards as the public pages (`<a class="IllustUser" href="/<id>/">` with `IllustUserThumb` / `IllustUserName`) and is paged by `PG` (0-based; the
   `PageBar` links the next one -- the walk ends where it does not, never on a guess, cap `MAX_FEED_PAGES`). So an account that follows but has not posted within the feed's reach is missing until it posts;
-  a feed showing the login page raises "log in again", a feed with no post is an empty list. **Written against the public feeds' markup (`NewArrivalPcV.jsp`, parsed in `checks.py` and by hand: 40 authors from 48 real
+  a feed showing the login page raises "log in again", a feed with no post is an empty list (and a warning that counts the markup's classes, so a different markup shows in the log).
+  **The feed is ordered by when the authors posted, not by when one followed them** (v0.75, the user's test: a new follow's last post was on page 2 and no card came): `follows._look`'s "stop at the first page of known accounts"
+  is for lists with the newest follows first, so a module with `WHOLE_FEED = True` is walked whole (cap `MAX_FEED_PAGES`), and PoiPiku has **no `FOLLOWS_HOURS`** -- v0.74's 11 h made Refresh all right after the
+  first look skip it. A look costs up to 40 pages 5 s apart in the background; `checks.py` (`poipiku_checks`) fails with the old early stop. **Written against the public feeds' markup (`NewArrivalPcV.jsp`, parsed in `checks.py` and by hand: 40 authors from 48 real
   cards), not seen with a real login** -- if the user's own feed differs, `_USER` / `_BAR` are what to adjust. The grid's small
   picture is the site's `_360.jpg` rendition of the file (seen on its list pages, no Referer needed), never the original. `robots.txt` asks `Crawl-delay: 5`: a
   sync spaces gallery-dl's pages 5-7 s (`OPTIONS`), a gallery somebody waits for 2.5-4 s (`OPEN_SLEEP`; one post is one page, 5-7 s made a first screen two
