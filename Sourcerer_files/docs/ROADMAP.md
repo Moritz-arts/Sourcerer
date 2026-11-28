@@ -18,7 +18,7 @@ drops every new file, de-duplicated across sources, into a [TrackImage](https://
 | Pixiv | works | R-18 with a login; ugoira plays as an animated WebP |
 | Patreon | works | originals; patron posts with a login |
 | Fanbox, Fantia | works | cookie login |
-| PoiPiku | works as a visitor, login not tried | listed by gallery-dl; a visitor gets 640 px copies, the original needs the cookie login (not tried against a real account) |
+| PoiPiku | works, with and without the login | listed by gallery-dl; a visitor gets 640 px copies, the login the originals (signed links); the accounts a login follows are the authors of its Following feed (PoiPiku has no list), only those who posted lately |
 | X | works with a login | listed by gallery-dl, originals |
 | XenForo forums | works | media gallery or attachment browser, albums, threads; login per forum; forums behind a guard or in a folder work; clips, sounds, animated WebPs and whole (uncropped) pictures in Full mode |
 | Boorus | works | Danbooru, e621, Gelbooru, Rule 34, yande.re, Konachan and more: an artist's tag search |
