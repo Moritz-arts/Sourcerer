@@ -911,6 +911,23 @@ def poipiku_checks():
     finally:
         net.get_text = real
 
+    # the Following feed is a LIST (a post header per post, the emoji keyboard below), not the grid of the public pages: read from a real post page's markup
+    def item(uid, name, avatar="profile_20200101000000.jpeg"):
+        return ('<div class="IllustItem  Upload" id="IllustItem_%s0"><div class="IllustItemUser"><a class="IllustItemUserThumb" href="/%s/" style="background-image:url(\'https://cdn.poipiku.com/%09d/%s_120.jpg\')"></a>'
+                '<h2 class="IllustItemUserName"><a href="/%s/">%s</a></h2><span class="BtnBase UserInfoCmdFollow UserInfoCmdFollow_%s">x</span></div>'
+                '<a class="IllustItemThumb" href="javascript:void(0)"><img class="IllustItemThumbImg" src="https://cdn.poipiku.com/%09d/1_640.jpg"/></a></div>' % (uid, uid, int(uid), avatar, uid, name, uid, int(uid)))
+    list_pages = {0: feed(0, [item("2", "Artist A"), item("3", "Artist &amp; B", "default_user.jpg"), item("2", "Artist A")], [0, 1]), 1: feed(1, [item("4", "Artist C")], [0, 1])}
+    asked, real = [], net.get_text
+    net.get_text = lambda url, params=None, headers=None: (asked.append(dict(params or {})), (list_pages.get((params or {}).get("PG"), ""), url))[1]
+    try:
+        (_n, pages), = list(poipiku.following("poipiku"))
+        got = [a for page in pages for a in page]
+        check([(a["url"], a["name"]) for a in got] == [("https://poipiku.com/2/", "Artist A"), ("https://poipiku.com/3/", "Artist & B"), ("https://poipiku.com/4/", "Artist C")]
+              and got[0]["avatar"] == "https://cdn.poipiku.com/000000002/profile_20200101000000.jpeg_120.jpg" and got[1]["avatar"] == "" and [p["PG"] for p in asked] == [0, 1],
+              "the Following feed as a list (a post header per post) is read like the grid: authors once, names, avatars from the background image", (got, asked))
+    finally:
+        net.get_text = real
+
     # a follow made after the first look: its last post can be on any page of a feed ordered by time, so the next look walks the whole feed (never stops at a page of
     # known accounts) and Refresh all right after the first look still reads it (no minimum between looks)
     from sourcerer import follows, sync
