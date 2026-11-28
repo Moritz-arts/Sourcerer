@@ -597,6 +597,202 @@ def meter_checks():
         client.put("/api/speed", json={"reset": "limits"})
 
 
+def library_gallery_checks():
+    """2026-11-28: browsing an artist whose download is complete asked the site for every page again (a login site's requests are the account's, and the day's
+    limit). The posts past the newest page are in the library already: they are listed from the files table, the site is asked only for what is new."""
+    import datetime
+    import os
+    from sourcerer import accounts, snapshots, sources, sync
+    root = pathlib.Path(tempfile.mkdtemp(prefix="sourcerer-libgal-"))
+    folder = root / "Artist L"
+    folder.mkdir()
+    N, PAGE_N = 100, 20
+    asked = []
+    day0 = datetime.datetime(2024, 1, 1, tzinfo=datetime.timezone.utc)
+
+    class Cdn(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            n = int(self.path.strip("/").split(".")[0])
+            body = jpeg(((n * 37) % 256, (n * 91) % 256, (n * 53) % 256), (64, 48))
+            self.send_response(200)
+            self.send_header("Content-Type", "image/jpeg")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+    base = serve(Cdn)
+
+    def post(n):                                   # post 0 is the newest: n days before the last of 100
+        return Media(remote_key="k%d" % n, url="%s/%d.jpg" % (base, n), post_url="https://fakelib.test/p/%d" % n, posted=(day0 + datetime.timedelta(days=N - n)).isoformat(),
+                     name="n%d" % n, filename="f%03d.jpg" % n, thumb="%s/%d.jpg" % (base, n), large="%s/%d.jpg" % (base, n))
+
+    def pages(url):
+        for first in range(0, N, PAGE_N):
+            asked.append(first)
+            yield [post(n) for n in range(first, first + PAGE_N)]
+    fake = types.SimpleNamespace(KIND="fakelib", LABEL="Fakelib", match=lambda url: url.startswith("https://fakelib.test/"), pages=pages, profile=lambda url: {})
+    sources.SITES.insert(0, fake)
+    old = {k: db.get_setting(k) for k in ("library", "browse_library", "browse_window")}
+
+    def walk(artist=41):
+        """(items, gallery) of everything a gallery hands out, scrolled to its end."""
+        g = gallery._Gallery(artist)
+        out = []
+        for _ in range(30):
+            got = g.more(60)
+            if not got:
+                break
+            out += got
+        return out, g
+
+    def ordered(items):
+        times = [i["posted"] for i in items if i["posted"]]
+        return times == sorted(times, reverse=True)
+    try:
+        with db.connect() as con:
+            con.execute("DELETE FROM artists WHERE id = 41")
+            con.execute("INSERT INTO artists (id, name, folder, layout, dedupe, auto_download, listed) VALUES (41, 'Artist L', ?, 'together', 'keep_all', 1, 0)", (str(folder),))
+            con.execute("INSERT INTO sources (id, artist_id, kind, url, complete) VALUES (41, 41, 'fakelib', 'https://fakelib.test/l', 0)")
+        sync._sync_artist(41)
+        with db.connect() as con:
+            have = con.execute("SELECT COUNT(*) FROM files WHERE artist_id = 41 AND path IS NOT NULL").fetchone()[0]
+            complete = con.execute("SELECT complete FROM sources WHERE id = 41").fetchone()[0]
+        check(have == N and complete == 1, "the made-up artist is downloaded to its end", (have, complete))
+        db.set_setting("browse_library", "1")
+
+        def reset():                               # a snapshot as a look of a minute ago leaves it: the newest page
+            asked.clear()
+            snapshots.save(41, [post(n) for n in range(PAGE_N)], merge=False)
+        reset()
+        items, g = walk()
+        keys = [i["key"] for i in items]
+        check(len(keys) == N and len(set(keys)) == N and not asked, "a fresh snapshot and a complete download: every post is shown, the site is asked for none", (len(keys), len(set(keys)), asked))
+        check(ordered(items) and keys[:3] == ["k0", "k1", "k2"] and keys[-1] == "k%d" % (N - 1), "... newest first, snapshot and library in one run", keys[:5] + keys[-2:])
+        check(all(i["saved"] and i["thumb"].startswith("/api/thumb/") and i["large"].startswith("/api/gallery/file/") for i in items), "... every post shows its own file", items[PAGE_N + 1])
+        old_item = items[N - 1]
+        check(old_item["fname"] == "f%03d.jpg" % (N - 1) and old_item["post"] == "https://fakelib.test/p/%d" % (N - 1) and old_item["posted"] and not old_item["info"] and old_item["w"] == 64,
+              "a post from the library keeps its file's name, its post and its date, and asks the site for no information", old_item)
+        check(g.state()[0]["library"] is True, "the source says its older posts come from the library", g.state())
+
+        # the scan for what is new: a snapshot that is old asks the site once, for its first page, and the rest is not asked
+        reset()
+        with db.connect() as con:
+            con.execute("UPDATE snapshots SET fetched = ? WHERE source_id = 41", ((datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=2)).isoformat(),))
+        items, g = walk()
+        check(asked == [0] and len({i["key"] for i in items}) == N, "an old snapshot: the site is asked for its first page only (the scan for what is new), the rest is the library", (asked, len(items)))
+        reset()
+        with db.connect() as con:
+            con.execute("DELETE FROM snapshots WHERE source_id = 41")
+        items, g = walk()
+        check(asked == [0] and len({i["key"] for i in items}) == N and ordered(items), "no snapshot at all: the same, one page", (asked, len(items)))
+
+        # a site that rests (the day's limit is spent: when the library is wanted most) or fails does not take the library away
+        reset()
+        with db.connect() as con:
+            con.execute("UPDATE snapshots SET fetched = ? WHERE source_id = 41", ((datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=2)).isoformat(),))
+        net.pause("https://fakelib.test/l", 3600, "made-up rest")
+        try:
+            items, g = walk()
+        finally:
+            net._state["paused"].clear()
+        check(len({i["key"] for i in items}) == N and not asked and g.sources[0].error.startswith("rests"),
+              "the site rests: the library still lists every post, and the source says why", (len(items), asked, g.sources[0].error))
+        pages_ok = fake.pages
+
+        def failing(url):
+            asked.append("down")
+            raise RuntimeError("the site is down")
+            yield []
+        fake.pages = failing
+        try:
+            items, g = walk()
+        finally:
+            fake.pages = pages_ok
+        check(len({i["key"] for i in items}) == N and asked == ["down"] and "the site is down" in g.sources[0].error,
+              "a look that fails: the library still lists every post, and the source says why", (len(items), asked, g.sources[0].error))
+
+        # not complete (or the setting off): the site lists everything as before
+        reset()
+        with db.connect() as con:
+            con.execute("UPDATE sources SET complete = 0 WHERE id = 41")
+        items, g = walk()
+        check(asked == [0, 20, 40, 60, 80] and len({i["key"] for i in items}) == N and g.state()[0]["library"] is False,
+              "a download that is not complete is listed by the site, page after page", (asked, len(items)))
+        reset()
+        with db.connect() as con:
+            con.execute("UPDATE sources SET complete = 1 WHERE id = 41")
+        db.set_setting("browse_library", "0")
+        items, g = walk()
+        check(asked == [0, 20, 40, 60, 80] and len({i["key"] for i in items}) == N, "with the setting off the site lists everything, as before", (asked, len(items)))
+        db.set_setting("browse_library", "1")
+
+        # a file the user deleted is not shown from the library (the site is not asked for it here), and a gone file cannot be downloaded from the gallery
+        reset()
+        with db.connect() as con:
+            gone = [r["path"] for r in con.execute("SELECT path FROM files WHERE artist_id = 41 AND remote_key IN ('k50', 'k51', 'k52')")]
+        for path in gone:
+            os.remove(path)
+        items, g = walk()
+        keys = {i["key"] for i in items}
+        check(len(items) == N - 3 and not ({"k50", "k51", "k52"} & keys) and not asked, "files the user deleted are not listed, and nothing is asked for them", (len(items), asked))
+        g.items[1] = (g.sources[0], gallery._Local(remote_key="k77", url="", post_url="", posted="", name="n", filename="f.jpg"))
+        g.items[1][1].path = gone[0]
+        gallery._galleries[g.id] = g
+        try:
+            gallery.download(g.id, 1)
+            check(False, "a library post whose file is gone cannot be downloaded from the gallery")
+        except RuntimeError as e:
+            check("gone from the library" in str(e) and not asked, "a library post whose file is gone says so, and asks no site", str(e))
+        finally:
+            gallery._galleries.pop(g.id, None)
+
+        # All artists: a login site is never asked, and goes on past its snapshot from the library
+        saved = (sources.account_key, accounts.careful)
+        sources.account_key, accounts.careful = (lambda url: "xtest"), (lambda key: True)
+        try:
+            db.set_setting("browse_window", "0")
+            reset()
+            items, g = walk(None)
+            mine = [i for i in items if i["artist_id"] == 41]
+            check(g.sources and g.sources[0].offline and len(mine) == N - 3 and not asked,
+                  "All artists: a login site's older posts come from the library, and the site is not asked", (len(mine), asked, [s.offline for s in g.sources]))
+            with db.connect() as con:
+                con.execute("UPDATE sources SET complete = 0 WHERE id = 41")
+            items, g = walk(None)
+            mine = [i for i in items if i["artist_id"] == 41]
+            check(len(mine) == PAGE_N and not asked, "... and a download that is not complete shows the snapshot and no more, as before", (len(mine), asked))
+        finally:
+            sources.account_key, accounts.careful = saved
+            with db.connect() as con:
+                con.execute("UPDATE sources SET complete = 1 WHERE id = 41")
+
+        # the library is gone (folder deleted, drive unplugged): it stands in for nothing, and the site lists the posts -- also a site that gallery-dl reads, one source
+        # at a time: the fallback takes its turn like any other listing
+        for kind in ("fakelib", "x"):
+            fake.KIND = kind
+            reset()
+            moved = folder.with_name("moved")
+            folder.rename(moved)
+            try:
+                items, g = walk()
+            finally:
+                moved.rename(folder)
+            check(len({i["key"] for i in items}) == N and asked and g.state()[0]["library"] is False and not any(i["saved"] for i in items) and not gallery._serial,
+                  "the library is gone (%s): the site lists the posts, as before" % kind, (len(items), asked, g.state()[0]["library"], gallery._serial))
+        fake.KIND = "fakelib"
+    finally:
+        sources.SITES.remove(fake)
+        gallery._galleries.clear()
+        for k, v in old.items():
+            if v is not None:
+                db.set_setting(k, v)
+        with db.connect() as con:
+            con.execute("DELETE FROM artists WHERE id = 41")
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def tune_checks():
     client = server.app.test_client()
     client.put("/api/speed", json={"reset": "limits"})
@@ -665,6 +861,12 @@ def tune_checks():
 
 
 def settings_checks():
+    # 2026-11-28: a new setting's checkbox took the id of the library folder's field ($("set-library") then found the text input first, and its setting did nothing)
+    import collections
+    ids = re.findall(r'\sid="([^"]+)"', (REPO / "Sourcerer_files" / "static" / "index.html").read_text(encoding="utf-8"))
+    ids = [i for i in ids if not i.startswith(("i-", "l-"))]                # (the icon sprite's symbols are no controls)
+    check(not [k for k, v in collections.Counter(ids).items() if v > 1], "every id of the page is used once", [k for k, v in collections.Counter(ids).items() if v > 1])
+
     def scenario(old):
         with db.connect() as con:
             con.execute("DELETE FROM settings WHERE key IN ('speed', 'speed_v1', 'parallel', 'per_host', 'pace_ms', 'login_gap', 'login_pace')")
@@ -1436,7 +1638,7 @@ def cooling_checks():
 
 
 def main():
-    for group in (forum_checks, tile_checks, speed_checks, refusal_checks, budget_checks, meter_checks, tune_checks, settings_checks, gallery_checks, media_checks, poipiku_checks, resume_checks, library_checks, cooling_checks, refresh_checks):
+    for group in (forum_checks, tile_checks, speed_checks, refusal_checks, budget_checks, meter_checks, library_gallery_checks, tune_checks, settings_checks, gallery_checks, media_checks, poipiku_checks, resume_checks, library_checks, cooling_checks, refresh_checks):
         print("--", group.__name__, flush=True)
         try:
             group()

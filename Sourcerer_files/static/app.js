@@ -1440,6 +1440,7 @@ function galSources(list) {
         (unlooked ? " · " + plural(unlooked, "account") + " not looked at yet" : "")
       : busy ? label + ": asking the site…" + (of.length > 1 ? " (" + of.filter(function (s) { return !s.loading; }).length + " of " + of.length + " accounts answered)" : "") : "Hide " + label + (G.all ? " (" + plural(of.length, "source") + ")" : "") +
         (of.every(function (s) { return s.fresh; }) ? " · from a recent look, asked again at the end of what is shown (the artist's Refresh reads it at once)" : "") +
+        (of.every(function (s) { return s.library; }) ? " · older posts from your library: the site is asked for what is new only" : "") +
         (news ? " · " + plural(news, "new post") : "");
     // A spinner while the site is asked, green when it answered, orange when it did not.
     var state = busy ? '<i class="spin"></i>' : '<i class="dot ' + (bad.length ? "warn" : ready ? "ok" : "blank") + '"></i>';
@@ -2516,6 +2517,7 @@ function fillSettings() {
   $("set-follows").checked = st.import_follows === "1";
   $("set-scanstart").checked = st.scan_on_start !== "0";
   $("set-tilelogo").checked = st.tile_logo !== "0";
+  $("set-browselib").checked = st.browse_library !== "0";
   $("set-auto").checked = st.auto_sync === "1";
   $("set-hours").value = st.auto_hours; $("set-hours").disabled = st.auto_sync !== "1";
   fillSpeed();
@@ -2577,6 +2579,7 @@ $("btn-browse").addEventListener("click", function () {
   }).catch(fail);
 });
 $("set-tilelogo").addEventListener("change", function () { saveSetting({ tile_logo: this.checked ? "1" : "0" }); });
+$("set-browselib").addEventListener("change", function () { saveSetting({ browse_library: this.checked ? "1" : "0" }); });
 $("set-scanstart").addEventListener("change", function () { saveSetting({ scan_on_start: this.checked ? "1" : "0" }); });
 $("set-follows").addEventListener("change", function () { saveSetting({ import_follows: this.checked ? "1" : "0" }); });
 $("set-auto").addEventListener("change", function () { saveSetting({ auto_sync: this.checked ? "1" : "0" }); });

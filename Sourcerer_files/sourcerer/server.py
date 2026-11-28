@@ -35,7 +35,7 @@ CHOICES = {"filenames": ("original", "dated"), "theme": ("system", "light", "dar
            "auto_sync": ("0", "1"), "import_follows": ("0", "1"), "channel": ("stable", "beta"),
            "tile_logo": ("0", "1"), "scan_on_start": ("0", "1"), "grid_quality": ("best", "fast"),
            "speed": tuple(net.PROFILES),
-           "browse_window": ("0", "7", "14", "30", "90")}
+           "browse_window": ("0", "7", "14", "30", "90"), "browse_library": ("0", "1")}
 RANGES = {"card_size": (160, 800), "auto_hours": (1, 168)}
 
 

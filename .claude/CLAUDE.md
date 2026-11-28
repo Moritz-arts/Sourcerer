@@ -1357,6 +1357,22 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   its first page as ever -- what the artist posted meanwhile is counted as new then, a few minutes later than before, and *Refresh* on the artist reads
   the site at once. The chip's tooltip says so (`fresh` in `state()`). Without this every opening cost one request per source, a logged-in one on
   X, pixiv and Patreon.
+- **A complete download's older posts come from the library, not the site** (v0.78, `gallery._Source.local` / `reads_library` / `_from_library`, `gallery._Local`, setting `browse_library`, default on;
+  the user's wish, 2026-11-28: "show what I have downloaded in the gallery instead of calling every page again, scan only for new media"): the gallery used to list an artist page after page from the site,
+  past its 60-post snapshot, although every older post was in `files` already -- on a login site each page is the account's request and the day's limit. A source with `sources.complete = 1` now
+  takes **the newest page from the snapshot or one live page** (that is the scan for what is new: unchanged -- `fresh` snapshots ask nobody, `new` is counted, "N new posts - show") **and everything beyond from `files`**
+  (`WHERE source_id = ? AND path IS NOT NULL`, keyset on `_SORT` = `COALESCE(stamp, posted, created)` + `id`, 120 rows a read, 60 in All artists; no stat per row, the file is looked at only when its post is handed out in
+  `more()`). `reads_library()` = `local and checked`: **`checked` is "the site had its look"** (a fresh snapshot, an offline source, or the first live page), so S1 (fresh snapshot) asks nothing at all, S2 (old snapshot) and S3
+  (no snapshot) ask one page. A read of the library takes no turn at a site's lane (`start_fill` / `_run` skip `_serial` and `_spaced`) and the live listing is let go after its first page (a suspended gallery-dl is 40 MB;
+  `skip` reopens it when the library fails as a stand-in). **All artists never asks a login site -- and now goes on past its snapshots from the library** (`seed`: `done = not local` for an offline source; `fill`
+  ends an offline source that is not local, library or not). **A post of the library is a `_Local`** (a `Media` subclass with no field of its own: one more field would change `snapshots.SHAPE` and drop every snapshot): no
+  address, so `info()` answers `{}`, `picture()` raises `NoPicture`, `download()` returns the saved item or says the file is gone; `item()` gives it the library's thumbnail even when `width` is unknown (there is no site picture to
+  fall back on). `self.seen` holds every key that went into a buffer (snapshot, live page, library) and keeps the library's first read -- which starts one second above where the buffer ends -- from handing out a post twice.
+  **The library stands in only while it is there**: the first read probes the newest five files, and when none exists (folder deleted, drive unplugged, library moved) or there is nothing to start from, `local` goes
+  off and the site lists the posts as before (`library` in `state()` is False); a file deleted later is not listed (the site is not asked for it here -- the setting off lists it again to download). **A site that rests or
+  fails does not take the library away** (`fill`: `done` stays False for a local source -- the day's limit spent is when it is wanted most). Known limits: a byte-identical duplicate that was not kept (`path` NULL) is not listed
+  under its own post; a `files` row whose source was removed (`source_id` NULL) is not listed; a post the download gave up on is missing until the setting is off. Checked by `.github/checks.py`
+  (`library_gallery_checks`: a made-up site, requests counted per page) and in Chromium (a complete artist scrolled to its end: 100 tiles, no request, the viewer's file from the library).
 - Browse's state poll (`galPoll`) runs only while a source of the open gallery is loading
   (and once when a gallery comes back from aside), slows down, and reopens a gallery the server
   closed; every path that ends a gallery's loading (no cards, a failed open) must clear `G.loading`.

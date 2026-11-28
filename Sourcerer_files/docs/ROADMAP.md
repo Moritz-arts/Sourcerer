@@ -68,6 +68,7 @@ the same artist on several sites is combined; merge dialogs with reasons, *Merge
 
 **Browse** — three views (Artists, Gallery, Recommended placeholder); artists on the left, posts on the right; *All artists* with a time window;
 site chips, Squares / Full layout, viewer with zoom, download one / several / whole artist, GIFs and ugoira play; settings of the page are kept across restarts.
+Older posts of a complete download are listed from the library, so browsing an artist already downloaded spends no request (the site is asked for what is new).
 
 **The window** — on Windows the page's own bar is the title bar: pywebview moves the window, and what Windows does at the screen's edge is done by the server when the
 button is let go -- half, quarter or maximized -- and a docked or maximized window dragged by the bar gets its size back under the pointer; it keeps working on the
