@@ -1239,7 +1239,12 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   X's ratelimit or lock (gallery-dl `ratelimit: abort`, `_run`). A site is
   every host one company runs (`_SITES`): a stop from pixiv's API stops
   i.pximg.net too. Never retry into a 429 on a login -- that is how
-  accounts get flagged; pause and let the next sync carry on.
+  accounts get flagged; pause and let the next sync carry on. **A rest the day's budget began ends when the limit has room again** (v0.77, `net._rest`, `BUDGET_REST`): the rest was stored
+  with the limit of that moment ("today's 3000 requests are done", until tomorrow), so a user who raised the limit (Settings > Speed & safety > Daily limits; the one for forums is
+  *Forums and other sites with a login*, 3000) still read "Works, but the site rests until 02:26 tomorrow" in Manage Accounts and no thumbnail loaded in the gallery. `paused()` and
+  `pauses()` compare today's count with the limit as it is now -- only for a rest that says the budget's words, and only for today's count (one begun yesterday runs out by itself, as
+  drawn); `checks.py` (`budget_checks`). Downloads spend the same budget as Browse's pictures (3000 forum requests are minutes at Normal), so a site whose day went to downloads shows no
+  thumbnail until the limit is raised or tomorrow: a reserve for Browse is not built.
 - **One gallery-dl reads per site at a time** (`_gdl._busy`): a gallery and
   a sync listing X at once looked like two clients on one session. The lock
   is held while a page is read, never while a caller keeps a listing

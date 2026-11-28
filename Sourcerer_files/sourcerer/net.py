@@ -431,17 +431,43 @@ def _rhythm(url, bulk):
     return pace, every, rest
 
 
+BUDGET_REST = "requests are done; the rest follows tomorrow"      # what a rest says when the day's budget began it (spend)
+
+
+def _room_again(site):
+    """Whether today's count is below the day's limit AS IT IS NOW. A rest the budget began was stored with the limit of that moment, and a user who raised the
+    limit (Settings > Speed & safety > Daily limits) had a site that still rested until tomorrow: the manage-accounts row said so, the gallery's pictures failed with it.
+    Only today's count decides: after midnight the rest runs out by itself (a random half hour to three more, as spend() drew it)."""
+    entry = _stored("spent").get(site)
+    return bool(entry) and entry[0] == time.strftime("%Y-%m-%d") and entry[1] < day_limit(site)
+
+
+def _rest(site):
+    """(until, why) while the site rests, else None; a rest of the day's budget that the limit has room for again is ended here."""
+    entry = _stored("paused").get(site)
+    if not entry or entry[0] <= time.time():
+        return None
+    if BUDGET_REST in entry[1] and _room_again(site):
+        with _lock:
+            pauses_ = _stored("paused")
+            if pauses_.get(site) is entry:
+                del pauses_[site]
+                _store("paused")
+        _flush()
+        log.info("%s: the rest ends, the day's limit has room again (%d of %d requests)", site, _stored("spent")[site][1], day_limit(site))
+        return None
+    return entry
+
+
 def paused(url):
     """(until, why) while a site is paused, else None."""
-    entry = _stored("paused").get(site_of(url))
-    return entry if entry and entry[0] > time.time() else None
+    return _rest(site_of(url))
 
 
 def pauses():
     """The pauses now running, for the window: [{site, name, until (Unix time), why}]."""
-    now = time.time()
     return [{"site": s, "name": name_of(s), "until": e[0], "why": e[1]}
-            for s, e in sorted(_stored("paused").items()) if e[0] > now]
+            for s, e in ((s, _rest(s)) for s in sorted(_stored("paused"))) if e]
 
 
 def _stopped(url):
@@ -470,8 +496,7 @@ def spend(url, n=1):
     _flush()
     if over:
         tomorrow = time.mktime(time.strptime(day, "%Y-%m-%d")) + 86400
-        pause(url, tomorrow - time.time() + _hours(0.5, 3),
-              "today's %d requests are done; the rest follows tomorrow" % day_limit(site))
+        pause(url, tomorrow - time.time() + _hours(0.5, 3), "today's %d %s" % (day_limit(site), BUDGET_REST))
 
 
 SCAN_SHARE = 0.5            # a sweep's look at cards that do not download (Refresh all) may use this much of a day's budget
