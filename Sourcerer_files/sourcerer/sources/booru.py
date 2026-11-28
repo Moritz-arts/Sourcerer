@@ -232,6 +232,12 @@ def _auth_headers(host, data=None):
     return out or None
 
 
+def counted(host):
+    """Whether the requests made with this booru's key count against the day's limit: Gelbooru's engine sends the key as parameters (net's careful lane,
+    a daily budget), the others as a Basic header -- a token lane, paced but not counted."""
+    return BOORUS.get(host, ("",))[0] == "gelbooru"
+
+
 def _auth_params(host, data=None):
     data = data or _secrets(host)
     if not data or BOORUS.get(host, ("",))[0] != "gelbooru":

@@ -1578,8 +1578,9 @@ def get_accounts():
             host = booru.BOORUS.get(host, (0, 0, 0, 0, None))[4] or host       # paused under its API host
         rest = net.paused(host)
         a["rest"] = {"until": rest[0], "why": rest[1]} if rest else None
-        if a["key"] in net.BUDGETS:
-            a["usage"] = net.usage(a["key"])            # (a site's key is its name in net)
+        if a["logged_in"] and (a["kind"] == "window" or a["kind"] == "api_key" and booru.counted(a["key"].split(":", 1)[1])):
+            a["usage"] = net.usage(net.site_of(host))   # what carries a cookie login (or a Gelbooru key) is counted against the day's limit, where spend() counted it:
+                                                        # pixiv, X, ... by their name in net, a forum or a booru by its host
     boorus = [dict(b, **booru.login_help("booru:" + b["host"])) for b in booru.LOGIN_SITES]
     types = [{"type": t, "label": label, "kind": how, "many": t in ("mastodon", "misskey", "xenforo", "booru")}
              for t, label, how in accounts.TYPES]

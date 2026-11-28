@@ -1258,6 +1258,15 @@ Every job after an optional one carries `if: ${{ !cancelled() && needs.<job>.res
   `pauses()` compare today's count with the limit as it is now -- only for a rest that says the budget's words, and only for today's count (one begun yesterday runs out by itself, as
   drawn); `checks.py` (`budget_checks`). Downloads spend the same budget as Browse's pictures (3000 forum requests are minutes at Normal), so a site whose day went to downloads shows no
   thumbnail until the limit is raised or tomorrow: a reserve for Browse is not built.
+- **Manage Accounts draws the day's count as a bar per login** (v0.78, `accUsageBar` / `paintUsage` in app.js, `server.get_accounts`, `net.usage`): a bar under the state text with
+  "N of M requests today" -- the accent while there is room, orange from 80 %, red with "N of M · limit reached" once the limit is spent -- and the tooltip says where the limit
+  is set (Settings > Speed & safety > Daily limits) and the three kinds of request asked most. **M is `net.day_limit(site)` as it is set NOW** (not the default, not what a rest was stored with),
+  so the bar follows the sliders. **Only a login whose requests `net.spend` counts gets a bar** (`usage` in the row, from `get_accounts`): every cookie login (pixiv, X, Patreon, Fanbox, Fantia,
+  PoiPiku, a forum -- its own count against the "Forums and other sites" limit) and a booru whose key goes in the parameters (`booru.counted`: Gelbooru's engine; Danbooru and e621 send a Basic header, a token
+  lane that is paced but not counted), never Bluesky, Mastodon, Misskey -- a bar at 0 for ever would say "no requests", which is false. **The row's markup carries no numbers**: `paintUsage` writes
+  width, text, tone and tooltip in place after every `drawAccounts`, and the dialog asks `/api/accounts` every 3 s while it is open (`accPoll`, quiet on an error, ends with the dialog), so the syncs
+  behind it show without redrawing a row (a redraw swallows a click on Check / Log out -- the activity bar's lesson). The state text must not carry the count again. Checked by `.github/checks.py`
+  (`meter_checks`) and in Chromium (light, dark, a narrow window; a raised limit seen by the open dialog without a redraw).
 - **One gallery-dl reads per site at a time** (`_gdl._busy`): a gallery and
   a sync listing X at once looked like two clients on one session. The lock
   is held while a page is read, never while a caller keeps a listing

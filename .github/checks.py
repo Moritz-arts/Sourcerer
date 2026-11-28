@@ -544,6 +544,59 @@ def budget_checks():
     client.put("/api/speed", json={"reset": "limits"})
 
 
+def meter_checks():
+    """2026-11-28: Manage Accounts draws a bar per login -- what was asked today against the day's limit, whatever the user set. Only a login whose requests are counted gets one
+    (a cookie login, Gelbooru's key in the parameters; not a token or a Basic header, which are paced but not counted), and the limit is the one in force now."""
+    from sourcerer import accounts
+    client = server.app.test_client()
+    client.put("/api/speed", json={"reset": "limits"})
+    net._state["unfriendly"], net._state["paused"], net._state["spent"] = {}, {}, {}
+    cookies = lambda domain, **kv: [{"name": k, "value": v, "domain": domain, "path": "/", "expires": 0} for k, v in kv.items()]
+    login = lambda key, **fields: accounts._write(key, dict({"key": key, "saved": accounts._now(), "how": "test", "state": "ok", "checked": accounts._now(), "why": ""}, **fields))
+    keys = ["x", "xenforo:forum.example", "booru:gelbooru.com", "booru:danbooru.donmai.us", "bluesky"]
+    rows = lambda: {a["key"]: a for a in client.get("/api/accounts").get_json()["accounts"]}
+    try:
+        login("x", cookies=cookies("x.com", auth_token="t", ct0="c"))
+        login("xenforo:forum.example", cookies=cookies("forum.example", xf_user="1,a"), base="https://forum.example")
+        login("booru:gelbooru.com", user="u", api_key="k")
+        login("booru:danbooru.donmai.us", user="u", api_key="k")
+        login("bluesky", refresh="r", access="a")
+        net.spend("https://x.com/i/api/graphql/abc/UserMedia", 120)
+        net.spend("https://forum.example/index.php", 30)
+        net.spend("https://gelbooru.com/index.php", 5)
+        got = rows()
+        check(all(k in got and got[k]["logged_in"] for k in keys), "the made-up logins are listed", sorted(got))
+        check(got["x"]["usage"]["used"] == 120 and got["x"]["usage"]["budget"] == 600, "a cookie login shows what it spent against its default limit", got["x"].get("usage"))
+        check(got["xenforo:forum.example"]["usage"]["used"] == 30 and got["xenforo:forum.example"]["usage"]["budget"] == 3000,
+              "a forum's bar counts that forum's own requests against the limit of the other sites", got["xenforo:forum.example"].get("usage"))
+        check(got["booru:gelbooru.com"]["usage"]["used"] == 5 and got["booru:gelbooru.com"]["usage"]["budget"] == 3000, "so does a booru whose key goes in the parameters")
+        check("usage" not in got["booru:danbooru.donmai.us"] and "usage" not in got["bluesky"],
+              "a login whose requests are not counted (a Basic header, a token) gets no bar", (got["booru:danbooru.donmai.us"].get("usage"), got["bluesky"].get("usage")))
+
+        client.put("/api/speed", json={"tune": {"limit_x": 150, "limit_other": 4000}})
+        got = rows()
+        check(got["x"]["usage"]["budget"] == 150 and got["xenforo:forum.example"]["usage"]["budget"] == 4000 and got["booru:gelbooru.com"]["usage"]["budget"] == 4000
+              and got["x"]["usage"]["used"] == 120, "the bars follow the limits as they are set now, the count stays", [got[k]["usage"] for k in keys[:3]])
+        net.spend("https://x.com/i/api/graphql/abc/UserMedia", 30)
+        got = rows()
+        check(got["x"]["usage"]["used"] == 150 and got["x"]["usage"]["budget"] == 150 and got["x"]["rest"] and "150 requests are done" in got["x"]["rest"]["why"],
+              "a limit that is reached shows as full, and the site's rest says why", (got["x"]["usage"], got["x"]["rest"]))
+        client.put("/api/speed", json={"tune": {"limit_x": 300}})
+        got = rows()
+        check(got["x"]["usage"]["budget"] == 300 and got["x"]["rest"] is None, "...and a raised limit empties the bar's red and ends the rest at once", (got["x"]["usage"], got["x"]["rest"]))
+        net._state["spent"]["x"] = ["2000-01-01", 99]
+        check(rows()["x"]["usage"]["used"] == 0, "yesterday's count is not today's")
+    finally:
+        for key in keys:
+            try:
+                accounts._path(key).unlink()
+            except OSError:
+                pass
+        net._state["paused"].clear()
+        net._state["spent"].clear()
+        client.put("/api/speed", json={"reset": "limits"})
+
+
 def tune_checks():
     client = server.app.test_client()
     client.put("/api/speed", json={"reset": "limits"})
@@ -1383,7 +1436,7 @@ def cooling_checks():
 
 
 def main():
-    for group in (forum_checks, tile_checks, speed_checks, refusal_checks, budget_checks, tune_checks, settings_checks, gallery_checks, media_checks, poipiku_checks, resume_checks, library_checks, cooling_checks, refresh_checks):
+    for group in (forum_checks, tile_checks, speed_checks, refusal_checks, budget_checks, meter_checks, tune_checks, settings_checks, gallery_checks, media_checks, poipiku_checks, resume_checks, library_checks, cooling_checks, refresh_checks):
         print("--", group.__name__, flush=True)
         try:
             group()
